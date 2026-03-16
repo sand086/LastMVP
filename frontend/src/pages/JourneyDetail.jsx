@@ -80,7 +80,8 @@ import {
     Loader2,
     CheckCircle2,
     XCircle,
-    RefreshCw
+    RefreshCw,
+    Search
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
@@ -141,6 +142,7 @@ const JourneyDetail = () => {
     const [showCloseSummary, setShowCloseSummary] = useState(false);
     const [closeSummary, setCloseSummary] = useState('');
     const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+    const [packageSearchTerm, setPackageSearchTerm] = useState('');
 
     // Incident state
     const [showIncidentModal, setShowIncidentModal] = useState(false);
@@ -941,10 +943,38 @@ const JourneyDetail = () => {
                                 {pendingPackages.length > 0 && (
                                     <div className="border border-slate-200 rounded-sm">
                                         <div className="p-3 bg-slate-50 border-b border-slate-200">
-                                            <p className="font-medium text-slate-900">Paquetes no entregados</p>
-                                            <p className="text-sm text-slate-500">Marca los paquetes fallidos y selecciona el motivo</p>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div>
+                                                    <p className="font-medium text-slate-900">Paquetes no entregados</p>
+                                                    <p className="text-sm text-slate-500">Marca los paquetes fallidos y selecciona el motivo</p>
+                                                </div>
+                                                <span className="text-sm text-slate-500">
+                                                    {pendingPackages.length} paquetes pendientes
+                                                </span>
+                                            </div>
+                                            {/* Search input */}
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                                <Input
+                                                    type="text"
+                                                    placeholder="Buscar por No. Guía o destinatario..."
+                                                    value={packageSearchTerm}
+                                                    onChange={(e) => setPackageSearchTerm(e.target.value)}
+                                                    className="pl-10 h-9"
+                                                    data-testid="package-search-input"
+                                                />
+                                                {packageSearchTerm && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPackageSearchTerm('')}
+                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                                    >
+                                                        <XCircle className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="max-h-48 overflow-y-auto">
+                                        <div className="max-h-64 overflow-y-auto">
                                             <table className="data-table w-full text-sm">
                                                 <thead>
                                                     <tr>
@@ -955,41 +985,81 @@ const JourneyDetail = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {pendingPackages.map((pkg) => {
-                                                        const isFailed = failedPackages.find(f => f.id === pkg.id);
-                                                        return (
-                                                            <tr key={pkg.id}>
-                                                                <td>
-                                                                    <Checkbox
-                                                                        checked={!!isFailed}
-                                                                        onCheckedChange={() => toggleFailedPackage(pkg)}
-                                                                    />
-                                                                </td>
-                                                                <td className="font-mono">{pkg.tracking_number}</td>
-                                                                <td>{pkg.recipient_name}</td>
-                                                                <td>
-                                                                    {isFailed && (
-                                                                        <Select
-                                                                            value={isFailed.failure_reason}
-                                                                            onValueChange={(v) => toggleFailedPackage(pkg, v)}
-                                                                        >
-                                                                            <SelectTrigger className="h-8">
-                                                                                <SelectValue />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                {FAILURE_REASONS.map((r) => (
-                                                                                    <SelectItem key={r} value={r}>{r}</SelectItem>
-                                                                                ))}
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    )}
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
+                                                    {pendingPackages
+                                                        .filter(pkg => {
+                                                            if (!packageSearchTerm) return true;
+                                                            const search = packageSearchTerm.toLowerCase();
+                                                            return (
+                                                                (pkg.tracking_number || '').toLowerCase().includes(search) ||
+                                                                (pkg.order_reference_id || '').toLowerCase().includes(search) ||
+                                                                (pkg.recipient_name || '').toLowerCase().includes(search)
+                                                            );
+                                                        })
+                                                        .map((pkg) => {
+                                                            const isFailed = failedPackages.find(f => f.id === pkg.id);
+                                                            return (
+                                                                <tr key={pkg.id} className={isFailed ? 'bg-red-50' : ''}>
+                                                                    <td>
+                                                                        <Checkbox
+                                                                            checked={!!isFailed}
+                                                                            onCheckedChange={() => toggleFailedPackage(pkg)}
+                                                                        />
+                                                                    </td>
+                                                                    <td className="font-mono">{pkg.tracking_number || pkg.order_reference_id}</td>
+                                                                    <td>{pkg.recipient_name}</td>
+                                                                    <td>
+                                                                        {isFailed && (
+                                                                            <Select
+                                                                                value={isFailed.failure_reason}
+                                                                                onValueChange={(v) => toggleFailedPackage(pkg, v)}
+                                                                            >
+                                                                                <SelectTrigger className="h-8">
+                                                                                    <SelectValue />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    {FAILURE_REASONS.map((r) => (
+                                                                                        <SelectItem key={r} value={r}>{r}</SelectItem>
+                                                                                    ))}
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
                                                 </tbody>
                                             </table>
+                                            {/* No results message */}
+                                            {packageSearchTerm && pendingPackages.filter(pkg => {
+                                                const search = packageSearchTerm.toLowerCase();
+                                                return (
+                                                    (pkg.tracking_number || '').toLowerCase().includes(search) ||
+                                                    (pkg.order_reference_id || '').toLowerCase().includes(search) ||
+                                                    (pkg.recipient_name || '').toLowerCase().includes(search)
+                                                );
+                                            }).length === 0 && (
+                                                <div className="text-center py-6 text-slate-500">
+                                                    <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                                    <p className="text-sm">No se encontraron paquetes con "{packageSearchTerm}"</p>
+                                                </div>
+                                            )}
                                         </div>
+                                        {/* Selected count */}
+                                        {failedPackages.length > 0 && (
+                                            <div className="p-3 bg-red-50 border-t border-red-200 flex items-center justify-between">
+                                                <span className="text-sm text-red-700">
+                                                    <strong>{failedPackages.length}</strong> paquete(s) marcados como fallidos
+                                                </span>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => setFailedPackages([])}
+                                                    className="text-red-600 hover:text-red-700"
+                                                >
+                                                    Limpiar selección
+                                                </Button>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
