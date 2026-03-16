@@ -1024,6 +1024,87 @@ async def upload_photo(
     
     return {"filename": filename, "path": f"/api/uploads/{filename}"}
 
+# Upload multiple images for journey sections
+@api_router.post("/upload/journey-images")
+async def upload_journey_images(
+    files: List[UploadFile] = File(...),
+    journey_id: str = Form(...),
+    section: str = Form(...),  # start, incident, close
+    incident_id: Optional[str] = Form(None),
+    user: dict = Depends(require_role(["coordinator", "agent"]))
+):
+    uploaded_files = []
+    
+    for file in files:
+        # Validate file type
+        if not file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+            continue
+        
+        contents = await file.read()
+        if len(contents) > 5 * 1024 * 1024:
+            continue
+        
+        # Save file
+        file_id = str(uuid.uuid4())
+        ext = Path(file.filename).suffix.lower()
+        filename = f"{journey_id}_{section}_{file_id}{ext}"
+        filepath = UPLOAD_DIR / filename
+        
+        with open(filepath, "wb") as f:
+            f.write(contents)
+        
+        image_record = {
+            "id": file_id,
+            "journey_id": journey_id,
+            "section": section,
+            "incident_id": incident_id,
+            "filename": filename,
+            "original_name": file.filename,
+            "path": f"/api/uploads/{filename}",
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_by": user["id"]
+        }
+        await db.journey_images.insert_one(image_record)
+        uploaded_files.append({k: v for k, v in image_record.items() if k != "_id"})
+    
+    return {"uploaded": len(uploaded_files), "files": uploaded_files}
+
+# Get images for a journey section
+@api_router.get("/journey-images/{journey_id}")
+async def get_journey_images(
+    journey_id: str,
+    section: Optional[str] = None,
+    incident_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    query = {"journey_id": journey_id}
+    if section:
+        query["section"] = section
+    if incident_id:
+        query["incident_id"] = incident_id
+    
+    images = await db.journey_images.find(query, {"_id": 0}).sort("uploaded_at", -1).to_list(100)
+    return images
+
+# Delete an image
+@api_router.delete("/journey-images/{image_id}")
+async def delete_journey_image(
+    image_id: str,
+    user: dict = Depends(require_role(["coordinator", "agent"]))
+):
+    image = await db.journey_images.find_one({"id": image_id}, {"_id": 0})
+    if not image:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada")
+    
+    # Delete file from filesystem
+    filepath = UPLOAD_DIR / image["filename"]
+    if filepath.exists():
+        filepath.unlink()
+    
+    # Delete from database
+    await db.journey_images.delete_one({"id": image_id})
+    return {"message": "Imagen eliminada"}
+
 @api_router.get("/uploads/{filename}")
 async def get_upload(filename: str):
     filepath = UPLOAD_DIR / filename

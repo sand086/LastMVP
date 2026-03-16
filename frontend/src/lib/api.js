@@ -112,6 +112,27 @@ export const uploadPhoto = (file, journeyId, photoType) => {
     });
 };
 
+// Journey images (multiple files)
+export const uploadJourneyImages = (files, journeyId, section, incidentId = null) => {
+    const formData = new FormData();
+    files.forEach(file => formData.append('files', file));
+    formData.append('journey_id', journeyId);
+    formData.append('section', section);
+    if (incidentId) formData.append('incident_id', incidentId);
+    return api.post('/upload/journey-images', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+};
+
+export const getJourneyImages = (journeyId, section = null, incidentId = null) => {
+    const params = {};
+    if (section) params.section = section;
+    if (incidentId) params.incident_id = incidentId;
+    return api.get(`/journey-images/${journeyId}`, { params });
+};
+
+export const deleteJourneyImage = (imageId) => api.delete(`/journey-images/${imageId}`);
+
 export const downloadTemplate = () => api.get('/template/layout', { responseType: 'blob' });
 
 // Retry packages

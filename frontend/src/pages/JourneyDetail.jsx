@@ -9,7 +9,9 @@ import {
     updateIncident,
     deleteIncident,
     exportIncidents,
-    uploadPhoto
+    uploadJourneyImages,
+    getJourneyImages,
+    deleteJourneyImage
 } from '../lib/api';
 import { 
     formatDate, 
@@ -81,6 +83,7 @@ import {
     RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
+import ImageUploader from '../components/ImageUploader';
 
 const JourneyDetail = () => {
     const { id } = useParams();
@@ -90,6 +93,12 @@ const JourneyDetail = () => {
     const [journey, setJourney] = useState(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('inicio');
+
+    // Images state
+    const [startImages, setStartImages] = useState([]);
+    const [closeImages, setCloseImages] = useState([]);
+    const [incidentImages, setIncidentImages] = useState({});
+    const [uploadingImages, setUploadingImages] = useState(false);
 
     // Start form state
     const [startForm, setStartForm] = useState({
@@ -148,7 +157,56 @@ const JourneyDetail = () => {
 
     useEffect(() => {
         fetchJourney();
+        fetchImages();
     }, [id]);
+
+    const fetchImages = async () => {
+        try {
+            const res = await getJourneyImages(id);
+            const images = res.data;
+            
+            // Separate images by section
+            setStartImages(images.filter(img => img.section === 'start'));
+            setCloseImages(images.filter(img => img.section === 'close'));
+            
+            // Group incident images by incident_id
+            const incidentImgs = {};
+            images.filter(img => img.section === 'incident').forEach(img => {
+                if (img.incident_id) {
+                    if (!incidentImgs[img.incident_id]) {
+                        incidentImgs[img.incident_id] = [];
+                    }
+                    incidentImgs[img.incident_id].push(img);
+                }
+            });
+            setIncidentImages(incidentImgs);
+        } catch (error) {
+            console.error('Error fetching images:', error);
+        }
+    };
+
+    const handleUploadImages = async (files, section, incidentId = null) => {
+        setUploadingImages(true);
+        try {
+            await uploadJourneyImages(files, id, section, incidentId);
+            toast.success('Imágenes subidas correctamente');
+            fetchImages();
+        } catch (error) {
+            toast.error('Error al subir imágenes');
+        } finally {
+            setUploadingImages(false);
+        }
+    };
+
+    const handleDeleteImage = async (imageId) => {
+        try {
+            await deleteJourneyImage(imageId);
+            toast.success('Imagen eliminada');
+            fetchImages();
+        } catch (error) {
+            toast.error('Error al eliminar imagen');
+        }
+    };
 
     const fetchJourney = async () => {
         try {
@@ -572,6 +630,18 @@ const JourneyDetail = () => {
                                     />
                                 </div>
 
+                                {/* Image upload for start */}
+                                <div className="space-y-2">
+                                    <Label>Evidencia fotográfica</Label>
+                                    <ImageUploader
+                                        images={startImages}
+                                        onUpload={(files) => handleUploadImages(files, 'start')}
+                                        onDelete={handleDeleteImage}
+                                        uploading={uploadingImages}
+                                        label="Agregar fotos de inicio"
+                                    />
+                                </div>
+
                                 {/* Checklist */}
                                 <div className="border border-slate-200 rounded-sm p-4 space-y-3">
                                     <p className="font-medium text-slate-900 mb-3">Checklist de salida</p>
@@ -648,6 +718,28 @@ const JourneyDetail = () => {
                                         <p className="text-sm">{journey.start_data.notes}</p>
                                     </div>
                                 )}
+                                {/* Show start images */}
+                                {startImages.length > 0 && (
+                                    <div className="mt-4">
+                                        <p className="text-xs text-slate-500 uppercase mb-2">Evidencia fotográfica</p>
+                                        <ImageUploader
+                                            images={startImages}
+                                            onDelete={canEdit() ? handleDeleteImage : null}
+                                            disabled={!canEdit()}
+                                        />
+                                    </div>
+                                )}
+                                {/* Allow adding more images if in progress */}
+                                {journey.status === 'in_progress' && canEdit() && (
+                                    <div className="mt-4">
+                                        <ImageUploader
+                                            images={[]}
+                                            onUpload={(files) => handleUploadImages(files, 'start')}
+                                            uploading={uploadingImages}
+                                            label="Agregar más fotos"
+                                        />
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     ) : (
@@ -698,6 +790,7 @@ const JourneyDetail = () => {
                                             <th>Tipo</th>
                                             <th>Severidad</th>
                                             <th>Descripción</th>
+                                            <th>Fotos</th>
                                             <th>Estado</th>
                                             <th>Acciones</th>
                                         </tr>
@@ -715,6 +808,16 @@ const JourneyDetail = () => {
                                                     </span>
                                                 </td>
                                                 <td className="max-w-xs truncate">{incident.description}</td>
+                                                <td>
+                                                    {incidentImages[incident.id]?.length > 0 ? (
+                                                        <span className="flex items-center gap-1 text-slate-600">
+                                                            <Camera className="w-4 h-4" />
+                                                            {incidentImages[incident.id].length}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-400">-</span>
+                                                    )}
+                                                </td>
                                                 <td>
                                                     <span className={`status-badge ${getStatusColor(incident.status)}`}>
                                                         {getStatusLabel(incident.status)}
@@ -901,6 +1004,18 @@ const JourneyDetail = () => {
                                     />
                                 </div>
 
+                                {/* Image upload for close */}
+                                <div className="space-y-2">
+                                    <Label>Evidencia fotográfica de cierre</Label>
+                                    <ImageUploader
+                                        images={closeImages}
+                                        onUpload={(files) => handleUploadImages(files, 'close')}
+                                        onDelete={handleDeleteImage}
+                                        uploading={uploadingImages}
+                                        label="Agregar fotos de cierre"
+                                    />
+                                </div>
+
                                 {/* Checklist */}
                                 <div className="border border-slate-200 rounded-sm p-4 space-y-3">
                                     <p className="font-medium text-slate-900 mb-3">Checklist de cierre</p>
@@ -989,6 +1104,16 @@ const JourneyDetail = () => {
                                         <p className="font-mono font-bold text-2xl text-amber-700">{journey.close_data.packages_to_retry}</p>
                                     </div>
                                 </div>
+                                {/* Show close images */}
+                                {closeImages.length > 0 && (
+                                    <div className="mt-4">
+                                        <p className="text-xs text-slate-500 uppercase mb-2">Evidencia fotográfica de cierre</p>
+                                        <ImageUploader
+                                            images={closeImages}
+                                            disabled={true}
+                                        />
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     ) : (
@@ -1087,6 +1212,19 @@ const JourneyDetail = () => {
                                 data-testid="incident-action-textarea"
                             />
                         </div>
+                        {/* Image upload for incident */}
+                        {editingIncident && (
+                            <div className="space-y-2">
+                                <Label>Evidencia fotográfica</Label>
+                                <ImageUploader
+                                    images={incidentImages[editingIncident.id] || []}
+                                    onUpload={(files) => handleUploadImages(files, 'incident', editingIncident.id)}
+                                    onDelete={handleDeleteImage}
+                                    uploading={uploadingImages}
+                                    label="Agregar fotos"
+                                />
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setShowIncidentModal(false)}>
