@@ -1,34 +1,183 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* LastMile OS Styles */
+
+/* Prevent text-align center on App container */
+.App {
+    text-align: left;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
+/* Custom progress bar colors */
+.progress-high {
+    background-color: #1A7A4A !important;
+}
+
+.progress-medium {
+    background-color: #C07000 !important;
+}
+
+.progress-low {
+    background-color: #8B0000 !important;
+}
+
+/* Smooth transitions for interactive elements */
+button, a, input, select, textarea {
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Focus ring styling */
+*:focus-visible {
+    outline: 2px solid #0F172A;
+    outline-offset: 2px;
+}
+
+/* Table improvements */
+.data-table {
+    border-collapse: collapse;
+}
+
+.data-table thead th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    z-index: 1;
+}
+
+/* File drop zone animations */
+.drop-zone {
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.drop-zone.drag-over {
+    border-color: #0F172A;
+    background-color: #f1f5f9;
+}
+
+/* Card shadows */
+.card-hover:hover {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+/* Status animations */
+@keyframes pulse-success {
+    0%, 100% { background-color: rgba(26, 122, 74, 0.1); }
+    50% { background-color: rgba(26, 122, 74, 0.2); }
+}
+
+.pulse-success {
+    animation: pulse-success 2s ease-in-out infinite;
+}
+
+/* Loading skeleton animation */
+@keyframes shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: calc(200px + 100%) 0; }
+}
+
+.skeleton {
+    background: linear-gradient(90deg, #f0f0f0 0px, #e0e0e0 50%, #f0f0f0 100%);
+    background-size: 200px 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Tooltip improvements */
+[data-tooltip] {
+    position: relative;
+}
+
+[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    background: #0F172A;
+    color: white;
+    font-size: 12px;
+    border-radius: 2px;
+    white-space: nowrap;
+    z-index: 50;
+}
+
+/* Print styles */
+@media print {
+    .no-print {
+        display: none !important;
+    }
+    
+    .data-table {
+        font-size: 10px;
     }
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+    .sidebar-hidden {
+        transform: translateX(-100%);
+    }
 }
 
-.App-link {
-    color: #61dafb;
+/* Custom scrollbar for modals */
+.modal-scroll::-webkit-scrollbar {
+    width: 6px;
 }
 
-@keyframes App-logo-spin {
+.modal-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.modal-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+}
+
+/* Badge animations */
+.badge-pulse {
+    animation: badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+/* Toast customization */
+[data-sonner-toaster] {
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* Checkbox styling */
+[data-state="checked"] {
+    background-color: #0F172A;
+    border-color: #0F172A;
+}
+
+/* Calendar day selected */
+.rdp-day_selected {
+    background-color: #0F172A !important;
+}
+
+/* Select dropdown */
+[data-radix-popper-content-wrapper] {
+    z-index: 100 !important;
+}
+
+/* Dialog overlay */
+[data-state="open"][role="dialog"] {
+    animation: fadeIn 0.2s ease-out;
+}
+
+/* Alert dialog */
+[role="alertdialog"] {
+    animation: scaleIn 0.2s ease-out;
+}
+
+@keyframes scaleIn {
     from {
-        transform: rotate(0deg);
+        opacity: 0;
+        transform: scale(0.95);
     }
     to {
-        transform: rotate(360deg);
+        opacity: 1;
+        transform: scale(1);
     }
 }
