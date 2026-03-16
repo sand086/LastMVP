@@ -79,6 +79,29 @@ export const uploadLayout = (file) => {
     });
 };
 
+export const uploadHistoryOrders = (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/upload/history-orders', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+};
+
+export const uploadRouteSummary = (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/upload/route-summary', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+};
+
+export const createJourneysFromCosmo = (data) => api.post('/journeys/from-cosmo', data);
+
+// Messenger-Provider mappings
+export const getMessengerMappings = () => api.get('/messenger-mappings');
+export const saveMessengerMappings = (mappings) => api.post('/messenger-mappings', mappings);
+export const deleteMessengerMapping = (messengerName) => api.delete(`/messenger-mappings/${encodeURIComponent(messengerName)}`);
+
 export const uploadPhoto = (file, journeyId, photoType) => {
     const formData = new FormData();
     formData.append('file', file);

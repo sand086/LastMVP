@@ -598,6 +598,354 @@ async def delete_incident(incident_id: str, user: dict = Depends(require_role(["
 
 # ==================== FILE UPLOAD ====================
 
+# Upload history-orders CSV file (Step 1)
+@api_router.post("/upload/history-orders")
+async def upload_history_orders(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role(["coordinator", "agent"]))
+):
+    if not file.filename.endswith(('.csv', '.xlsx')):
+        raise HTTPException(status_code=400, detail="Solo se permiten archivos CSV o XLSX")
+    
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="El archivo excede 10MB")
+    
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+        
+        # Required columns from history-orders
+        required_columns = ["order_id", "order_reference_id", "tracking_url"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(status_code=400, detail=f"Columnas faltantes: {', '.join(missing_columns)}")
+        
+        # Convert to list of dicts
+        orders = df.to_dict('records')
+        
+        # Clean data and extract key fields
+        cleaned_orders = []
+        for order in orders:
+            cleaned_order = {}
+            for key in order:
+                if pd.isna(order[key]):
+                    cleaned_order[key] = ""
+                else:
+                    cleaned_order[key] = str(order[key])
+            cleaned_orders.append(cleaned_order)
+        
+        # Group orders by order_id (route)
+        routes = {}
+        for order in cleaned_orders:
+            route_id = order.get("order_id", "")
+            if route_id:
+                if route_id not in routes:
+                    routes[route_id] = {
+                        "route_id": route_id,
+                        "driver_name": order.get("driver_name", ""),
+                        "orders": []
+                    }
+                routes[route_id]["orders"].append({
+                    "order_reference_id": order.get("order_reference_id", ""),
+                    "tracking_url": order.get("tracking_url", ""),
+                    "recipient_name": order.get("recipient_name", ""),
+                    "recipient_address": order.get("recipient_address", ""),
+                    "recipient_phone": order.get("recipient_phone", ""),
+                    "zone": order.get("zone", ""),
+                    "order_status": order.get("order_status", ""),
+                    "failure_reason": order.get("failure_reason", ""),
+                    "failure_reason_note": order.get("failure_reason_note", ""),
+                    "created_date": order.get("created_date", ""),
+                    "created_at": order.get("created_at", "")
+                })
+        
+        return {
+            "filename": file.filename,
+            "total_orders": len(cleaned_orders),
+            "total_routes": len(routes),
+            "routes": list(routes.values()),
+            "preview": cleaned_orders[:10]
+        }
+    except Exception as e:
+        logger.error(f"Error parsing history-orders file: {e}")
+        raise HTTPException(status_code=400, detail=f"Error al procesar archivo: {str(e)}")
+
+# Upload route-summary XLSX file (Step 2)
+@api_router.post("/upload/route-summary")
+async def upload_route_summary(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role(["coordinator", "agent"]))
+):
+    if not file.filename.endswith(('.csv', '.xlsx')):
+        raise HTTPException(status_code=400, detail="Solo se permiten archivos CSV o XLSX")
+    
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="El archivo excede 10MB")
+    
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+        
+        # Required columns from route-summary
+        required_columns = ["Order ID", "Driver"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(status_code=400, detail=f"Columnas faltantes: {', '.join(missing_columns)}")
+        
+        # Convert to list of dicts
+        routes = df.to_dict('records')
+        
+        # Clean data
+        cleaned_routes = []
+        for route in routes:
+            cleaned_route = {}
+            for key in route:
+                if pd.isna(route[key]):
+                    cleaned_route[key] = ""
+                else:
+                    cleaned_route[key] = str(route[key])
+            
+            # Only include rows with valid Order ID
+            if cleaned_route.get("Order ID"):
+                cleaned_routes.append({
+                    "route_id": cleaned_route.get("Order ID", ""),
+                    "driver_name": cleaned_route.get("Driver", ""),
+                    "team": cleaned_route.get("Team", ""),
+                    "status": cleaned_route.get("Status", ""),
+                    "zones": cleaned_route.get("Zones", ""),
+                    "planned_distance": cleaned_route.get("Planned Distance", ""),
+                    "actual_distance": cleaned_route.get("Actual Distance", ""),
+                    "total_stops": cleaned_route.get("Total Stops", "0"),
+                    "completed_stops": cleaned_route.get("Completed Stops", "0"),
+                    "cancelled_stops": cleaned_route.get("Cancelled Stops", "0"),
+                    "pending_stops": cleaned_route.get("Pending Stops", "0")
+                })
+        
+        # Get unique drivers for provider assignment
+        drivers = list(set(r["driver_name"] for r in cleaned_routes if r["driver_name"]))
+        
+        return {
+            "filename": file.filename,
+            "total_routes": len(cleaned_routes),
+            "routes": cleaned_routes,
+            "drivers": sorted(drivers),
+            "preview": cleaned_routes[:10]
+        }
+    except Exception as e:
+        logger.error(f"Error parsing route-summary file: {e}")
+        raise HTTPException(status_code=400, detail=f"Error al procesar archivo: {str(e)}")
+
+# ==================== MESSENGER-PROVIDER MAPPING ====================
+
+class MessengerProviderMapping(BaseModel):
+    messenger_name: str
+    provider_id: str
+
+@api_router.get("/messenger-mappings")
+async def get_messenger_mappings(user: dict = Depends(get_current_user)):
+    mappings = await db.messenger_mappings.find({}, {"_id": 0}).to_list(500)
+    # Enrich with provider names
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    for m in mappings:
+        m["provider_name"] = providers.get(m.get("provider_id"), "Sin asignar")
+    return mappings
+
+@api_router.post("/messenger-mappings")
+async def save_messenger_mappings(
+    mappings: List[MessengerProviderMapping],
+    user: dict = Depends(require_role(["coordinator", "agent"]))
+):
+    for mapping in mappings:
+        await db.messenger_mappings.update_one(
+            {"messenger_name": mapping.messenger_name},
+            {"$set": {
+                "messenger_name": mapping.messenger_name,
+                "provider_id": mapping.provider_id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_by": user["id"]
+            }},
+            upsert=True
+        )
+    return {"message": f"{len(mappings)} asignaciones guardadas"}
+
+@api_router.delete("/messenger-mappings/{messenger_name}")
+async def delete_messenger_mapping(
+    messenger_name: str,
+    user: dict = Depends(require_role(["coordinator", "agent"]))
+):
+    result = await db.messenger_mappings.delete_one({"messenger_name": messenger_name})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Mapping no encontrado")
+    return {"message": "Asignación eliminada"}
+
+# ==================== COMBINED JOURNEY CREATION (Two-step upload) ====================
+
+class CosmoJourneyCreate(BaseModel):
+    date: str
+    client_id: str
+    history_orders: List[dict]  # Orders from history-orders file
+    route_summary: List[dict]   # Routes from route-summary file
+    messenger_provider_mappings: List[dict]  # {messenger_name, provider_id}
+
+@api_router.post("/journeys/from-cosmo")
+async def create_journeys_from_cosmo(
+    data: CosmoJourneyCreate,
+    user: dict = Depends(require_role(["coordinator", "agent"]))
+):
+    created_journeys = []
+    skipped_duplicates = []
+    errors = []
+    
+    # Save messenger-provider mappings
+    for mapping in data.messenger_provider_mappings:
+        if mapping.get("messenger_name") and mapping.get("provider_id"):
+            await db.messenger_mappings.update_one(
+                {"messenger_name": mapping["messenger_name"]},
+                {"$set": {
+                    "messenger_name": mapping["messenger_name"],
+                    "provider_id": mapping["provider_id"],
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True
+            )
+    
+    # Get all existing orders to check for duplicates
+    existing_orders = await db.packages.find({}, {"order_reference_id": 1, "_id": 0}).to_list(10000)
+    existing_order_ids = set(o.get("order_reference_id", "") for o in existing_orders if o.get("order_reference_id"))
+    
+    # Build order lookup from history-orders
+    orders_by_route = {}
+    for order in data.history_orders:
+        route_id = order.get("order_id") or order.get("route_id", "")
+        if route_id:
+            if route_id not in orders_by_route:
+                orders_by_route[route_id] = []
+            orders_by_route[route_id].append(order)
+    
+    # Get messenger-provider mappings
+    mappings = {m["messenger_name"]: m["provider_id"] for m in data.messenger_provider_mappings if m.get("provider_id")}
+    
+    # Process each route from route-summary
+    for route in data.route_summary:
+        route_id = route.get("route_id", "")
+        driver_name = route.get("driver_name", "")
+        
+        if not route_id:
+            continue
+        
+        # Get provider from mapping
+        provider_id = mappings.get(driver_name)
+        if not provider_id:
+            # Try to get from existing mappings in DB
+            existing_mapping = await db.messenger_mappings.find_one({"messenger_name": driver_name}, {"_id": 0})
+            if existing_mapping:
+                provider_id = existing_mapping.get("provider_id")
+        
+        if not provider_id:
+            errors.append(f"Sin proveedor asignado para mensajero: {driver_name}")
+            continue
+        
+        # Check if journey with this route_id already exists
+        existing_journey = await db.journeys.find_one({"cosmo_route_id": route_id}, {"_id": 0})
+        if existing_journey:
+            skipped_duplicates.append(route_id)
+            continue
+        
+        # Get orders for this route
+        route_orders = orders_by_route.get(route_id, [])
+        
+        # Filter out duplicate orders
+        new_orders = []
+        duplicate_orders = []
+        for order in route_orders:
+            order_ref = order.get("order_reference_id", "")
+            if order_ref in existing_order_ids:
+                duplicate_orders.append(order_ref)
+            else:
+                new_orders.append(order)
+                existing_order_ids.add(order_ref)  # Mark as used
+        
+        if not new_orders and route_orders:
+            skipped_duplicates.append(f"{route_id} (todas las órdenes duplicadas)")
+            continue
+        
+        # Create journey
+        journey_id = str(uuid.uuid4())
+        journey = {
+            "id": journey_id,
+            "cosmo_route_id": route_id,
+            "date": data.date,
+            "client_id": data.client_id,
+            "provider_id": provider_id,
+            "driver_name": driver_name,
+            "team": route.get("team", ""),
+            "status": "scheduled",
+            "packages_total": len(new_orders),
+            "packages_delivered": 0,
+            "packages_failed": 0,
+            "packages_retry": 0,
+            "planned_distance": route.get("planned_distance", ""),
+            "actual_distance": route.get("actual_distance", ""),
+            "total_stops": route.get("total_stops", "0"),
+            "completed_stops": route.get("completed_stops", "0"),
+            "cancelled_stops": route.get("cancelled_stops", "0"),
+            "start_data": None,
+            "close_data": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": user["id"]
+        }
+        await db.journeys.insert_one(journey)
+        
+        # Create packages from orders
+        for order in new_orders:
+            package = {
+                "id": str(uuid.uuid4()),
+                "journey_id": journey_id,
+                "order_reference_id": order.get("order_reference_id", ""),
+                "tracking_number": order.get("order_reference_id", ""),
+                "tracking_url": order.get("tracking_url", ""),
+                "recipient_name": order.get("recipient_name", ""),
+                "address": order.get("recipient_address", ""),
+                "recipient_phone": order.get("recipient_phone", ""),
+                "zone": order.get("zone", ""),
+                "delivery_window": "",
+                "cosmo_status": order.get("order_status", ""),
+                "status": "delivered" if order.get("order_status") == "delivered" else ("failed" if order.get("order_status") == "cancelled" else "pending"),
+                "failure_reason": order.get("failure_reason", ""),
+                "failure_reason_note": order.get("failure_reason_note", ""),
+                "created_date": order.get("created_date", ""),
+                "is_retry": False
+            }
+            await db.packages.insert_one(package)
+            
+            # Update journey counts based on cosmo status
+            if package["status"] == "delivered":
+                await db.journeys.update_one({"id": journey_id}, {"$inc": {"packages_delivered": 1}})
+            elif package["status"] == "failed":
+                await db.journeys.update_one({"id": journey_id}, {"$inc": {"packages_failed": 1}})
+        
+        created_journeys.append({
+            "journey_id": journey_id,
+            "route_id": route_id,
+            "driver": driver_name,
+            "packages": len(new_orders),
+            "duplicates_skipped": len(duplicate_orders)
+        })
+    
+    return {
+        "message": f"{len(created_journeys)} jornadas creadas",
+        "created_journeys": created_journeys,
+        "skipped_duplicates": skipped_duplicates,
+        "errors": errors
+    }
+
+# Keep original layout upload for backwards compatibility
 @api_router.post("/upload/layout")
 async def upload_layout(
     file: UploadFile = File(...),

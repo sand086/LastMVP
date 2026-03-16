@@ -2,48 +2,40 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-    uploadLayout, 
-    downloadTemplate, 
+    uploadHistoryOrders,
+    uploadRouteSummary,
+    createJourneysFromCosmo,
     getClients, 
     getProviders,
-    getRetryPackages,
-    createJourney,
-    createUploadHistory,
+    getMessengerMappings,
     getUploadHistory
 } from '../lib/api';
-import { formatDate, downloadFile } from '../lib/utils';
+import { formatDate } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Calendar } from '../components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Checkbox } from '../components/ui/checkbox';
 import { 
     Upload, 
     FileSpreadsheet, 
-    Download,
     Calendar as CalendarIcon,
     AlertCircle,
     CheckCircle2,
     X,
     Loader2,
     Package,
-    RefreshCw,
     History,
-    Eye
+    Truck,
+    Users,
+    ChevronRight,
+    Link as LinkIcon,
+    ExternalLink
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from '../components/ui/dialog';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -54,47 +46,70 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '../components/ui/alert-dialog';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '../components/ui/table';
 
 const Layout = () => {
     const navigate = useNavigate();
     const { canEdit } = useAuth();
-    const fileInputRef = useRef(null);
+    const historyFileRef = useRef(null);
+    const routeFileRef = useRef(null);
 
     // State
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
+    const [messengerMappings, setMessengerMappings] = useState({});
     const [uploadHistory, setUploadHistory] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [uploading, setUploading] = useState(false);
-    const [creating, setCreating] = useState(false);
 
-    // Upload state
-    const [dragOver, setDragOver] = useState(false);
-    const [uploadedFile, setUploadedFile] = useState(null);
-    const [parsedData, setParsedData] = useState(null);
-    const [uploadError, setUploadError] = useState(null);
+    // Step tracking
+    const [currentStep, setCurrentStep] = useState(1);
 
-    // Form state
+    // Step 1: History Orders
+    const [historyFile, setHistoryFile] = useState(null);
+    const [historyData, setHistoryData] = useState(null);
+    const [historyUploading, setHistoryUploading] = useState(false);
+    const [historyError, setHistoryError] = useState(null);
+
+    // Step 2: Route Summary
+    const [routeFile, setRouteFile] = useState(null);
+    const [routeData, setRouteData] = useState(null);
+    const [routeUploading, setRouteUploading] = useState(false);
+    const [routeError, setRouteError] = useState(null);
+
+    // Step 3: Configuration
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [selectedClient, setSelectedClient] = useState('');
-    const [selectedProvider, setSelectedProvider] = useState('');
+    const [driverProviderMap, setDriverProviderMap] = useState({});
 
-    // Retry packages
-    const [retryPackages, setRetryPackages] = useState([]);
-    const [selectedRetryPackages, setSelectedRetryPackages] = useState([]);
-    const [showRetryDialog, setShowRetryDialog] = useState(false);
+    // Creation
+    const [creating, setCreating] = useState(false);
     const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+    const [creationResult, setCreationResult] = useState(null);
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [clientsRes, providersRes, historyRes] = await Promise.all([
+                const [clientsRes, providersRes, mappingsRes, historyRes] = await Promise.all([
                     getClients(),
                     getProviders(),
+                    getMessengerMappings(),
                     getUploadHistory(),
                 ]);
                 setClients(clientsRes.data);
                 setProviders(providersRes.data);
+                // Convert mappings array to object
+                const mappingsObj = {};
+                mappingsRes.data.forEach(m => {
+                    mappingsObj[m.messenger_name] = m.provider_id;
+                });
+                setMessengerMappings(mappingsObj);
                 setUploadHistory(historyRes.data);
             } catch (error) {
                 toast.error('Error al cargar datos');
@@ -105,155 +120,166 @@ const Layout = () => {
         fetchData();
     }, []);
 
-    // Fetch retry packages when provider changes
+    // Initialize driver-provider mappings when route data changes
     useEffect(() => {
-        const fetchRetryPackages = async () => {
-            if (selectedProvider) {
-                try {
-                    const res = await getRetryPackages(selectedProvider);
-                    setRetryPackages(res.data);
-                } catch (error) {
-                    console.error('Error fetching retry packages:', error);
-                }
-            } else {
-                setRetryPackages([]);
-            }
-        };
-        fetchRetryPackages();
-    }, [selectedProvider]);
+        if (routeData?.drivers) {
+            const newMap = {};
+            routeData.drivers.forEach(driver => {
+                // Use existing mapping if available
+                newMap[driver] = messengerMappings[driver] || '';
+            });
+            setDriverProviderMap(newMap);
+        }
+    }, [routeData, messengerMappings]);
 
-    const handleDragOver = (e) => {
-        e.preventDefault();
-        setDragOver(true);
-    };
-
-    const handleDragLeave = (e) => {
-        e.preventDefault();
-        setDragOver(false);
-    };
-
-    const handleDrop = (e) => {
-        e.preventDefault();
-        setDragOver(false);
-        const file = e.dataTransfer.files[0];
-        if (file) handleFileSelect(file);
-    };
-
-    const handleFileInput = (e) => {
+    // Step 1: Upload History Orders
+    const handleHistoryFileSelect = async (e) => {
         const file = e.target.files?.[0];
-        if (file) handleFileSelect(file);
-    };
+        if (!file) return;
 
-    const handleFileSelect = async (file) => {
-        // Validate file type
         const validTypes = ['.csv', '.xlsx'];
         const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
         
         if (!validTypes.includes(ext)) {
-            setUploadError('Solo se permiten archivos CSV o XLSX');
+            setHistoryError('Solo se permiten archivos CSV o XLSX');
             return;
         }
 
-        // Validate file size (5MB)
-        if (file.size > 5 * 1024 * 1024) {
-            setUploadError('El archivo excede 5MB');
+        if (file.size > 10 * 1024 * 1024) {
+            setHistoryError('El archivo excede 10MB');
             return;
         }
 
-        setUploadedFile(file);
-        setUploadError(null);
-        setUploading(true);
+        setHistoryFile(file);
+        setHistoryError(null);
+        setHistoryUploading(true);
 
         try {
-            const res = await uploadLayout(file);
-            setParsedData(res.data);
-            toast.success(`${res.data.total_rows} paquetes encontrados`);
+            const res = await uploadHistoryOrders(file);
+            setHistoryData(res.data);
+            toast.success(`${res.data.total_orders} órdenes encontradas en ${res.data.total_routes} rutas`);
+            setCurrentStep(2);
         } catch (error) {
-            setUploadError(error.response?.data?.detail || 'Error al procesar archivo');
-            setUploadedFile(null);
+            setHistoryError(error.response?.data?.detail || 'Error al procesar archivo');
+            setHistoryFile(null);
         } finally {
-            setUploading(false);
+            setHistoryUploading(false);
         }
     };
 
-    const handleDownloadTemplate = async () => {
-        try {
-            const res = await downloadTemplate();
-            downloadFile(res.data, 'plantilla_layout.csv');
-            toast.success('Plantilla descargada');
-        } catch (error) {
-            toast.error('Error al descargar plantilla');
-        }
-    };
+    // Step 2: Upload Route Summary
+    const handleRouteFileSelect = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
 
-    const handleClearFile = () => {
-        setUploadedFile(null);
-        setParsedData(null);
-        setUploadError(null);
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
-
-    const handleProceed = () => {
-        if (!selectedClient || !selectedProvider) {
-            toast.error('Selecciona cliente y proveedor');
+        const validTypes = ['.csv', '.xlsx'];
+        const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        
+        if (!validTypes.includes(ext)) {
+            setRouteError('Solo se permiten archivos CSV o XLSX');
             return;
         }
 
-        if (retryPackages.length > 0) {
-            setSelectedRetryPackages(retryPackages.map(p => p.id));
-            setShowRetryDialog(true);
-        } else {
-            setShowConfirmDialog(true);
+        if (file.size > 10 * 1024 * 1024) {
+            setRouteError('El archivo excede 10MB');
+            return;
+        }
+
+        setRouteFile(file);
+        setRouteError(null);
+        setRouteUploading(true);
+
+        try {
+            const res = await uploadRouteSummary(file);
+            setRouteData(res.data);
+            toast.success(`${res.data.total_routes} rutas encontradas con ${res.data.drivers.length} mensajeros`);
+            setCurrentStep(3);
+        } catch (error) {
+            setRouteError(error.response?.data?.detail || 'Error al procesar archivo');
+            setRouteFile(null);
+        } finally {
+            setRouteUploading(false);
         }
     };
 
-    const handleConfirmRetry = () => {
-        setShowRetryDialog(false);
-        setShowConfirmDialog(true);
+    // Update driver-provider mapping
+    const handleDriverProviderChange = (driver, providerId) => {
+        setDriverProviderMap(prev => ({
+            ...prev,
+            [driver]: providerId
+        }));
     };
 
-    const handleCreateJourney = async () => {
+    // Check if all drivers have providers assigned
+    const allDriversAssigned = () => {
+        if (!routeData?.drivers) return false;
+        return routeData.drivers.every(driver => driverProviderMap[driver]);
+    };
+
+    // Create journeys
+    const handleCreateJourneys = async () => {
         setShowConfirmDialog(false);
         setCreating(true);
 
         try {
-            const journeyData = {
+            // Build messenger-provider mappings
+            const mappings = Object.entries(driverProviderMap).map(([messenger_name, provider_id]) => ({
+                messenger_name,
+                provider_id
+            }));
+
+            // Build history orders from the parsed data
+            const allOrders = [];
+            if (historyData?.routes) {
+                historyData.routes.forEach(route => {
+                    route.orders.forEach(order => {
+                        allOrders.push({
+                            ...order,
+                            route_id: route.route_id,
+                            order_id: route.route_id
+                        });
+                    });
+                });
+            }
+
+            const payload = {
                 date: format(selectedDate, 'yyyy-MM-dd'),
                 client_id: selectedClient,
-                provider_id: selectedProvider,
-                packages: parsedData.packages,
-                retry_packages: selectedRetryPackages,
+                history_orders: allOrders,
+                route_summary: routeData?.routes || [],
+                messenger_provider_mappings: mappings
             };
 
-            const res = await createJourney(journeyData);
+            const res = await createJourneysFromCosmo(payload);
+            setCreationResult(res.data);
+            toast.success(res.data.message);
 
-            // Create upload history entry
-            await createUploadHistory({
-                date: format(selectedDate, 'yyyy-MM-dd'),
-                client_id: selectedClient,
-                provider_id: selectedProvider,
-                package_count: parsedData.total_rows + selectedRetryPackages.length,
-                journey_id: res.data.id,
-                journey_status: 'scheduled',
-            });
-
-            toast.success('Jornada creada exitosamente');
-            navigate(`/journeys/${res.data.id}`);
+            if (res.data.created_journeys?.length > 0) {
+                // Navigate to journeys list after 2 seconds
+                setTimeout(() => {
+                    navigate('/journeys');
+                }, 2000);
+            }
         } catch (error) {
-            toast.error(error.response?.data?.detail || 'Error al crear jornada');
+            toast.error(error.response?.data?.detail || 'Error al crear jornadas');
         } finally {
             setCreating(false);
         }
     };
 
-    const toggleRetryPackage = (packageId) => {
-        setSelectedRetryPackages(prev => 
-            prev.includes(packageId)
-                ? prev.filter(id => id !== packageId)
-                : [...prev, packageId]
-        );
+    // Clear all and restart
+    const handleClearAll = () => {
+        setCurrentStep(1);
+        setHistoryFile(null);
+        setHistoryData(null);
+        setHistoryError(null);
+        setRouteFile(null);
+        setRouteData(null);
+        setRouteError(null);
+        setDriverProviderMap({});
+        setCreationResult(null);
+        if (historyFileRef.current) historyFileRef.current.value = '';
+        if (routeFileRef.current) routeFileRef.current.value = '';
     };
 
     if (!canEdit()) {
@@ -276,158 +302,230 @@ const Layout = () => {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="font-heading text-2xl font-bold text-slate-900 tracking-tight">
-                        Cargar Layout
+                        Cargar Datos de Cosmo
                     </h1>
                     <p className="text-slate-500 text-sm">
-                        Sube un archivo CSV o XLSX con los paquetes a entregar
+                        Importa archivos history-orders y route-summary desde Cosmo
                     </p>
                 </div>
-                <Button
-                    variant="outline"
-                    onClick={handleDownloadTemplate}
-                    data-testid="download-template-btn"
-                >
-                    <Download className="w-4 h-4 mr-2" />
-                    Descargar plantilla
-                </Button>
+                {(historyFile || routeFile) && (
+                    <Button variant="outline" onClick={handleClearAll} data-testid="clear-all-btn">
+                        <X className="w-4 h-4 mr-2" />
+                        Limpiar todo
+                    </Button>
+                )}
+            </div>
+
+            {/* Steps indicator */}
+            <div className="flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-sm">
+                <div className={`flex items-center gap-2 ${currentStep >= 1 ? 'text-slate-900' : 'text-slate-400'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                        currentStep > 1 ? 'bg-emerald-100 text-emerald-700' : 
+                        currentStep === 1 ? 'bg-slate-900 text-white' : 'bg-slate-200'
+                    }`}>
+                        {currentStep > 1 ? <CheckCircle2 className="w-5 h-5" /> : '1'}
+                    </div>
+                    <span className="font-medium">History Orders</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-slate-300" />
+                <div className={`flex items-center gap-2 ${currentStep >= 2 ? 'text-slate-900' : 'text-slate-400'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                        currentStep > 2 ? 'bg-emerald-100 text-emerald-700' : 
+                        currentStep === 2 ? 'bg-slate-900 text-white' : 'bg-slate-200'
+                    }`}>
+                        {currentStep > 2 ? <CheckCircle2 className="w-5 h-5" /> : '2'}
+                    </div>
+                    <span className="font-medium">Route Summary</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-slate-300" />
+                <div className={`flex items-center gap-2 ${currentStep >= 3 ? 'text-slate-900' : 'text-slate-400'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                        currentStep === 3 ? 'bg-slate-900 text-white' : 'bg-slate-200'
+                    }`}>
+                        3
+                    </div>
+                    <span className="font-medium">Configurar y Crear</span>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Main upload area */}
                 <div className="lg:col-span-2 space-y-6">
-                    {/* File upload zone */}
-                    <Card>
-                        <CardContent className="p-6">
-                            {!uploadedFile ? (
+                    {/* Step 1: History Orders */}
+                    <Card className={currentStep === 1 ? 'ring-2 ring-slate-900' : ''}>
+                        <CardHeader>
+                            <CardTitle className="font-heading text-lg flex items-center gap-2">
+                                <FileSpreadsheet className="w-5 h-5" />
+                                Paso 1: Archivo History Orders
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {!historyFile ? (
                                 <div
-                                    className={`drop-zone cursor-pointer ${dragOver ? 'drag-over' : ''}`}
-                                    onDragOver={handleDragOver}
-                                    onDragLeave={handleDragLeave}
-                                    onDrop={handleDrop}
-                                    onClick={() => fileInputRef.current?.click()}
-                                    data-testid="file-drop-zone"
+                                    className="drop-zone cursor-pointer"
+                                    onClick={() => historyFileRef.current?.click()}
+                                    data-testid="history-file-zone"
                                 >
                                     <input
-                                        ref={fileInputRef}
+                                        ref={historyFileRef}
                                         type="file"
                                         accept=".csv,.xlsx"
-                                        onChange={handleFileInput}
+                                        onChange={handleHistoryFileSelect}
                                         className="hidden"
-                                        data-testid="file-input"
+                                        data-testid="history-file-input"
                                     />
-                                    <Upload className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-                                    <p className="text-slate-700 font-medium mb-1">
-                                        Arrastra tu archivo aquí
+                                    <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                                    <p className="text-slate-700 font-medium">
+                                        Selecciona archivo history-orders
                                     </p>
-                                    <p className="text-slate-500 text-sm mb-4">
-                                        o haz clic para seleccionar
+                                    <p className="text-slate-500 text-sm mt-1">
+                                        Formato: history-orders-aaaa-mm-dd-aaaa-mm-dd.csv
                                     </p>
-                                    <p className="text-slate-400 text-xs">
-                                        Formatos: CSV, XLSX • Máximo: 5MB
+                                    <p className="text-slate-400 text-xs mt-2">
+                                        CSV o XLSX • Máximo 10MB
                                     </p>
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {/* File info */}
-                                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-sm">
+                                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-sm">
                                         <div className="flex items-center gap-3">
-                                            <FileSpreadsheet className="w-10 h-10 text-emerald-600" />
+                                            <FileSpreadsheet className="w-8 h-8 text-emerald-600" />
                                             <div>
-                                                <p className="font-medium text-slate-900">
-                                                    {uploadedFile.name}
-                                                </p>
+                                                <p className="font-medium text-slate-900">{historyFile.name}</p>
                                                 <p className="text-sm text-slate-500">
-                                                    {(uploadedFile.size / 1024).toFixed(1)} KB
+                                                    {(historyFile.size / 1024).toFixed(1)} KB
                                                 </p>
                                             </div>
                                         </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={handleClearFile}
-                                            data-testid="clear-file-btn"
-                                        >
-                                            <X className="w-4 h-4" />
-                                        </Button>
+                                        {historyUploading ? (
+                                            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                                        ) : (
+                                            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                        )}
                                     </div>
 
-                                    {uploading && (
-                                        <div className="flex items-center justify-center py-8">
-                                            <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
-                                            <span className="ml-3 text-slate-500">Procesando archivo...</span>
-                                        </div>
-                                    )}
-
-                                    {parsedData && (
-                                        <>
-                                            <div className="flex items-center gap-2 text-emerald-600">
-                                                <CheckCircle2 className="w-5 h-5" />
+                                    {historyData && (
+                                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-sm">
+                                            <div className="flex items-center gap-2 text-emerald-700 mb-2">
+                                                <Package className="w-5 h-5" />
                                                 <span className="font-medium">
-                                                    {parsedData.total_rows} paquetes encontrados
+                                                    {historyData.total_orders} órdenes en {historyData.total_routes} rutas
                                                 </span>
                                             </div>
-
-                                            {/* Preview table */}
-                                            <div className="border border-slate-200 rounded-sm overflow-hidden">
-                                                <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
-                                                    <p className="text-sm font-medium text-slate-700">
-                                                        Vista previa (primeros 10 registros)
-                                                    </p>
-                                                </div>
-                                                <div className="overflow-x-auto max-h-64">
-                                                    <table className="data-table w-full text-xs">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>No. Guía</th>
-                                                                <th>Destinatario</th>
-                                                                <th>Dirección</th>
-                                                                <th>Zona</th>
-                                                                <th>Ventana</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {parsedData.preview.map((pkg, idx) => (
-                                                                <tr key={idx}>
-                                                                    <td className="font-mono">{pkg.tracking_number}</td>
-                                                                    <td>{pkg.recipient_name}</td>
-                                                                    <td className="max-w-xs truncate">{pkg.address}</td>
-                                                                    <td>{pkg.zone}</td>
-                                                                    <td>{pkg.delivery_window}</td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
-                                        </>
+                                            <p className="text-sm text-emerald-600">
+                                                Columnas detectadas: order_reference_id, tracking_url, order_status
+                                            </p>
+                                        </div>
                                     )}
                                 </div>
                             )}
 
-                            {uploadError && (
-                                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-sm flex items-start gap-3">
-                                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                                    <div>
-                                        <p className="font-medium text-red-800">Error al procesar</p>
-                                        <p className="text-sm text-red-600">{uploadError}</p>
-                                    </div>
+                            {historyError && (
+                                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-sm flex items-center gap-2 text-red-700">
+                                    <AlertCircle className="w-5 h-5" />
+                                    <span>{historyError}</span>
                                 </div>
                             )}
                         </CardContent>
                     </Card>
 
-                    {/* Configuration */}
-                    {parsedData && (
-                        <Card className="animate-fade-in">
+                    {/* Step 2: Route Summary */}
+                    <Card className={currentStep === 2 ? 'ring-2 ring-slate-900' : ''}>
+                        <CardHeader>
+                            <CardTitle className="font-heading text-lg flex items-center gap-2">
+                                <Truck className="w-5 h-5" />
+                                Paso 2: Archivo Route Summary
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {currentStep < 2 ? (
+                                <div className="text-center py-8 text-slate-400">
+                                    <Truck className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                                    <p>Primero carga el archivo history-orders</p>
+                                </div>
+                            ) : !routeFile ? (
+                                <div
+                                    className="drop-zone cursor-pointer"
+                                    onClick={() => routeFileRef.current?.click()}
+                                    data-testid="route-file-zone"
+                                >
+                                    <input
+                                        ref={routeFileRef}
+                                        type="file"
+                                        accept=".csv,.xlsx"
+                                        onChange={handleRouteFileSelect}
+                                        className="hidden"
+                                        data-testid="route-file-input"
+                                    />
+                                    <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                                    <p className="text-slate-700 font-medium">
+                                        Selecciona archivo route-summary
+                                    </p>
+                                    <p className="text-slate-500 text-sm mt-1">
+                                        Formato: route-summary-aaaa-mm-dd-aaaa-mm-dd.xlsx
+                                    </p>
+                                    <p className="text-slate-400 text-xs mt-2">
+                                        CSV o XLSX • Máximo 10MB
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-sm">
+                                        <div className="flex items-center gap-3">
+                                            <FileSpreadsheet className="w-8 h-8 text-emerald-600" />
+                                            <div>
+                                                <p className="font-medium text-slate-900">{routeFile.name}</p>
+                                                <p className="text-sm text-slate-500">
+                                                    {(routeFile.size / 1024).toFixed(1)} KB
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {routeUploading ? (
+                                            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                                        ) : (
+                                            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                        )}
+                                    </div>
+
+                                    {routeData && (
+                                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-sm">
+                                            <div className="flex items-center gap-2 text-emerald-700 mb-2">
+                                                <Users className="w-5 h-5" />
+                                                <span className="font-medium">
+                                                    {routeData.total_routes} rutas con {routeData.drivers.length} mensajeros
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-emerald-600">
+                                                Columnas detectadas: Order ID, Driver, Team, Total Stops
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {routeError && (
+                                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-sm flex items-center gap-2 text-red-700">
+                                    <AlertCircle className="w-5 h-5" />
+                                    <span>{routeError}</span>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+
+                    {/* Step 3: Configuration */}
+                    {currentStep >= 3 && (
+                        <Card className="ring-2 ring-slate-900">
                             <CardHeader>
-                                <CardTitle className="font-heading text-lg">
-                                    Configurar jornada
+                                <CardTitle className="font-heading text-lg flex items-center gap-2">
+                                    <LinkIcon className="w-5 h-5" />
+                                    Paso 3: Configuración y Asignación de Proveedores
                                 </CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <CardContent className="space-y-6">
+                                {/* Date and Client */}
+                                <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label>Fecha de entrega</Label>
+                                        <Label>Fecha de las jornadas</Label>
                                         <Popover>
                                             <PopoverTrigger asChild>
                                                 <Button 
@@ -449,7 +547,6 @@ const Layout = () => {
                                             </PopoverContent>
                                         </Popover>
                                     </div>
-
                                     <div className="space-y-2">
                                         <Label>Cliente</Label>
                                         <Select value={selectedClient} onValueChange={setSelectedClient}>
@@ -465,69 +562,179 @@ const Layout = () => {
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                </div>
 
-                                    <div className="space-y-2">
-                                        <Label>Proveedor</Label>
-                                        <Select value={selectedProvider} onValueChange={setSelectedProvider}>
-                                            <SelectTrigger data-testid="select-provider">
-                                                <SelectValue placeholder="Seleccionar proveedor" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {providers.map((provider) => (
-                                                    <SelectItem key={provider.id} value={provider.id}>
-                                                        {provider.name}
-                                                    </SelectItem>
+                                {/* Driver-Provider Mapping */}
+                                <div className="border border-slate-200 rounded-sm">
+                                    <div className="p-3 bg-slate-50 border-b border-slate-200">
+                                        <p className="font-medium text-slate-900">Asignar Proveedor a cada Mensajero</p>
+                                        <p className="text-sm text-slate-500">
+                                            Los mensajeros detectados necesitan un proveedor asignado
+                                        </p>
+                                    </div>
+                                    <div className="max-h-80 overflow-y-auto">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Mensajero (Driver)</TableHead>
+                                                    <TableHead>Proveedor Asignado</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {routeData?.drivers.map((driver) => (
+                                                    <TableRow key={driver}>
+                                                        <TableCell className="font-medium">{driver}</TableCell>
+                                                        <TableCell>
+                                                            <Select
+                                                                value={driverProviderMap[driver] || ''}
+                                                                onValueChange={(v) => handleDriverProviderChange(driver, v)}
+                                                            >
+                                                                <SelectTrigger 
+                                                                    className={`w-full ${!driverProviderMap[driver] ? 'border-amber-400' : ''}`}
+                                                                    data-testid={`provider-select-${driver}`}
+                                                                >
+                                                                    <SelectValue placeholder="Sin asignar" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {providers.map((provider) => (
+                                                                        <SelectItem key={provider.id} value={provider.id}>
+                                                                            {provider.name}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </TableCell>
+                                                    </TableRow>
                                                 ))}
-                                            </SelectContent>
-                                        </Select>
+                                            </TableBody>
+                                        </Table>
                                     </div>
                                 </div>
 
-                                {/* Retry packages indicator */}
-                                {selectedProvider && retryPackages.length > 0 && (
-                                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-sm flex items-center gap-3">
-                                        <RefreshCw className="w-5 h-5 text-amber-600" />
-                                        <div className="flex-1">
-                                            <p className="font-medium text-amber-800">
-                                                {retryPackages.length} paquetes de reintento
-                                            </p>
-                                            <p className="text-sm text-amber-600">
-                                                Se incluirán automáticamente de jornadas anteriores
-                                            </p>
-                                        </div>
+                                {/* Warning if not all drivers assigned */}
+                                {!allDriversAssigned() && (
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-sm flex items-center gap-2 text-amber-700">
+                                        <AlertCircle className="w-5 h-5" />
+                                        <span>Asigna un proveedor a todos los mensajeros para continuar</span>
                                     </div>
                                 )}
 
-                                <div className="flex justify-end pt-4">
+                                {/* Create button */}
+                                <div className="flex justify-end">
                                     <Button
-                                        onClick={handleProceed}
-                                        disabled={!selectedClient || !selectedProvider}
-                                        data-testid="proceed-btn"
+                                        onClick={() => setShowConfirmDialog(true)}
+                                        disabled={!selectedClient || !allDriversAssigned() || creating}
+                                        data-testid="create-journeys-btn"
                                     >
-                                        <Package className="w-4 h-4 mr-2" />
-                                        Crear jornada ({parsedData.total_rows + (selectedProvider ? retryPackages.length : 0)} paquetes)
+                                        {creating ? (
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        ) : (
+                                            <Package className="w-4 h-4 mr-2" />
+                                        )}
+                                        Crear Jornadas
                                     </Button>
                                 </div>
                             </CardContent>
                         </Card>
                     )}
+
+                    {/* Creation Result */}
+                    {creationResult && (
+                        <Card className="border-emerald-200 bg-emerald-50">
+                            <CardHeader>
+                                <CardTitle className="font-heading text-lg flex items-center gap-2 text-emerald-700">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    {creationResult.message}
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {creationResult.created_journeys?.length > 0 && (
+                                    <div>
+                                        <p className="text-sm font-medium text-emerald-800 mb-2">Jornadas creadas:</p>
+                                        <ul className="space-y-1 text-sm text-emerald-700">
+                                            {creationResult.created_journeys.map((j, idx) => (
+                                                <li key={idx}>
+                                                    • {j.driver} - {j.packages} paquetes (Ruta: {j.route_id})
+                                                    {j.duplicates_skipped > 0 && (
+                                                        <span className="text-amber-600 ml-2">
+                                                            ({j.duplicates_skipped} duplicados omitidos)
+                                                        </span>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {creationResult.skipped_duplicates?.length > 0 && (
+                                    <div>
+                                        <p className="text-sm font-medium text-amber-700 mb-2">Rutas duplicadas omitidas:</p>
+                                        <ul className="space-y-1 text-sm text-amber-600">
+                                            {creationResult.skipped_duplicates.map((id, idx) => (
+                                                <li key={idx}>• {id}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {creationResult.errors?.length > 0 && (
+                                    <div>
+                                        <p className="text-sm font-medium text-red-700 mb-2">Errores:</p>
+                                        <ul className="space-y-1 text-sm text-red-600">
+                                            {creationResult.errors.map((err, idx) => (
+                                                <li key={idx}>• {err}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
                 </div>
 
-                {/* Upload history */}
+                {/* Sidebar: Upload history & Preview */}
                 <div className="space-y-6">
+                    {/* Routes Preview */}
+                    {historyData?.routes?.length > 0 && (
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="font-heading text-lg flex items-center gap-2">
+                                    <Truck className="w-5 h-5" />
+                                    Rutas Detectadas
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-0">
+                                <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+                                    {historyData.routes.slice(0, 10).map((route) => (
+                                        <div key={route.route_id} className="p-3 hover:bg-slate-50">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="font-mono text-sm font-medium">{route.route_id}</span>
+                                                <span className="text-xs bg-slate-100 px-2 py-0.5 rounded">
+                                                    {route.orders.length} órdenes
+                                                </span>
+                                            </div>
+                                            {route.driver_name && (
+                                                <p className="text-xs text-slate-500">{route.driver_name}</p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* Upload History */}
                     <Card>
                         <CardHeader>
                             <CardTitle className="font-heading text-lg flex items-center gap-2">
                                 <History className="w-5 h-5" />
-                                Historial de cargas
+                                Historial de Cargas
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
                             {loading ? (
-                                <div className="p-4 space-y-3">
-                                    {[1, 2, 3].map((i) => (
-                                        <div key={i} className="h-16 bg-slate-100 animate-pulse rounded" />
-                                    ))}
+                                <div className="p-4 flex justify-center">
+                                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
                                 </div>
                             ) : uploadHistory.length === 0 ? (
                                 <div className="text-center py-8 text-slate-500">
@@ -536,34 +743,17 @@ const Layout = () => {
                                 </div>
                             ) : (
                                 <div className="divide-y divide-slate-100">
-                                    {uploadHistory.slice(0, 10).map((entry) => (
-                                        <div 
-                                            key={entry.id} 
-                                            className="p-4 hover:bg-slate-50 transition-colors"
-                                        >
+                                    {uploadHistory.slice(0, 8).map((entry) => (
+                                        <div key={entry.id} className="p-3 hover:bg-slate-50">
                                             <div className="flex items-center justify-between mb-1">
-                                                <span className="font-mono text-sm text-slate-900">
+                                                <span className="font-mono text-sm">
                                                     {formatDate(entry.date)}
                                                 </span>
                                                 <span className="text-xs text-slate-500">
                                                     {entry.package_count} paquetes
                                                 </span>
                                             </div>
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-sm text-slate-600">
-                                                    {entry.provider_name}
-                                                </span>
-                                                <span className={`status-badge ${
-                                                    entry.journey_status === 'closed' 
-                                                        ? 'status-closed' 
-                                                        : entry.journey_status === 'in_progress'
-                                                            ? 'status-in_progress'
-                                                            : 'status-scheduled'
-                                                }`}>
-                                                    {entry.journey_status === 'closed' ? 'Cerrada' : 
-                                                     entry.journey_status === 'in_progress' ? 'En progreso' : 'Programada'}
-                                                </span>
-                                            </div>
+                                            <p className="text-sm text-slate-600">{entry.provider_name}</p>
                                         </div>
                                     ))}
                                 </div>
@@ -573,86 +763,31 @@ const Layout = () => {
                 </div>
             </div>
 
-            {/* Retry packages dialog */}
-            <Dialog open={showRetryDialog} onOpenChange={setShowRetryDialog}>
-                <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="font-heading">
-                            Paquetes de reintento
-                        </DialogTitle>
-                        <DialogDescription>
-                            Los siguientes paquetes no fueron entregados en jornadas anteriores.
-                            Selecciona los que deseas incluir en esta jornada.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="max-h-96 overflow-y-auto">
-                        <table className="data-table w-full text-sm">
-                            <thead>
-                                <tr>
-                                    <th className="w-10"></th>
-                                    <th>No. Guía</th>
-                                    <th>Destinatario</th>
-                                    <th>Fecha original</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {retryPackages.map((pkg) => (
-                                    <tr key={pkg.id}>
-                                        <td>
-                                            <Checkbox
-                                                checked={selectedRetryPackages.includes(pkg.id)}
-                                                onCheckedChange={() => toggleRetryPackage(pkg.id)}
-                                            />
-                                        </td>
-                                        <td className="font-mono">{pkg.tracking_number}</td>
-                                        <td>{pkg.recipient_name}</td>
-                                        <td className="font-mono text-xs">
-                                            {formatDate(pkg.original_journey_date)}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div className="flex justify-between items-center pt-4">
-                        <p className="text-sm text-slate-500">
-                            {selectedRetryPackages.length} de {retryPackages.length} seleccionados
-                        </p>
-                        <div className="flex gap-3">
-                            <Button variant="outline" onClick={() => setShowRetryDialog(false)}>
-                                Cancelar
-                            </Button>
-                            <Button onClick={handleConfirmRetry} data-testid="confirm-retry-btn">
-                                Continuar
-                            </Button>
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
-
-            {/* Confirm dialog */}
+            {/* Confirm Dialog */}
             <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle className="font-heading">
-                            Confirmar creación de jornada
+                            Confirmar creación de jornadas
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            Se creará una jornada con los siguientes datos:
+                            Se crearán jornadas con los siguientes datos:
                             <ul className="mt-3 space-y-1 text-slate-700">
                                 <li>• Fecha: <strong>{format(selectedDate, 'dd/MM/yyyy')}</strong></li>
                                 <li>• Cliente: <strong>{clients.find(c => c.id === selectedClient)?.name}</strong></li>
-                                <li>• Proveedor: <strong>{providers.find(p => p.id === selectedProvider)?.name}</strong></li>
-                                <li>• Paquetes nuevos: <strong>{parsedData?.total_rows}</strong></li>
-                                <li>• Paquetes de reintento: <strong>{selectedRetryPackages.length}</strong></li>
-                                <li>• Total: <strong>{(parsedData?.total_rows || 0) + selectedRetryPackages.length}</strong></li>
+                                <li>• Rutas: <strong>{routeData?.total_routes}</strong></li>
+                                <li>• Mensajeros: <strong>{routeData?.drivers.length}</strong></li>
+                                <li>• Órdenes totales: <strong>{historyData?.total_orders}</strong></li>
                             </ul>
+                            <p className="mt-3 text-sm text-amber-600">
+                                Se omitirán automáticamente órdenes y rutas duplicadas.
+                            </p>
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
                         <AlertDialogAction 
-                            onClick={handleCreateJourney}
+                            onClick={handleCreateJourneys}
                             disabled={creating}
                             data-testid="confirm-create-btn"
                         >
@@ -662,7 +797,7 @@ const Layout = () => {
                                     Creando...
                                 </>
                             ) : (
-                                'Crear jornada'
+                                'Crear jornadas'
                             )}
                         </AlertDialogAction>
                     </AlertDialogFooter>

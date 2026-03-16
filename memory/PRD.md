@@ -28,6 +28,15 @@ Build a SaaS web application called "LastMile OS MVP" for managing last-mile del
 
 ## What's Been Implemented (2026-03-16)
 
+### Layout Upload Update (Cosmo Format)
+- ✅ Two-step file upload process:
+  1. **history-orders-aaaa-mm-dd-aaaa-mm-dd.csv**: Contains order details with `order_reference_id`, `tracking_url`, `order_status`
+  2. **route-summary-aaaa-mm-dd-aaaa-mm-dd.xlsx**: Contains route info with `Order ID`, `Driver`, `Team`, `Total Stops`
+- ✅ Driver-to-Provider assignment UI: Map each messenger to a transport provider
+- ✅ Duplicate prevention: Checks for existing orders and routes before creating
+- ✅ Messenger-Provider mapping persistence in database
+- ✅ Auto-sync of delivered/cancelled status from Cosmo data
+
 ### Backend (FastAPI + MongoDB)
 - ✅ JWT Authentication with login/logout/me endpoints
 - ✅ User management (CRUD, password change by admin)
