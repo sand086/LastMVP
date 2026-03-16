@@ -1,0 +1,131 @@
+{
+  "design_system": {
+    "name": "LastMile OS - Industrial Swiss",
+    "description": "A high-performance, high-contrast, data-dense design system for logistics operations. Prioritizes legibility, speed, and status visibility.",
+    "theme_strategy": "light_mode_preferred",
+    "typography": {
+      "font_family": {
+        "headings": "Barlow Condensed, sans-serif",
+        "body": "IBM Plex Sans, sans-serif",
+        "mono": "JetBrains Mono, monospace"
+      },
+      "imports": [
+        "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      ],
+      "scale": {
+        "h1": "text-4xl font-bold tracking-tight uppercase text-slate-900",
+        "h2": "text-2xl font-bold tracking-tight text-slate-800",
+        "h3": "text-xl font-semibold text-slate-800",
+        "body_lg": "text-base font-normal leading-relaxed",
+        "body_md": "text-sm font-normal leading-relaxed",
+        "caption": "text-xs font-medium text-slate-500 uppercase tracking-wider",
+        "mono_data": "font-mono text-sm tracking-tight text-slate-700"
+      }
+    },
+    "colors": {
+      "palette": {
+        "brand": {
+          "primary": "#0F172A",
+          "secondary": "#334155",
+          "accent": "#2E6096"
+        },
+        "status": {
+          "success": "#1A7A4A",
+          "warning": "#C07000",
+          "critical": "#8B0000",
+          "info": "#2E6096",
+          "pending": "#888888"
+        },
+        "background": {
+          "app": "#F8FAFC",
+          "surface": "#FFFFFF",
+          "surface_hover": "#F1F5F9",
+          "overlay": "rgba(15, 23, 42, 0.8)"
+        },
+        "border": {
+          "subtle": "#E2E8F0",
+          "strong": "#CBD5E1",
+          "focus": "#0F172A"
+        }
+      },
+      "usage_rules": {
+        "buttons": {
+          "primary": "bg-slate-900 text-white hover:bg-slate-800",
+          "secondary": "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50",
+          "ghost": "text-slate-600 hover:bg-slate-100",
+          "destructive": "bg-red-700 text-white hover:bg-red-800",
+          "success": "bg-[#1A7A4A] text-white hover:bg-[#145d38]"
+        },
+        "status_indicators": {
+          "success_bg": "bg-[#1A7A4A]/10 text-[#1A7A4A] border-[#1A7A4A]/20",
+          "warning_bg": "bg-[#C07000]/10 text-[#C07000] border-[#C07000]/20",
+          "critical_bg": "bg-[#8B0000]/10 text-[#8B0000] border-[#8B0000]/20",
+          "info_bg": "bg-[#2E6096]/10 text-[#2E6096] border-[#2E6096]/20",
+          "pending_bg": "bg-[#888888]/10 text-[#888888] border-[#888888]/20"
+        }
+      }
+    },
+    "layout": {
+      "spacing_scale": "comfortable_density",
+      "grid_system": "bento_grid",
+      "sidebar": "fixed_left_w_64_bg_white_border_r",
+      "container": "max_w_7xl_mx_auto_p_6",
+      "card_style": "bg-white border border-slate-200 shadow-sm rounded-sm"
+    },
+    "components": {
+      "buttons": "rounded-sm font-medium transition-all active:scale-95",
+      "inputs": "rounded-sm border-slate-300 focus:ring-2 focus:ring-slate-900 focus:border-transparent",
+      "cards": "rounded-sm border border-slate-200 bg-white shadow-sm",
+      "tables": "w-full text-sm text-left border-collapse [&_th]:uppercase [&_th]:text-xs [&_th]:font-bold [&_th]:text-slate-500 [&_th]:p-3 [&_td]:p-3 [&_tr]:border-b [&_tr]:border-slate-100 hover:[&_tr]:bg-slate-50",
+      "progress_bars": "h-2 rounded-full bg-slate-100 [&>div]:rounded-full"
+    },
+    "motion": {
+      "default_transition": "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+      "hover_lift": "hover:-translate-y-0.5 hover:shadow-md",
+      "page_enter": "animate-in fade-in slide-in-from-bottom-4 duration-500"
+    },
+    "assets": {
+      "images": {
+        "login_bg": "https://images.unsplash.com/photo-1669003154471-b72fe01a899d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDV8MHwxfHNlYXJjaHwxfHxsb2dpc3RpY3MlMjB3YXJlaG91c2UlMjBhZXJpYWx8ZW58MHx8fHwxNzczNjkwNDc2fDA&ixlib=rb-4.1.0&q=85",
+        "journey_placeholder": "https://images.unsplash.com/photo-1760800690644-dc6c71a853eb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwxfHxjb3VyaWVyJTIwZGVsaXZlcnklMjB2YW4lMjB1cmJhbnxlbnwwfHx8fDE3NzM2OTA0NzZ8MA&ixlib=rb-4.1.0&q=85",
+        "avatar_placeholder": "https://ui.shadcn.com/avatars/04.png"
+      },
+      "icons": {
+        "library": "lucide-react",
+        "style": "stroke-width=1.5"
+      }
+    }
+  },
+  "instructions_to_main_agent": {
+    "step_1_setup": "Install fonts via Google Fonts import in index.css. Update tailwind.config.js with the custom colors and font families.",
+    "step_2_layout": "Create a 'DashboardLayout' component with a fixed sidebar and top header. Use the 'Bento' grid for the main dashboard view.",
+    "step_3_components": "Customize Shadcn components to match the 'Industrial Swiss' aesthetic (rounded-sm, 1px borders, no heavy shadows).",
+    "step_4_pages": {
+      "login": "Use the 'login_bg' image with a heavy dark overlay. Center the login form card.",
+      "dashboard": "Implement the 4 KPI cards and the 'Journey Management Table'. Use progress bars with conditional colors (green/amber/red).",
+      "journeys": "Create a detailed view with tabs (Inicio, Incidencias, Fin). Use the file upload zone with drag-and-drop.",
+      "file_upload": "Use a dashed border zone with a clear CTA icon."
+    },
+    "critical_rules": [
+      "DO NOT use generic gradients.",
+      "DO NOT use 'Inter' for headings.",
+      "Ensure all UI labels are in Spanish as per user request.",
+      "Implement the 60-second polling logic for dashboard data.",
+      "Add 'data-testid' to all interactive elements."
+    ]
+  },
+  "universal_guidelines": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur) only for overlays/modals.",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯📚🎭🎬🎪🎉🎊🎁🎀🎂🍰🎈🎨🎰💰💵💳🏦💎🪙💸🤑📊📈📉💹🔢🏆🥇 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories (especially sponsor logos) = main agent will use placeholder text which is FORBIDDEN"
+  ]
+}
