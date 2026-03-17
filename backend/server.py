@@ -229,12 +229,23 @@ async def logout(user: dict = Depends(get_current_user)):
 
 # ==================== USER MANAGEMENT (COORDINATOR ONLY) ====================
 
-@api_router.get("/users", response_model=List[UserResponse])
+@api_router.get("/users")
 async def get_users(user: dict = Depends(require_role(["coordinator"]))):
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
+    
+    # Enrich with client and provider names
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    
+    for u in users:
+        assigned_clients = u.get("assigned_clients", [])
+        assigned_providers = u.get("assigned_providers", [])
+        u["assigned_client_names"] = [clients.get(cid, "") for cid in assigned_clients if cid in clients]
+        u["assigned_provider_names"] = [providers.get(pid, "") for pid in assigned_providers if pid in providers]
+    
     return users
 
-@api_router.post("/users", response_model=UserResponse)
+@api_router.post("/users")
 async def create_user(data: UserCreate, user: dict = Depends(require_role(["coordinator"]))):
     existing = await db.users.find_one({"email": data.email})
     if existing:
@@ -246,6 +257,8 @@ async def create_user(data: UserCreate, user: dict = Depends(require_role(["coor
         "name": data.name,
         "role": data.role,
         "password": hash_password(data.password),
+        "assigned_clients": [],
+        "assigned_providers": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.users.insert_one(new_user)
@@ -258,6 +271,31 @@ async def update_user(user_id: str, data: dict, admin: dict = Depends(require_ro
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return {"message": "Usuario actualizado"}
+
+@api_router.put("/users/{user_id}/assignments")
+async def update_user_assignments(
+    user_id: str, 
+    data: dict,
+    admin: dict = Depends(require_role(["coordinator"]))
+):
+    """Update client and provider assignments for a user"""
+    update_data = {}
+    if "assigned_clients" in data:
+        update_data["assigned_clients"] = data["assigned_clients"]
+    if "assigned_providers" in data:
+        update_data["assigned_providers"] = data["assigned_providers"]
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No hay datos para actualizar")
+    
+    result = await db.users.update_one({"id": user_id}, {"$set": update_data})
+    if result.modified_count == 0:
+        # Check if user exists
+        user = await db.users.find_one({"id": user_id})
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    return {"message": "Asignaciones actualizadas"}
 
 @api_router.delete("/users/{user_id}")
 async def delete_user(user_id: str, admin: dict = Depends(require_role(["coordinator"]))):
@@ -1639,6 +1677,358 @@ async def root():
 @api_router.get("/health")
 async def health():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+# ==================== REPORTING API (For Power BI, Tableau, etc.) ====================
+
+@api_router.get("/reports/journeys")
+async def report_journeys(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get journeys data for reporting/BI tools.
+    Returns flattened data suitable for Power BI, Tableau, etc.
+    """
+    query = {}
+    if date_from:
+        query["date"] = {"$gte": date_from}
+    if date_to:
+        query.setdefault("date", {})["$lte"] = date_to
+    if client_id:
+        query["client_id"] = client_id
+    if provider_id:
+        query["provider_id"] = provider_id
+    if status:
+        query["status"] = status
+    
+    journeys = await db.journeys.find(query, {"_id": 0}).to_list(10000)
+    
+    # Enrich with names
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    
+    # Flatten for BI tools
+    result = []
+    for j in journeys:
+        close_data = j.get("close_data") or {}
+        start_data = j.get("start_data") or {}
+        
+        # Count incidents
+        incidents_count = await db.incidents.count_documents({"journey_id": j["id"]})
+        open_incidents = await db.incidents.count_documents({"journey_id": j["id"], "status": "open"})
+        
+        result.append({
+            "journey_id": j["id"],
+            "date": j.get("date"),
+            "client_id": j.get("client_id"),
+            "client_name": clients.get(j.get("client_id"), ""),
+            "provider_id": j.get("provider_id"),
+            "provider_name": providers.get(j.get("provider_id"), ""),
+            "driver_name": j.get("driver_name", ""),
+            "status": j.get("status"),
+            "packages_total": j.get("packages_total", 0),
+            "packages_delivered": j.get("packages_delivered", 0),
+            "packages_failed": j.get("packages_failed", 0),
+            "packages_retry": j.get("packages_retry", 0),
+            "delivery_rate": close_data.get("delivery_rate", 0),
+            "km_traveled": close_data.get("km_traveled", 0),
+            "odometer_start": start_data.get("odometer_start", 0),
+            "odometer_end": close_data.get("odometer_end", 0),
+            "departure_time": start_data.get("departure_time"),
+            "closed_at": close_data.get("closed_at"),
+            "fuel_level": start_data.get("fuel_level", ""),
+            "incidents_total": incidents_count,
+            "incidents_open": open_incidents,
+            "created_at": j.get("created_at")
+        })
+    
+    return {"data": result, "total": len(result)}
+
+@api_router.get("/reports/packages")
+async def report_packages(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    status: Optional[str] = None,
+    journey_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get packages data for reporting/BI tools.
+    """
+    # Build journey filter
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lte"] = date_to
+    
+    if journey_id:
+        journey_ids = [journey_id]
+    else:
+        journeys = await db.journeys.find(j_query, {"id": 1, "_id": 0}).to_list(10000)
+        journey_ids = [j["id"] for j in journeys]
+    
+    # Build package query
+    pkg_query = {"journey_id": {"$in": journey_ids}}
+    if status:
+        pkg_query["status"] = status
+    
+    packages = await db.packages.find(pkg_query, {"_id": 0}).to_list(50000)
+    
+    # Enrich with journey data
+    journeys_map = {}
+    for jid in journey_ids:
+        j = await db.journeys.find_one({"id": jid}, {"_id": 0})
+        if j:
+            journeys_map[jid] = j
+    
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    
+    result = []
+    for pkg in packages:
+        journey = journeys_map.get(pkg.get("journey_id"), {})
+        result.append({
+            "package_id": pkg.get("id"),
+            "journey_id": pkg.get("journey_id"),
+            "journey_date": journey.get("date"),
+            "tracking_number": pkg.get("tracking_number") or pkg.get("order_reference_id"),
+            "tracking_url": pkg.get("tracking_url", ""),
+            "recipient_name": pkg.get("recipient_name"),
+            "address": pkg.get("address"),
+            "zone": pkg.get("zone"),
+            "status": pkg.get("status"),
+            "cosmo_status": pkg.get("cosmo_status", ""),
+            "failure_reason": pkg.get("failure_reason", ""),
+            "is_retry": pkg.get("is_retry", False),
+            "client_name": clients.get(journey.get("client_id"), ""),
+            "provider_name": providers.get(journey.get("provider_id"), ""),
+            "driver_name": journey.get("driver_name", "")
+        })
+    
+    return {"data": result, "total": len(result)}
+
+@api_router.get("/reports/incidents")
+async def report_incidents(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
+    incident_type: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get incidents data for reporting/BI tools.
+    """
+    # Get journeys in date range
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lte"] = date_to
+    
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    journey_ids = [j["id"] for j in journeys]
+    journeys_map = {j["id"]: j for j in journeys}
+    
+    # Build incident query
+    inc_query = {"journey_id": {"$in": journey_ids}}
+    if severity:
+        inc_query["severity"] = severity
+    if status:
+        inc_query["status"] = status
+    if incident_type:
+        inc_query["incident_type"] = incident_type
+    
+    incidents = await db.incidents.find(inc_query, {"_id": 0}).to_list(10000)
+    
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    
+    result = []
+    for inc in incidents:
+        journey = journeys_map.get(inc.get("journey_id"), {})
+        result.append({
+            "incident_id": inc.get("id"),
+            "journey_id": inc.get("journey_id"),
+            "journey_date": journey.get("date"),
+            "occurred_at": inc.get("occurred_at"),
+            "incident_type": inc.get("incident_type"),
+            "description": inc.get("description"),
+            "severity": inc.get("severity"),
+            "status": inc.get("status"),
+            "tracking_number": inc.get("tracking_number", ""),
+            "action_taken": inc.get("action_taken", ""),
+            "resolved_at": inc.get("resolved_at"),
+            "client_name": clients.get(journey.get("client_id"), ""),
+            "provider_name": providers.get(journey.get("provider_id"), ""),
+            "driver_name": journey.get("driver_name", ""),
+            "created_at": inc.get("created_at")
+        })
+    
+    return {"data": result, "total": len(result)}
+
+@api_router.get("/reports/kpis")
+async def report_kpis(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    group_by: str = "day",  # day, week, month, provider, client
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get aggregated KPIs for reporting/BI tools.
+    """
+    if not date_from:
+        date_from = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    journeys = await db.journeys.find(
+        {"date": {"$gte": date_from, "$lte": date_to}},
+        {"_id": 0}
+    ).to_list(10000)
+    
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    
+    # Group data
+    groups = {}
+    for j in journeys:
+        if group_by == "provider":
+            key = providers.get(j.get("provider_id"), "Sin proveedor")
+        elif group_by == "client":
+            key = clients.get(j.get("client_id"), "Sin cliente")
+        elif group_by == "week":
+            d = datetime.strptime(j.get("date", date_from), "%Y-%m-%d")
+            key = f"{d.year}-W{d.isocalendar()[1]:02d}"
+        elif group_by == "month":
+            key = j.get("date", "")[:7]  # YYYY-MM
+        else:  # day
+            key = j.get("date", "")
+        
+        if key not in groups:
+            groups[key] = {
+                "group": key,
+                "journeys_count": 0,
+                "journeys_completed": 0,
+                "packages_total": 0,
+                "packages_delivered": 0,
+                "packages_failed": 0,
+                "km_total": 0,
+                "incidents_count": 0
+            }
+        
+        close_data = j.get("close_data") or {}
+        groups[key]["journeys_count"] += 1
+        if j.get("status") == "closed":
+            groups[key]["journeys_completed"] += 1
+        groups[key]["packages_total"] += j.get("packages_total", 0)
+        groups[key]["packages_delivered"] += j.get("packages_delivered", 0)
+        groups[key]["packages_failed"] += j.get("packages_failed", 0)
+        groups[key]["km_total"] += close_data.get("km_traveled", 0)
+    
+    # Calculate delivery rates
+    result = []
+    for key, data in groups.items():
+        data["delivery_rate"] = round(
+            (data["packages_delivered"] / data["packages_total"] * 100) 
+            if data["packages_total"] > 0 else 0, 2
+        )
+        result.append(data)
+    
+    # Sort by group
+    result.sort(key=lambda x: x["group"])
+    
+    return {"data": result, "total": len(result), "date_from": date_from, "date_to": date_to}
+
+@api_router.get("/reports/schema")
+async def report_schema():
+    """
+    Returns the schema of available report endpoints for BI tool integration.
+    """
+    return {
+        "api_version": "1.0",
+        "endpoints": [
+            {
+                "name": "Journeys Report",
+                "endpoint": "/api/reports/journeys",
+                "method": "GET",
+                "description": "Datos de jornadas con métricas de entrega",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "client_id", "type": "string", "required": False},
+                    {"name": "provider_id", "type": "string", "required": False},
+                    {"name": "status", "type": "string", "enum": ["scheduled", "in_progress", "closed"], "required": False}
+                ],
+                "fields": [
+                    "journey_id", "date", "client_id", "client_name", "provider_id", "provider_name",
+                    "driver_name", "status", "packages_total", "packages_delivered", "packages_failed",
+                    "delivery_rate", "km_traveled", "incidents_total", "incidents_open"
+                ]
+            },
+            {
+                "name": "Packages Report",
+                "endpoint": "/api/reports/packages",
+                "method": "GET",
+                "description": "Datos detallados de paquetes",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "status", "type": "string", "enum": ["pending", "delivered", "failed", "retry"], "required": False},
+                    {"name": "journey_id", "type": "string", "required": False}
+                ],
+                "fields": [
+                    "package_id", "journey_id", "journey_date", "tracking_number", "tracking_url",
+                    "recipient_name", "address", "zone", "status", "failure_reason", "is_retry",
+                    "client_name", "provider_name", "driver_name"
+                ]
+            },
+            {
+                "name": "Incidents Report",
+                "endpoint": "/api/reports/incidents",
+                "method": "GET",
+                "description": "Datos de incidencias",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "severity", "type": "string", "enum": ["Alto", "Medio", "Bajo"], "required": False},
+                    {"name": "status", "type": "string", "enum": ["open", "resolved"], "required": False},
+                    {"name": "incident_type", "type": "string", "required": False}
+                ],
+                "fields": [
+                    "incident_id", "journey_id", "journey_date", "occurred_at", "incident_type",
+                    "description", "severity", "status", "action_taken", "resolved_at",
+                    "client_name", "provider_name", "driver_name"
+                ]
+            },
+            {
+                "name": "KPIs Report",
+                "endpoint": "/api/reports/kpis",
+                "method": "GET",
+                "description": "KPIs agregados por período o dimensión",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "group_by", "type": "string", "enum": ["day", "week", "month", "provider", "client"], "default": "day"}
+                ],
+                "fields": [
+                    "group", "journeys_count", "journeys_completed", "packages_total",
+                    "packages_delivered", "packages_failed", "km_total", "delivery_rate"
+                ]
+            }
+        ],
+        "authentication": {
+            "type": "Bearer Token",
+            "header": "Authorization",
+            "format": "Bearer <token>",
+            "obtain_token": "POST /api/auth/login with {email, password}"
+        }
+    }
 
 # Include the router
 app.include_router(api_router)

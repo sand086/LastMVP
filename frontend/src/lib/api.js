@@ -42,6 +42,7 @@ export const requestPasswordReset = (email) => api.post('/auth/request-password-
 export const getUsers = () => api.get('/users');
 export const createUser = (data) => api.post('/users', data);
 export const updateUser = (id, data) => api.put(`/users/${id}`, data);
+export const updateUserAssignments = (id, data) => api.put(`/users/${id}/assignments`, data);
 export const deleteUser = (id) => api.delete(`/users/${id}`);
 export const changePasswordByAdmin = (userId, newPassword) => api.post('/users/change-password', { user_id: userId, new_password: newPassword });
 
@@ -153,5 +154,12 @@ export const exportIncidents = (params) => api.get('/export/incidents', { params
 
 // Seed
 export const seedDatabase = () => api.post('/seed');
+
+// Reports API (for Power BI, etc.)
+export const getReportJourneys = (params) => api.get('/reports/journeys', { params });
+export const getReportPackages = (params) => api.get('/reports/packages', { params });
+export const getReportIncidents = (params) => api.get('/reports/incidents', { params });
+export const getReportKpis = (params) => api.get('/reports/kpis', { params });
+export const getReportSchema = () => api.get('/reports/schema');
 
 export default api;

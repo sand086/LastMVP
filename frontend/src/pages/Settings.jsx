@@ -4,6 +4,7 @@ import {
     getUsers, 
     createUser, 
     updateUser, 
+    updateUserAssignments,
     deleteUser,
     changePasswordByAdmin,
     getPasswordResetRequests,
@@ -21,6 +22,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Checkbox } from '../components/ui/checkbox';
 import {
     Dialog,
     DialogContent,
@@ -53,7 +55,8 @@ import {
     Loader2,
     X,
     Database,
-    Shield
+    Shield,
+    Link as LinkIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -77,7 +80,16 @@ const Settings = () => {
         role: '',
         password: '',
     });
+    const [userAssignments, setUserAssignments] = useState({
+        assigned_clients: [],
+        assigned_providers: []
+    });
     const [userSubmitting, setUserSubmitting] = useState(false);
+
+    // Assignment modal
+    const [showAssignmentModal, setShowAssignmentModal] = useState(false);
+    const [assignmentUser, setAssignmentUser] = useState(null);
+    const [assignmentSubmitting, setAssignmentSubmitting] = useState(false);
 
     // Password change modal
     const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -186,6 +198,48 @@ const Settings = () => {
             fetchData();
         } catch (error) {
             toast.error('Error al eliminar usuario');
+        }
+    };
+
+    // Assignment handlers
+    const handleOpenAssignmentModal = (user) => {
+        setAssignmentUser(user);
+        setUserAssignments({
+            assigned_clients: user.assigned_clients || [],
+            assigned_providers: user.assigned_providers || []
+        });
+        setShowAssignmentModal(true);
+    };
+
+    const toggleClientAssignment = (clientId) => {
+        setUserAssignments(prev => ({
+            ...prev,
+            assigned_clients: prev.assigned_clients.includes(clientId)
+                ? prev.assigned_clients.filter(id => id !== clientId)
+                : [...prev.assigned_clients, clientId]
+        }));
+    };
+
+    const toggleProviderAssignment = (providerId) => {
+        setUserAssignments(prev => ({
+            ...prev,
+            assigned_providers: prev.assigned_providers.includes(providerId)
+                ? prev.assigned_providers.filter(id => id !== providerId)
+                : [...prev.assigned_providers, providerId]
+        }));
+    };
+
+    const handleSaveAssignments = async () => {
+        setAssignmentSubmitting(true);
+        try {
+            await updateUserAssignments(assignmentUser.id, userAssignments);
+            toast.success('Asignaciones actualizadas');
+            setShowAssignmentModal(false);
+            fetchData();
+        } catch (error) {
+            toast.error('Error al guardar asignaciones');
+        } finally {
+            setAssignmentSubmitting(false);
         }
     };
 
