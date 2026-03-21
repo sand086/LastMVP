@@ -11,6 +11,10 @@ import Layout from './pages/Layout';
 import Settings from './pages/Settings';
 import ApiDocumentation from './pages/ApiDocumentation';
 import Reports from './pages/Reports';
+import SystemHealth from './pages/SystemHealth';
+import SystemLogs from './pages/SystemLogs';
+import SystemErrors from './pages/SystemErrors';
+import SystemIntegrity from './pages/SystemIntegrity';
 import './App.css';
 
 // Protected route wrapper
@@ -108,7 +112,7 @@ function AppRoutes() {
             <Route 
                 path="/settings" 
                 element={
-                    <ProtectedRoute allowedRoles={['coordinator']}>
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
                         <Settings />
                     </ProtectedRoute>
                 } 
@@ -128,6 +132,42 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute allowedRoles={['coordinator', 'executive']}>
                         <Reports />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/system/health" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
+                        <SystemHealth />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/system/logs" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
+                        <SystemLogs />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/system/errors" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
+                        <SystemErrors />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/system/integrity" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
+                        <SystemIntegrity />
                     </ProtectedRoute>
                 } 
             />

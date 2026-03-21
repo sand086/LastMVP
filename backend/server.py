@@ -17,6 +17,9 @@ import pandas as pd
 import io
 import shutil
 
+from middleware import AuditMiddleware, log_audit_event, log_system_error
+from system_routes import create_system_router, SERVER_START_TIME
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -36,6 +39,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Create the main app
 app = FastAPI(title="LastMile OS API")
+
+# Store db on app state for middleware access
+app.state.db = db
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -242,10 +248,12 @@ def apply_assignment_filter(user: dict, query: dict) -> dict:
 async def login(data: UserLogin):
     user = await db.users.find_one({"email": data.email}, {"_id": 0})
     if not user or not verify_password(data.password, user["password"]):
+        await log_audit_event(db, data.email, "", "login_failed", "user", "", details=f"Failed login for {data.email}", status="error")
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
     
     token = create_token(user["id"], user["email"], user["role"])
     user_response = {k: v for k, v in user.items() if k != "password"}
+    await log_audit_event(db, user["id"], user["role"], "login_success", "user", user["id"])
     return TokenResponse(access_token=token, user=user_response)
 
 @api_router.get("/auth/me")
@@ -564,6 +572,7 @@ async def start_journey(journey_id: str, data: JourneyStartData, user: dict = De
         {"id": journey_id},
         {"$set": {"status": "in_progress", "start_data": start_data}}
     )
+    await log_audit_event(db, user["id"], user["role"], "route_started", "journey", journey_id)
     
     return {"message": "Ruta iniciada exitosamente"}
 
@@ -616,6 +625,7 @@ async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = De
             {"$set": {"status": "retry", "failure_reason": failed_pkg.get("failure_reason", "")}}
         )
     
+    await log_audit_event(db, user["id"], user["role"], "route_closed", "journey", journey_id)
     return {"message": "Ruta cerrada exitosamente", "close_data": close_data}
 
 # ==================== INCIDENTS ====================
@@ -652,6 +662,7 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
         "created_by": user["id"]
     }
     await db.incidents.insert_one(incident)
+    await log_audit_event(db, user["id"], user["role"], "incident_created", "incident", incident["id"])
     return {k: v for k, v in incident.items() if k != "_id"}
 
 @api_router.put("/incidents/{incident_id}")
@@ -1088,6 +1099,8 @@ async def create_journeys_from_cosmo(
             "duplicates_updated": updated_in_other
         })
     
+    await log_audit_event(db, user["id"], user["role"], "layout_uploaded", "layout", "", details=f"{len(created_journeys)} rutas, {total_new_packages} nuevos, {total_updated_packages} actualizados")
+
     return {
         "message": f"{len(created_journeys)} rutas creadas, {total_updated_packages} paquetes actualizados",
         "created_journeys": created_journeys,
@@ -1643,6 +1656,14 @@ async def seed_database():
             "email": "karina@me.mx",
             "name": "Karina Ejecutivo",
             "role": "executive",
+            "password": password_hash,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "email": "dev@me.mx",
+            "name": "Dev Admin",
+            "role": "developer",
             "password": password_hash,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
@@ -2389,6 +2410,33 @@ async def report_schema():
                     "group", "journeys_count", "journeys_completed", "packages_total",
                     "packages_delivered", "packages_failed", "km_total", "delivery_rate"
                 ]
+            },
+            {
+                "name": "Custom Report (AI)",
+                "endpoint": "/api/reports/generate",
+                "method": "POST",
+                "description": "Genera reporte personalizable con insights de IA (Claude)",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "sections", "type": "array", "enum": ["provider_metrics", "driver_metrics", "incidents_breakdown"], "required": False}
+                ],
+                "fields": [
+                    "total_journeys", "total_packages", "total_delivered", "total_failed",
+                    "delivery_rate", "provider_metrics", "driver_metrics", "incidents_by_type",
+                    "incidents_by_imputability", "ai_insights"
+                ]
+            },
+            {
+                "name": "Report Excel Export",
+                "endpoint": "/api/reports/generate-excel",
+                "method": "POST",
+                "description": "Descarga reporte en formato Excel con hojas de rutas, incidencias y resumen por proveedor",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": True}
+                ],
+                "fields": ["Archivo .xlsx con 3 hojas: Rutas, Incidencias, Resumen Proveedores"]
             }
         ],
         "authentication": {
@@ -2401,6 +2449,15 @@ async def report_schema():
 
 # Include the router
 app.include_router(api_router)
+
+# Create and include system routes with proper dependency injection
+system_router = create_system_router(db, get_current_user)
+api_system_router = APIRouter(prefix="/api")
+api_system_router.include_router(system_router)
+app.include_router(api_system_router)
+
+# Add audit middleware (must be after CORS)
+app.add_middleware(AuditMiddleware)
 
 # CORS
 app.add_middleware(

@@ -76,7 +76,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     const canEdit = () => hasRole(['agent', 'coordinator']);
-    const isCoordinator = () => hasRole('coordinator');
+    const isCoordinator = () => hasRole(['coordinator', 'developer']);
     const isExecutive = () => hasRole('executive');
 
     const value = {

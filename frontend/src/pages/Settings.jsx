@@ -15,6 +15,7 @@ import {
     createProvider,
     seedDatabase
 } from '../lib/api';
+import api from '../lib/api';
 import { formatDateTime } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -56,7 +57,10 @@ import {
     X,
     Database,
     Shield,
-    Link as LinkIcon
+    Link as LinkIcon,
+    Settings2,
+    Server,
+    Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -70,6 +74,10 @@ const Settings = () => {
     const [providers, setProviders] = useState([]);
     const [resetRequests, setResetRequests] = useState([]);
     const [loading, setLoading] = useState(true);
+    
+    // System config
+    const [systemConfig, setSystemConfig] = useState(null);
+    const [configLoading, setConfigLoading] = useState(false);
 
     // User modal
     const [showUserModal, setShowUserModal] = useState(false);
@@ -115,6 +123,22 @@ const Settings = () => {
     useEffect(() => {
         fetchData();
     }, []);
+
+    useEffect(() => {
+        if (activeTab === 'system') fetchConfig();
+    }, [activeTab]);
+
+    const fetchConfig = async () => {
+        setConfigLoading(true);
+        try {
+            const res = await api.get('/system/config');
+            setSystemConfig(res.data);
+        } catch (error) {
+            console.error('Error fetching config:', error);
+        } finally {
+            setConfigLoading(false);
+        }
+    };
 
     const fetchData = async () => {
         try {
@@ -330,6 +354,7 @@ const Settings = () => {
             agent: 'Agente',
             coordinator: 'Coordinador',
             executive: 'Ejecutivo',
+            developer: 'Developer',
         };
         return labels[role] || role;
     };
@@ -339,6 +364,7 @@ const Settings = () => {
             agent: 'bg-emerald-100 text-emerald-700',
             coordinator: 'bg-blue-100 text-blue-700',
             executive: 'bg-slate-100 text-slate-700',
+            developer: 'bg-violet-100 text-violet-700',
         };
         return colors[role] || 'bg-slate-100 text-slate-700';
     };
@@ -425,7 +451,7 @@ const Settings = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="users" data-testid="tab-users">
                         <Users className="w-4 h-4 mr-2" />
                         Usuarios
@@ -437,6 +463,10 @@ const Settings = () => {
                     <TabsTrigger value="providers" data-testid="tab-providers">
                         <Truck className="w-4 h-4 mr-2" />
                         Proveedores
+                    </TabsTrigger>
+                    <TabsTrigger value="system" data-testid="tab-system">
+                        <Settings2 className="w-4 h-4 mr-2" />
+                        Sistema
                     </TabsTrigger>
                 </TabsList>
 
@@ -634,6 +664,69 @@ const Settings = () => {
                         </CardContent>
                     </Card>
                 </TabsContent>
+
+                {/* System Tab */}
+                <TabsContent value="system" className="space-y-4">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="font-heading flex items-center gap-2">
+                                <Server className="w-5 h-5" />
+                                Configuración del entorno
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {configLoading ? (
+                                <div className="flex items-center justify-center py-8">
+                                    <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                                </div>
+                            ) : systemConfig ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-3">
+                                        <div className="p-3 bg-slate-50 rounded-sm">
+                                            <p className="text-xs text-slate-500 uppercase">Backend</p>
+                                            <p className="font-mono text-sm font-medium">{systemConfig.backend_version}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 rounded-sm">
+                                            <p className="text-xs text-slate-500 uppercase">Python</p>
+                                            <p className="font-mono text-sm font-medium">{systemConfig.python_version}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 rounded-sm">
+                                            <p className="text-xs text-slate-500 uppercase">MongoDB Host</p>
+                                            <p className="font-mono text-sm font-medium">{systemConfig.mongo_host}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 rounded-sm">
+                                            <p className="text-xs text-slate-500 uppercase">Base de datos</p>
+                                            <p className="font-mono text-sm font-medium">{systemConfig.db_name} ({systemConfig.db_size_mb} MB, {systemConfig.collections_count} colecciones)</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <div className="p-3 bg-slate-50 rounded-sm">
+                                            <p className="text-xs text-slate-500 uppercase">CORS</p>
+                                            <p className="font-mono text-sm font-medium">{systemConfig.cors_origins}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 rounded-sm">
+                                            <p className="text-xs text-slate-500 uppercase">JWT Expiración</p>
+                                            <p className="font-mono text-sm font-medium">{systemConfig.jwt_expiry_hours} horas</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 rounded-sm">
+                                            <p className="text-xs text-slate-500 uppercase">Último deploy</p>
+                                            <p className="font-mono text-sm font-medium">{systemConfig.last_deploy?.slice(0, 19)}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 rounded-sm flex items-center gap-2">
+                                            <Clock className="w-4 h-4 text-slate-400" />
+                                            <div>
+                                                <p className="text-xs text-slate-500 uppercase">Uptime</p>
+                                                <p className="font-mono text-sm font-medium">{systemConfig.uptime}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-slate-500 text-sm">No se pudo cargar la configuración</p>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
             </Tabs>
 
             {/* User Modal */}
@@ -677,6 +770,7 @@ const Settings = () => {
                                     <SelectItem value="agent">Agente</SelectItem>
                                     <SelectItem value="coordinator">Coordinador</SelectItem>
                                     <SelectItem value="executive">Ejecutivo</SelectItem>
+                                    <SelectItem value="developer">Developer</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>

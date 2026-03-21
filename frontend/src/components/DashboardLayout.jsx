@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../lib/api';
 import { 
     LayoutDashboard, 
     Truck, 
@@ -11,7 +12,11 @@ import {
     User,
     ChevronDown,
     Code,
-    FileText
+    FileText,
+    Activity,
+    ScrollText,
+    Bug,
+    ShieldCheck,
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -23,7 +28,7 @@ import {
 import { Button } from '../components/ui/button';
 
 const navItems = [
-    { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['agent', 'coordinator', 'executive'] },
+    { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['agent', 'coordinator', 'executive', 'developer'] },
     { path: '/journeys', label: 'Rutas', icon: Truck, roles: ['agent', 'coordinator', 'executive'] },
     { path: '/layout', label: 'Layout', icon: Upload, roles: ['agent', 'coordinator'] },
     { path: '/reports', label: 'Reportes', icon: FileText, roles: ['coordinator', 'executive'] },
@@ -31,10 +36,36 @@ const navItems = [
     { path: '/settings', label: 'Configuración', icon: Settings, roles: ['coordinator'] },
 ];
 
+const systemNavItems = [
+    { path: '/system/health', label: 'Health', icon: Activity },
+    { path: '/system/logs', label: 'Logs', icon: ScrollText },
+    { path: '/system/errors', label: 'Errores', icon: Bug },
+    { path: '/system/integrity', label: 'Integridad', icon: ShieldCheck },
+];
+
 export const DashboardLayout = ({ children }) => {
     const { user, logout, hasRole } = useAuth();
     const location = useLocation();
     const navigate = useNavigate();
+    const [errorCount, setErrorCount] = useState(0);
+
+    const showSystemSection = hasRole(['coordinator', 'developer']);
+
+    const fetchErrorCount = useCallback(async () => {
+        if (!showSystemSection) return;
+        try {
+            const res = await api.get('/system/errors/count');
+            setErrorCount(res.data.count || 0);
+        } catch {
+            // Silently fail
+        }
+    }, [showSystemSection]);
+
+    useEffect(() => {
+        fetchErrorCount();
+        const interval = setInterval(fetchErrorCount, 60000);
+        return () => clearInterval(interval);
+    }, [fetchErrorCount]);
 
     const handleLogout = async () => {
         await logout();
@@ -48,9 +79,19 @@ export const DashboardLayout = ({ children }) => {
             agent: 'Agente',
             coordinator: 'Coordinador',
             executive: 'Ejecutivo',
+            developer: 'Developer',
         };
         return labels[role] || role;
     };
+
+    const isActive = (path) => location.pathname === path || 
+        (path !== '/' && location.pathname.startsWith(path));
+
+    const currentLabel = (() => {
+        const sysItem = systemNavItems.find(i => isActive(i.path));
+        if (sysItem) return `Sistema / ${sysItem.label}`;
+        return filteredNavItems.find(i => isActive(i.path))?.label || 'Dashboard';
+    })();
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex">
@@ -73,24 +114,56 @@ export const DashboardLayout = ({ children }) => {
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 p-4 space-y-1">
+                    <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
                         {filteredNavItems.map((item) => {
                             const Icon = item.icon;
-                            const isActive = location.pathname === item.path || 
-                                (item.path !== '/' && location.pathname.startsWith(item.path));
+                            const active = isActive(item.path);
                             
                             return (
                                 <Link
                                     key={item.path}
                                     to={item.path}
                                     data-testid={`nav-${item.path.replace('/', '') || 'dashboard'}`}
-                                    className={`sidebar-link ${isActive ? 'active' : 'text-slate-600'}`}
+                                    className={`sidebar-link ${active ? 'active' : 'text-slate-600'}`}
                                 >
                                     <Icon className="w-5 h-5" strokeWidth={1.5} />
                                     <span>{item.label}</span>
                                 </Link>
                             );
                         })}
+
+                        {/* System Section */}
+                        {showSystemSection && (
+                            <>
+                                <div className="pt-4 pb-2">
+                                    <p className="px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                                        Sistema
+                                    </p>
+                                </div>
+                                {systemNavItems.map((item) => {
+                                    const Icon = item.icon;
+                                    const active = isActive(item.path);
+                                    const showBadge = item.path === '/system/errors' && errorCount > 0;
+                                    
+                                    return (
+                                        <Link
+                                            key={item.path}
+                                            to={item.path}
+                                            data-testid={`nav-system-${item.label.toLowerCase()}`}
+                                            className={`sidebar-link ${active ? 'active' : 'text-slate-600'}`}
+                                        >
+                                            <Icon className="w-5 h-5" strokeWidth={1.5} />
+                                            <span>{item.label}</span>
+                                            {showBadge && (
+                                                <span className="ml-auto px-1.5 py-0.5 text-[10px] font-bold bg-red-500 text-white rounded-full" data-testid="error-badge-count">
+                                                    {errorCount}
+                                                </span>
+                                            )}
+                                        </Link>
+                                    );
+                                })}
+                            </>
+                        )}
                     </nav>
 
                     {/* User section */}
@@ -118,10 +191,7 @@ export const DashboardLayout = ({ children }) => {
                 <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
                     <div className="flex items-center gap-4">
                         <h1 className="font-heading font-semibold text-xl text-slate-800">
-                            {filteredNavItems.find(item => 
-                                location.pathname === item.path || 
-                                (item.path !== '/' && location.pathname.startsWith(item.path))
-                            )?.label || 'Dashboard'}
+                            {currentLabel}
                         </h1>
                     </div>
 
