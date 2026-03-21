@@ -1,135 +1,85 @@
-# LastMile OS - Product Requirements Document
+# LastMile OS MVP - Product Requirements Document
 
 ## Original Problem Statement
-Build a SaaS web application called "LastMile OS MVP" for managing last-mile delivery operations. The platform is used internally by ME (Mensajería y Estrategias), a Mexican logistics company, to manage their daily courier operations with multiple transport providers for B2B clients.
-
-## User Choices
-- **Database**: MongoDB (pre-configured)
-- **File Storage**: Local filesystem
-- **Password Reset**: Admin module with internal notifications
-- **Design**: AI-chosen (Industrial Swiss design system)
-- **Language**: Spanish UI
+Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard polling, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), and dynamic assignment.
 
 ## User Personas
-1. **Agente (Agent)**: Full access to operational modules - creates journeys, manages incidents, starts/closes routes
-2. **Coordinador (Coordinator)**: Full access + user management + settings configuration
-3. **Ejecutivo (Executive)**: Read-only access to dashboard and reports
+- **Agent**: Field delivery operator (upload layouts, manage routes)
+- **Coordinator**: Operations manager (full access, user management, assignments)
+- **Executive**: Business oversight (dashboard, reports, API docs)
 
-## Core Requirements (Static)
-- JWT Authentication with 8hr expiry
-- Three roles: Agent, Coordinator, Executive
-- Module 1: Layout Upload (CSV/XLSX parsing)
-- Module 2: Journey Start (checklist, photo upload)
-- Module 3: Incidents management (CRUD, severity levels)
-- Module 4: Journey Close (metrics calculation, retry packages)
-- Module 5: Dashboard (KPIs, polling every 60s, filters)
-- Color system: green=#1A7A4A, amber=#C07000, red=#8B0000, blue=#2E6096
-- Mobile-responsive, desktop-first (1280px optimized)
+## Tech Stack
+- **Frontend**: React + TailwindCSS + Shadcn UI + Lucide Icons
+- **Backend**: FastAPI + JWT Auth + Pandas/Openpyxl
+- **Database**: MongoDB
 
-## What's Been Implemented (2026-03-16)
+## Core Requirements
 
-### Layout Upload Update (Cosmo Format)
-- ✅ Two-step file upload process:
-  1. **history-orders-aaaa-mm-dd-aaaa-mm-dd.csv**: Contains order details with `order_reference_id`, `tracking_url`, `order_status`
-  2. **route-summary-aaaa-mm-dd-aaaa-mm-dd.xlsx**: Contains route info with `Order ID`, `Driver`, `Team`, `Total Stops`
-- ✅ Driver-to-Provider assignment UI: Map each messenger to a transport provider
-- ✅ Duplicate prevention: Checks for existing orders and routes before creating
-- ✅ Messenger-Provider mapping persistence in database
-- ✅ Auto-sync of delivered/cancelled status from Cosmo data
+### Authentication
+- JWT role-based auth (Agent, Coordinator, Executive)
+- Credentials: agente@me.mx, yael@me.mx, karina@me.mx / LastMile2026
 
-### Backend (FastAPI + MongoDB)
-- ✅ JWT Authentication with login/logout/me endpoints
-- ✅ User management (CRUD, password change by admin)
-- ✅ Password reset requests system
-- ✅ Clients and Providers CRUD
-- ✅ Journeys CRUD with start/close operations
-- ✅ Packages management
-- ✅ Incidents CRUD with resolve functionality
-- ✅ File upload (CSV/XLSX parsing, photo upload)
-- ✅ Dashboard stats endpoint
-- ✅ Export to Excel/CSV
-- ✅ Seed data with 2 clients, 2 providers, 3 users, 2 journeys
+### Dashboard
+- KPIs: Active routes, packages delivered, open incidents, closed routes
+- Date range + client/provider/status filters
+- Route table with quick access
+- Provider comparison metrics
+- Export to XLSX
 
-### Frontend (React + Tailwind CSS)
-- ✅ Login page with forgot password flow
-- ✅ Dashboard with 4 KPI cards (polling enabled)
-- ✅ Journey table with progress bars and status badges
-- ✅ Filters (date range, client, provider, status)
-- ✅ Journeys list page
-- ✅ Journey detail with 3 tabs (Inicio/Incidencias/Fin)
-- ✅ Journey start form with checklist
-- ✅ Incidents management with add/edit/resolve/delete
-- ✅ Journey close form with metrics calculation
-- ✅ Layout upload with drag & drop
-- ✅ Settings page with user/client/provider management
-- ✅ Role-based navigation and access control
-- ✅ WhatsApp-friendly summaries with copy button
-- ✅ Export functionality
-- ✅ Spanish language UI throughout
+### Layout Upload (2-Step)
+- Step 1: Upload history-orders.csv from Cosmo
+- Step 2: Upload route-summary.xlsx from Cosmo
+- Auto-creates routes and packages from uploaded data
 
-### Design System (Industrial Swiss)
-- ✅ Barlow Condensed headings, IBM Plex Sans body
-- ✅ Light mode with slate neutrals
-- ✅ Status badges and progress bar colors
-- ✅ Clean data tables with uppercase headers
-- ✅ Card-based layout with subtle shadows
+### Route Management (formerly "Jornada" - renamed to "Ruta" in UI)
+- **Start Route**: 9-item checklist, vehicle info, backup driver fields
+- **Incidents**: Register incidents with severity, images
+- **Close Route**: Metrics, 4-item checklist + conditional return evidence
+- Image uploads for all sections (start, close, incidents, return_evidence)
+- WhatsApp summary generation
 
-## Prioritized Backlog
+### Settings (Coordinator only)
+- User CRUD management
+- Client/Provider management
+- Dynamic user-to-client/provider assignment with modal
 
-### P0 - Critical (Not blocking but important)
-- None currently
+### API Documentation
+- Power BI integration sandbox at /api-docs
+- Available endpoints documentation
+- Code examples
 
-### P1 - High Priority Enhancements
-- File upload for odometer photos (endpoint exists, UI not connected)
-- Real-time incident count in sidebar notification bell
-- More detailed package tracking within journey
+## Completed Features (as of March 21, 2026)
+- [x] FastAPI Backend & React Frontend scaffolding with Seed Data
+- [x] 2-step Cosmo layout upload (history-orders + route-summary)
+- [x] Image uploads in Start, Incidents, Close, and Return Evidence
+- [x] Failed packages search filter with magnifying glass
+- [x] JWT role-based auth (Agent, Coordinator, Executive)
+- [x] Global rename: "Jornada" → "Ruta" in all UI (MongoDB keeps "journeys" internally)
+- [x] Extended start checklist (9 items including CEDIS arrival, pass, Cosmo confirmation, screenshot)
+- [x] Backup driver fields (name, request time, arrival time - conditionally visible)
+- [x] Conditional return evidence in close route (photo upload for package returns)
+- [x] API Documentation page connected to routing and sidebar
+- [x] Dynamic user assignment (client/provider) in Settings page
+- [x] Database cleanup for fresh testing
 
-### P2 - Medium Priority
-- Password reset email integration (currently admin-only)
-- Audit log for all actions
-- Mobile-optimized layout for field agents
-- Advanced reporting with date range charts
+## Upcoming Tasks (P1)
+- [ ] Add clickable tracking_url view in package details
+- [ ] Add search functionality in main packages table of Journey Detail page
 
-### P3 - Nice to Have
-- Dark mode toggle
-- Multi-language support (English)
-- Bulk journey operations
-- API rate limiting
-- PDF export for reports
+## Future Tasks (P2)
+- [ ] Automatic compression for large image uploads
+- [ ] Mobile-optimized views for field agents
 
-## Next Tasks List
-1. Connect photo upload UI to backend endpoint
-2. Add notification bell with real-time count
-3. Implement package-level tracking and status updates
-4. Add more detailed analytics charts on dashboard
-5. Consider mobile-first redesign for field agents
+## Key API Endpoints
+- POST /api/auth/login
+- POST /api/upload/step1-orders
+- POST /api/upload/step2-routes
+- POST /api/journeys/{journey_id}/start (accepts arrival_time_cedis, backup_driver_name, backup_request_time, backup_arrival_time)
+- POST /api/journeys/{journey_id}/close
+- GET /api/reports/journeys, /api/reports/packages, /api/reports/schema
 
-## Technical Architecture
-```
-Frontend (React 19)
-├── /src
-│   ├── /components (DashboardLayout, UI components)
-│   ├── /pages (Login, Dashboard, Journeys, Layout, Settings)
-│   ├── /contexts (AuthContext)
-│   └── /lib (api.js, utils.js)
-
-Backend (FastAPI)
-├── server.py (all routes and models)
-├── /uploads (file storage)
-└── .env (MONGO_URL, JWT_SECRET)
-
-Database (MongoDB)
-├── users
-├── clients
-├── providers
-├── journeys
-├── packages
-├── incidents
-├── password_reset_requests
-└── upload_history
-```
-
-## Test Credentials
-- Agent: agente@me.mx / LastMile2026
-- Coordinator: yael@me.mx / LastMile2026
-- Executive: karina@me.mx / LastMile2026
+## DB Schema
+- users: {email, password_hash, role, assigned_clients, assigned_providers}
+- journeys: {client_id, provider_id, date, status, packages_total, start_data, close_data, images}
+- packages: {tracking_number, recipient_name, address, status, journey_id}
+- incidents: {journey_id, type, severity, images}
