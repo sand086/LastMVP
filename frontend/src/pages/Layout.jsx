@@ -92,6 +92,11 @@ const Layout = () => {
     const [creating, setCreating] = useState(false);
     const [showConfirmDialog, setShowConfirmDialog] = useState(false);
     const [creationResult, setCreationResult] = useState(null);
+    
+    // Route type
+    const [routeType, setRouteType] = useState('CDMX / Zona Metro');
+    const [routeCity, setRouteCity] = useState('');
+    const [routeMaxPackages, setRouteMaxPackages] = useState(50);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -247,7 +252,10 @@ const Layout = () => {
                 client_id: selectedClient,
                 history_orders: allOrders,
                 route_summary: routeData?.routes || [],
-                messenger_provider_mappings: mappings
+                messenger_provider_mappings: mappings,
+                route_type: routeType,
+                city: routeType === 'Foránea' ? routeCity : null,
+                max_packages: routeType === 'Foránea' ? routeMaxPackages : null,
             };
 
             const res = await createJourneysFromCosmo(payload);
@@ -564,6 +572,48 @@ const Layout = () => {
                                     </div>
                                 </div>
 
+                                {/* Route Type Selection */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Tipo de ruta</Label>
+                                        <Select value={routeType} onValueChange={setRouteType}>
+                                            <SelectTrigger data-testid="select-route-type">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="CDMX / Zona Metro">CDMX / Zona Metro</SelectItem>
+                                                <SelectItem value="Foránea">Foránea</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    {routeType === 'Foránea' && (
+                                        <>
+                                            <div className="space-y-2">
+                                                <Label>Ciudad</Label>
+                                                <input
+                                                    type="text"
+                                                    value={routeCity}
+                                                    onChange={(e) => setRouteCity(e.target.value)}
+                                                    placeholder="Ej: Pachuca, Guadalajara"
+                                                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                                                    data-testid="route-city-input"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Máx. paquetes</Label>
+                                                <input
+                                                    type="number"
+                                                    value={routeMaxPackages}
+                                                    onChange={(e) => setRouteMaxPackages(parseInt(e.target.value) || 50)}
+                                                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                                                    data-testid="route-max-packages-input"
+                                                />
+                                                <p className="text-xs text-slate-500">Máximo de paquetes para ruta foránea</p>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
                                 {/* Driver-Provider Mapping */}
                                 <div className="border border-slate-200 rounded-sm">
                                     <div className="p-3 bg-slate-50 border-b border-slate-200">
@@ -654,15 +704,36 @@ const Layout = () => {
                                         <ul className="space-y-1 text-sm text-emerald-700">
                                             {creationResult.created_journeys.map((j, idx) => (
                                                 <li key={idx}>
-                                                    • {j.driver} - {j.packages} paquetes (Ruta: {j.route_id})
-                                                    {j.duplicates_skipped > 0 && (
-                                                        <span className="text-amber-600 ml-2">
-                                                            ({j.duplicates_skipped} duplicados omitidos)
+                                                    • {j.driver} - {j.packages} paquetes nuevos (Ruta: {j.route_id})
+                                                    {j.duplicates_updated > 0 && (
+                                                        <span className="text-blue-600 ml-2">
+                                                            ({j.duplicates_updated} paquetes actualizados)
                                                         </span>
                                                     )}
                                                 </li>
                                             ))}
                                         </ul>
+                                    </div>
+                                )}
+
+                                {creationResult.updated_journeys?.length > 0 && (
+                                    <div>
+                                        <p className="text-sm font-medium text-blue-700 mb-2">Rutas con paquetes actualizados:</p>
+                                        <ul className="space-y-1 text-sm text-blue-600">
+                                            {creationResult.updated_journeys.map((j, idx) => (
+                                                <li key={idx}>
+                                                    • {j.driver || j.route_id} - {j.packages_updated} paquetes actualizados
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {(creationResult.total_new_packages > 0 || creationResult.total_updated_packages > 0) && (
+                                    <div className="p-3 bg-white border border-emerald-200 rounded-sm">
+                                        <p className="text-sm font-medium text-slate-800">
+                                            Resumen: {creationResult.total_new_packages || 0} nuevos paquetes creados, {creationResult.total_updated_packages || 0} paquetes actualizados
+                                        </p>
                                     </div>
                                 )}
 

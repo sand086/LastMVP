@@ -209,3 +209,17 @@ export const SEVERITY_OPTIONS = [
     'Medio',
     'Bajo',
 ];
+
+export const IMPUTABILITY_OPTIONS = [
+    'ME / Mensajero',
+    'Cliente (destinatario)',
+    'Por definir',
+];
+
+export const getImputabilityColor = (imputability) => {
+    switch (imputability) {
+        case 'ME / Mensajero': return 'bg-red-100 text-red-700 border-red-200';
+        case 'Cliente (destinatario)': return 'bg-amber-100 text-amber-700 border-amber-200';
+        default: return 'bg-slate-100 text-slate-600 border-slate-200';
+    }
+};

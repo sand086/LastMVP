@@ -30,7 +30,9 @@ import {
     FUEL_LEVELS,
     VEHICLE_CONDITIONS,
     FAILURE_REASONS,
-    SEVERITY_OPTIONS
+    SEVERITY_OPTIONS,
+    IMPUTABILITY_OPTIONS,
+    getImputabilityColor,
 } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -341,6 +343,7 @@ const JourneyDetail = () => {
                 severity: incident.severity || '',
                 tracking_number: incident.tracking_number || '',
                 action_taken: incident.action_taken || '',
+                imputability: incident.imputability || 'Por definir',
             });
         } else {
             setEditingIncident(null);
@@ -351,6 +354,7 @@ const JourneyDetail = () => {
                 severity: '',
                 tracking_number: '',
                 action_taken: '',
+                imputability: 'Por definir',
             });
         }
         setShowIncidentModal(true);
@@ -488,6 +492,16 @@ const JourneyDetail = () => {
                         </div>
                         <p className="text-slate-500 text-sm">
                             {journey.provider_name} • {journey.client_name}
+                            {journey.route_type === 'Foránea' && journey.city && (
+                                <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded border border-violet-200">
+                                    Foránea — {journey.city}
+                                </span>
+                            )}
+                            {journey.route_type === 'CDMX / Zona Metro' && (
+                                <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded border border-blue-200">
+                                    CDMX
+                                </span>
+                            )}
                         </p>
                     </div>
                 </div>
@@ -858,6 +872,7 @@ const JourneyDetail = () => {
                                             <th>Hora</th>
                                             <th>Tipo</th>
                                             <th>Severidad</th>
+                                            <th>Imputabilidad</th>
                                             <th>Descripción</th>
                                             <th>Fotos</th>
                                             <th>Estado</th>
@@ -874,6 +889,11 @@ const JourneyDetail = () => {
                                                 <td>
                                                     <span className={`status-badge ${getSeverityColor(incident.severity)}`}>
                                                         {incident.severity}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span className={`px-2 py-0.5 text-xs font-medium rounded border ${getImputabilityColor(incident.imputability)}`} data-testid={`imputability-badge-${incident.id}`}>
+                                                        {incident.imputability || 'Por definir'}
                                                     </span>
                                                 </td>
                                                 <td className="max-w-xs truncate">{incident.description}</td>
@@ -1005,6 +1025,21 @@ const JourneyDetail = () => {
                                         </p>
                                     </div>
                                 </div>
+
+                                {/* Imputability summary in close form */}
+                                {journey.incidents?.length > 0 && (
+                                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-sm">
+                                        <p className="text-xs text-slate-500 uppercase mb-2">Resumen de imputabilidad de incidencias</p>
+                                        <div className="flex gap-4 text-sm">
+                                            <span className="text-red-700 font-medium">
+                                                Imputables a ME: {journey.incidents.filter(i => i.imputability === 'ME / Mensajero').length}
+                                            </span>
+                                            <span className="text-amber-700 font-medium">
+                                                Imputables al cliente: {journey.incidents.filter(i => i.imputability === 'Cliente (destinatario)').length}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Failed packages */}
                                 {pendingPackages.length > 0 && (
@@ -1279,6 +1314,23 @@ const JourneyDetail = () => {
                                         />
                                     </div>
                                 )}
+                                {/* Imputability summary */}
+                                {journey.incidents?.length > 0 && (
+                                    <div className="mt-4 p-3 bg-slate-50 rounded-sm">
+                                        <p className="text-xs text-slate-500 uppercase mb-2">Resumen de imputabilidad</p>
+                                        <div className="flex gap-4 text-sm">
+                                            <span className="text-red-700 font-medium">
+                                                Imputables a ME: {journey.incidents.filter(i => i.imputability === 'ME / Mensajero').length}
+                                            </span>
+                                            <span className="text-amber-700 font-medium">
+                                                Imputables al cliente: {journey.incidents.filter(i => i.imputability === 'Cliente (destinatario)').length}
+                                            </span>
+                                            <span className="text-slate-600">
+                                                Por definir: {journey.incidents.filter(i => !i.imputability || i.imputability === 'Por definir').length}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     ) : (
@@ -1366,6 +1418,22 @@ const JourneyDetail = () => {
                                 placeholder="TRK001"
                                 data-testid="incident-tracking-input"
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Imputabilidad</Label>
+                            <Select
+                                value={incidentForm.imputability}
+                                onValueChange={(v) => setIncidentForm({ ...incidentForm, imputability: v })}
+                            >
+                                <SelectTrigger data-testid="incident-imputability-select">
+                                    <SelectValue placeholder="Seleccionar" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {IMPUTABILITY_OPTIONS.map((opt) => (
+                                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div className="space-y-2">
                             <Label>Acción tomada (opcional)</Label>

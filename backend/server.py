@@ -126,6 +126,9 @@ class JourneyCreate(BaseModel):
     provider_id: str
     packages: List[dict]
     retry_packages: List[str] = []
+    route_type: Optional[str] = "CDMX / Zona Metro"
+    city: Optional[str] = None
+    max_packages: Optional[int] = None
 
 class JourneyResponse(BaseModel):
     id: str
@@ -152,6 +155,7 @@ class IncidentBase(BaseModel):
     severity: str  # Alto, Medio, Bajo
     tracking_number: Optional[str] = None
     action_taken: Optional[str] = None
+    imputability: Optional[str] = "Por definir"  # "ME / Mensajero", "Cliente (destinatario)", "Por definir"
 
 class IncidentCreate(IncidentBase):
     pass
@@ -210,6 +214,27 @@ def require_role(allowed_roles: List[str]):
             raise HTTPException(status_code=403, detail="Acceso denegado")
         return user
     return role_checker
+
+def apply_assignment_filter(user: dict, query: dict) -> dict:
+    """Filter queries by user's assigned clients/providers. Empty = see all."""
+    assigned_clients = user.get("assigned_clients", [])
+    assigned_providers = user.get("assigned_providers", [])
+    if assigned_clients:
+        query["client_id"] = {"$in": assigned_clients}
+    if assigned_providers:
+        if "provider_id" in query:
+            # Intersect with existing filter
+            existing = query["provider_id"]
+            if isinstance(existing, str):
+                if existing in assigned_providers:
+                    query["provider_id"] = existing
+                else:
+                    query["provider_id"] = {"$in": []}
+            elif isinstance(existing, dict) and "$in" in existing:
+                query["provider_id"] = {"$in": [p for p in existing["$in"] if p in assigned_providers]}
+        else:
+            query["provider_id"] = {"$in": assigned_providers}
+    return query
 
 # ==================== AUTH ROUTES ====================
 
@@ -415,6 +440,9 @@ async def get_journeys(
     if status:
         query["status"] = status
     
+    # Apply assignment-based filtering
+    query = apply_assignment_filter(user, query)
+    
     journeys = await db.journeys.find(query, {"_id": 0}).sort("date", -1).to_list(500)
     
     # Enrich with client and provider names
@@ -466,6 +494,9 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
         "client_id": data.client_id,
         "provider_id": data.provider_id,
         "status": "scheduled",
+        "route_type": data.route_type or "CDMX / Zona Metro",
+        "city": data.city,
+        "max_packages": data.max_packages,
         "packages_total": len(data.packages) + len(data.retry_packages),
         "packages_delivered": 0,
         "packages_failed": 0,
@@ -615,6 +646,7 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
         "severity": data.severity,
         "tracking_number": data.tracking_number,
         "action_taken": data.action_taken,
+        "imputability": data.imputability or "Por definir",
         "status": "open",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user["id"]
@@ -838,6 +870,9 @@ class CosmoJourneyCreate(BaseModel):
     history_orders: List[dict]  # Orders from history-orders file
     route_summary: List[dict]   # Routes from route-summary file
     messenger_provider_mappings: List[dict]  # {messenger_name, provider_id}
+    route_type: Optional[str] = "CDMX / Zona Metro"
+    city: Optional[str] = None
+    max_packages: Optional[int] = None
 
 @api_router.post("/journeys/from-cosmo")
 async def create_journeys_from_cosmo(
@@ -845,8 +880,11 @@ async def create_journeys_from_cosmo(
     user: dict = Depends(require_role(["coordinator", "agent"]))
 ):
     created_journeys = []
+    updated_journeys = []
     skipped_duplicates = []
     errors = []
+    total_new_packages = 0
+    total_updated_packages = 0
     
     # Save messenger-provider mappings
     for mapping in data.messenger_provider_mappings:
@@ -861,9 +899,9 @@ async def create_journeys_from_cosmo(
                 upsert=True
             )
     
-    # Get all existing orders to check for duplicates
-    existing_orders = await db.packages.find({}, {"order_reference_id": 1, "_id": 0}).to_list(10000)
-    existing_order_ids = set(o.get("order_reference_id", "") for o in existing_orders if o.get("order_reference_id"))
+    # Get all existing orders to check for duplicates - include journey_id for updates
+    existing_orders = await db.packages.find({}, {"order_reference_id": 1, "id": 1, "journey_id": 1, "_id": 0}).to_list(10000)
+    existing_order_map = {o.get("order_reference_id", ""): o for o in existing_orders if o.get("order_reference_id")}
     
     # Build order lookup from history-orders
     orders_by_route = {}
@@ -888,7 +926,6 @@ async def create_journeys_from_cosmo(
         # Get provider from mapping
         provider_id = mappings.get(driver_name)
         if not provider_id:
-            # Try to get from existing mappings in DB
             existing_mapping = await db.messenger_mappings.find_one({"messenger_name": driver_name}, {"_id": 0})
             if existing_mapping:
                 provider_id = existing_mapping.get("provider_id")
@@ -899,26 +936,90 @@ async def create_journeys_from_cosmo(
         
         # Check if journey with this route_id already exists
         existing_journey = await db.journeys.find_one({"cosmo_route_id": route_id}, {"_id": 0})
-        if existing_journey:
-            skipped_duplicates.append(route_id)
-            continue
         
         # Get orders for this route
         route_orders = orders_by_route.get(route_id, [])
         
-        # Filter out duplicate orders
+        if existing_journey:
+            # UPDATE MODE: Update existing packages' status
+            route_updated = 0
+            for order in route_orders:
+                order_ref = order.get("order_reference_id", "")
+                if order_ref and order_ref in existing_order_map:
+                    # Update existing package
+                    update_fields = {}
+                    new_cosmo_status = order.get("order_status", "")
+                    if new_cosmo_status:
+                        update_fields["cosmo_status"] = new_cosmo_status
+                        if new_cosmo_status == "delivered":
+                            update_fields["status"] = "delivered"
+                        elif new_cosmo_status == "cancelled":
+                            update_fields["status"] = "failed"
+                    
+                    tracking_url = order.get("tracking_url", "")
+                    if tracking_url:
+                        update_fields["tracking_url"] = tracking_url
+                    
+                    if update_fields:
+                        await db.packages.update_one(
+                            {"order_reference_id": order_ref},
+                            {"$set": update_fields}
+                        )
+                        route_updated += 1
+            
+            # Recalculate journey counts
+            if route_updated > 0:
+                j_id = existing_journey["id"]
+                delivered = await db.packages.count_documents({"journey_id": j_id, "status": "delivered"})
+                failed = await db.packages.count_documents({"journey_id": j_id, "status": "failed"})
+                await db.journeys.update_one(
+                    {"id": j_id},
+                    {"$set": {"packages_delivered": delivered, "packages_failed": failed}}
+                )
+                total_updated_packages += route_updated
+                updated_journeys.append({
+                    "journey_id": j_id,
+                    "route_id": route_id,
+                    "driver": driver_name,
+                    "packages_updated": route_updated
+                })
+            continue
+        
+        # CREATE MODE: New journey
         new_orders = []
-        duplicate_orders = []
+        updated_in_other = 0
         for order in route_orders:
             order_ref = order.get("order_reference_id", "")
-            if order_ref in existing_order_ids:
-                duplicate_orders.append(order_ref)
+            if order_ref in existing_order_map:
+                # Update existing package in another journey
+                update_fields = {}
+                new_cosmo_status = order.get("order_status", "")
+                if new_cosmo_status:
+                    update_fields["cosmo_status"] = new_cosmo_status
+                    if new_cosmo_status == "delivered":
+                        update_fields["status"] = "delivered"
+                    elif new_cosmo_status == "cancelled":
+                        update_fields["status"] = "failed"
+                tracking_url = order.get("tracking_url", "")
+                if tracking_url:
+                    update_fields["tracking_url"] = tracking_url
+                if update_fields:
+                    await db.packages.update_one({"order_reference_id": order_ref}, {"$set": update_fields})
+                    updated_in_other += 1
+                    total_updated_packages += 1
             else:
                 new_orders.append(order)
-                existing_order_ids.add(order_ref)  # Mark as used
+                existing_order_map[order_ref] = True
         
         if not new_orders and route_orders:
-            skipped_duplicates.append(f"{route_id} (todas las órdenes duplicadas)")
+            if updated_in_other > 0:
+                updated_journeys.append({
+                    "route_id": route_id,
+                    "driver": driver_name,
+                    "packages_updated": updated_in_other
+                })
+            else:
+                skipped_duplicates.append(f"{route_id} (todas las órdenes duplicadas)")
             continue
         
         # Create journey
@@ -932,6 +1033,9 @@ async def create_journeys_from_cosmo(
             "driver_name": driver_name,
             "team": route.get("team", ""),
             "status": "scheduled",
+            "route_type": data.route_type or "CDMX / Zona Metro",
+            "city": data.city if data.route_type == "Foránea" else None,
+            "max_packages": data.max_packages if data.route_type == "Foránea" else None,
             "packages_total": len(new_orders),
             "packages_delivered": 0,
             "packages_failed": 0,
@@ -969,8 +1073,8 @@ async def create_journeys_from_cosmo(
                 "is_retry": False
             }
             await db.packages.insert_one(package)
+            total_new_packages += 1
             
-            # Update journey counts based on cosmo status
             if package["status"] == "delivered":
                 await db.journeys.update_one({"id": journey_id}, {"$inc": {"packages_delivered": 1}})
             elif package["status"] == "failed":
@@ -981,14 +1085,17 @@ async def create_journeys_from_cosmo(
             "route_id": route_id,
             "driver": driver_name,
             "packages": len(new_orders),
-            "duplicates_skipped": len(duplicate_orders)
+            "duplicates_updated": updated_in_other
         })
     
     return {
-        "message": f"{len(created_journeys)} rutas creadas",
+        "message": f"{len(created_journeys)} rutas creadas, {total_updated_packages} paquetes actualizados",
         "created_journeys": created_journeys,
+        "updated_journeys": updated_journeys,
         "skipped_duplicates": skipped_duplicates,
-        "errors": errors
+        "errors": errors,
+        "total_new_packages": total_new_packages,
+        "total_updated_packages": total_updated_packages
     }
 
 # Keep original layout upload for backwards compatibility
@@ -1202,23 +1309,23 @@ async def get_dashboard_stats(
     if not date:
         date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
+    # Build base query with assignment filtering
+    base_query = {"date": date}
+    base_query = apply_assignment_filter(user, base_query)
+    
     # Active journeys today
-    active_journeys = await db.journeys.count_documents({
-        "date": date,
-        "status": "in_progress"
-    })
+    active_q = {**base_query, "status": "in_progress"}
+    active_journeys = await db.journeys.count_documents(active_q)
     
     # Closed journeys today
-    closed_journeys = await db.journeys.count_documents({
-        "date": date,
-        "status": "closed"
-    })
+    closed_q = {**base_query, "status": "closed"}
+    closed_journeys = await db.journeys.count_documents(closed_q)
     
     # Total journeys today
-    total_journeys = await db.journeys.count_documents({"date": date})
+    total_journeys = await db.journeys.count_documents(base_query)
     
     # Packages stats
-    journeys_today = await db.journeys.find({"date": date}, {"_id": 0}).to_list(100)
+    journeys_today = await db.journeys.find(base_query, {"_id": 0}).to_list(100)
     total_packages = sum(j.get("packages_total", 0) for j in journeys_today)
     delivered_packages = sum(j.get("packages_delivered", 0) for j in journeys_today)
     
@@ -1262,11 +1369,11 @@ async def get_incidents_breakdown(
     if not date_to:
         date_to = date_from
     
-    # Get journeys in date range
-    journeys = await db.journeys.find(
-        {"date": {"$gte": date_from, "$lte": date_to}},
-        {"_id": 0}
-    ).to_list(500)
+    # Get journeys in date range with assignment filtering
+    j_query = {"date": {"$gte": date_from, "$lte": date_to}}
+    j_query = apply_assignment_filter(user, j_query)
+    
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(500)
     journey_ids = [j["id"] for j in journeys]
     
     # Get incidents
@@ -1294,18 +1401,24 @@ async def get_provider_comparison(
     if not date_to:
         date_to = date_from
     
-    # Get all providers
+    # Get all providers (filtered by assignments if applicable)
     providers = await db.providers.find({}, {"_id": 0}).to_list(100)
+    assigned_providers = user.get("assigned_providers", [])
+    if assigned_providers:
+        providers = [p for p in providers if p["id"] in assigned_providers]
+    
+    assigned_clients = user.get("assigned_clients", [])
     
     comparison = []
     for provider in providers:
-        journeys = await db.journeys.find(
-            {
-                "provider_id": provider["id"],
-                "date": {"$gte": date_from, "$lte": date_to}
-            },
-            {"_id": 0}
-        ).to_list(500)
+        j_query = {
+            "provider_id": provider["id"],
+            "date": {"$gte": date_from, "$lte": date_to}
+        }
+        if assigned_clients:
+            j_query["client_id"] = {"$in": assigned_clients}
+        
+        journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(500)
         
         if not journeys:
             continue
@@ -1453,6 +1566,7 @@ async def export_incidents(
             "Tipo": inc.get("incident_type", ""),
             "Descripción": inc.get("description", ""),
             "Severidad": inc.get("severity", ""),
+            "Imputabilidad": inc.get("imputability", "Por definir"),
             "No. Guía": inc.get("tracking_number", ""),
             "Estado": inc.get("status", ""),
             "Acción Tomada": inc.get("action_taken", "")
@@ -1676,6 +1790,250 @@ async def seed_database():
         }
     }
 
+# ==================== CUSTOM REPORT GENERATION ====================
+
+class ReportRequest(BaseModel):
+    date_from: str
+    date_to: str
+    sections: List[str] = []  # provider_metrics, driver_metrics, incidents_breakdown, imputability
+    group_by: Optional[str] = "provider"
+
+@api_router.post("/reports/generate")
+async def generate_report(
+    data: ReportRequest,
+    user: dict = Depends(get_current_user)
+):
+    """Generate custom report with AI insights"""
+    from fpdf import FPDF
+    from fastapi.responses import Response as FastResponse
+    
+    j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
+    j_query = apply_assignment_filter(user, j_query)
+    
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    
+    if not journeys:
+        return {"error": "No hay datos para el período seleccionado"}
+    
+    journey_ids = [j["id"] for j in journeys]
+    
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    incidents = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
+    
+    # Build report data
+    report_data = {
+        "period": f"{data.date_from} - {data.date_to}",
+        "total_journeys": len(journeys),
+        "total_packages": sum(j.get("packages_total", 0) for j in journeys),
+        "total_delivered": sum(j.get("packages_delivered", 0) for j in journeys),
+        "total_failed": sum(j.get("packages_failed", 0) for j in journeys),
+        "total_km": sum((j.get("close_data") or {}).get("km_traveled", 0) for j in journeys),
+        "total_incidents": len(incidents),
+    }
+    
+    total_pkg = report_data["total_packages"]
+    report_data["delivery_rate"] = round((report_data["total_delivered"] / total_pkg * 100) if total_pkg > 0 else 0, 2)
+    report_data["total_retry"] = total_pkg - report_data["total_delivered"] - report_data["total_failed"]
+    
+    # Provider metrics
+    provider_metrics = {}
+    for j in journeys:
+        pid = j.get("provider_id", "")
+        pname = providers.get(pid, "Sin proveedor")
+        if pname not in provider_metrics:
+            provider_metrics[pname] = {
+                "days_operated": set(), "routes": 0, "packages_loaded": 0,
+                "delivered": 0, "failed": 0, "km_total": 0
+            }
+        pm = provider_metrics[pname]
+        pm["days_operated"].add(j.get("date", ""))
+        pm["routes"] += 1
+        pm["packages_loaded"] += j.get("packages_total", 0)
+        pm["delivered"] += j.get("packages_delivered", 0)
+        pm["failed"] += j.get("packages_failed", 0)
+        pm["km_total"] += (j.get("close_data") or {}).get("km_traveled", 0)
+    
+    for pname in provider_metrics:
+        pm = provider_metrics[pname]
+        pm["days_operated"] = len(pm["days_operated"])
+        pm["retry"] = pm["packages_loaded"] - pm["delivered"] - pm["failed"]
+        pm["delivery_rate"] = round((pm["delivered"] / pm["packages_loaded"] * 100) if pm["packages_loaded"] > 0 else 0, 2)
+    
+    # Driver metrics
+    driver_metrics = {}
+    for j in journeys:
+        dname = j.get("driver_name", "Sin driver")
+        if not dname:
+            dname = "Sin driver"
+        if dname not in driver_metrics:
+            driver_metrics[dname] = {
+                "days_operated": set(), "routes": 0, "packages_loaded": 0,
+                "delivered": 0, "failed": 0, "km_total": 0
+            }
+        dm = driver_metrics[dname]
+        dm["days_operated"].add(j.get("date", ""))
+        dm["routes"] += 1
+        dm["packages_loaded"] += j.get("packages_total", 0)
+        dm["delivered"] += j.get("packages_delivered", 0)
+        dm["failed"] += j.get("packages_failed", 0)
+        dm["km_total"] += (j.get("close_data") or {}).get("km_traveled", 0)
+    
+    for dname in driver_metrics:
+        dm = driver_metrics[dname]
+        dm["days_operated"] = len(dm["days_operated"])
+        dm["retry"] = dm["packages_loaded"] - dm["delivered"] - dm["failed"]
+        dm["delivery_rate"] = round((dm["delivered"] / dm["packages_loaded"] * 100) if dm["packages_loaded"] > 0 else 0, 2)
+    
+    # Incidents breakdown
+    incidents_by_type = {}
+    incidents_by_imputability = {"ME / Mensajero": 0, "Cliente (destinatario)": 0, "Por definir": 0}
+    for inc in incidents:
+        itype = inc.get("incident_type", "Otro")
+        incidents_by_type[itype] = incidents_by_type.get(itype, 0) + 1
+        imp = inc.get("imputability", "Por definir")
+        incidents_by_imputability[imp] = incidents_by_imputability.get(imp, 0) + 1
+    
+    report_data["provider_metrics"] = provider_metrics
+    report_data["driver_metrics"] = driver_metrics
+    report_data["incidents_by_type"] = incidents_by_type
+    report_data["incidents_by_imputability"] = incidents_by_imputability
+    
+    # Generate AI insights
+    ai_insights = ""
+    try:
+        llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
+        if llm_key:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            
+            chat = LlmChat(
+                api_key=llm_key,
+                session_id=f"report-{uuid.uuid4()}",
+                system_message="Eres un analista de operaciones logísticas de última milla. Genera insights concisos y accionables en español. Usa datos duros. Máximo 400 palabras."
+            ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+            
+            prompt = f"""Analiza estos datos de operación de última milla y genera insights clave:
+
+PERÍODO: {data.date_from} a {data.date_to}
+RESUMEN GENERAL: {report_data['total_journeys']} rutas, {report_data['total_packages']} paquetes, tasa de entrega {report_data['delivery_rate']}%, {report_data['total_km']} km, {report_data['total_incidents']} incidencias
+
+POR PROVEEDOR: {str({k: {kk: vv for kk, vv in v.items()} for k, v in provider_metrics.items()})}
+
+POR DRIVER: {str({k: {kk: vv for kk, vv in v.items()} for k, v in driver_metrics.items()})}
+
+INCIDENCIAS POR TIPO: {str(incidents_by_type)}
+INCIDENCIAS POR IMPUTABILIDAD: {str(incidents_by_imputability)}
+
+Genera un análisis ejecutivo con: 1) Resumen general, 2) Hallazgos clave, 3) Recomendaciones de mejora."""
+
+            msg = UserMessage(text=prompt)
+            ai_insights = await chat.send_message(msg)
+    except Exception as e:
+        logger.error(f"Error generating AI insights: {e}")
+        ai_insights = "No se pudieron generar insights de IA en este momento."
+    
+    report_data["ai_insights"] = ai_insights
+    
+    return report_data
+
+@api_router.post("/reports/generate-excel")
+async def generate_report_excel(
+    data: ReportRequest,
+    user: dict = Depends(get_current_user)
+):
+    """Generate Excel report"""
+    from fastapi.responses import Response as FastResponse
+    
+    j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
+    j_query = apply_assignment_filter(user, j_query)
+    
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    journey_ids = [j["id"] for j in journeys]
+    
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers_map = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    incidents = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Sheet 1: Routes
+        routes_data = []
+        for j in journeys:
+            cd = j.get("close_data") or {}
+            sd = j.get("start_data") or {}
+            routes_data.append({
+                "Fecha": j.get("date", ""),
+                "Cliente": clients.get(j.get("client_id"), ""),
+                "Proveedor": providers_map.get(j.get("provider_id"), ""),
+                "Driver": j.get("driver_name", ""),
+                "Tipo Ruta": j.get("route_type", "CDMX / Zona Metro"),
+                "Ciudad": j.get("city", ""),
+                "Estado": j.get("status", ""),
+                "Paquetes Total": j.get("packages_total", 0),
+                "Entregados": j.get("packages_delivered", 0),
+                "Fallidos": j.get("packages_failed", 0),
+                "Reintento": j.get("packages_total", 0) - j.get("packages_delivered", 0) - j.get("packages_failed", 0),
+                "Tasa Entrega %": cd.get("delivery_rate", 0),
+                "Km": cd.get("km_traveled", 0),
+                "Hora Inicio": sd.get("departure_time", ""),
+                "Hora Cierre": cd.get("closed_at", ""),
+            })
+        pd.DataFrame(routes_data).to_excel(writer, sheet_name="Rutas", index=False)
+        
+        # Sheet 2: Incidents
+        inc_data = []
+        j_map = {j["id"]: j for j in journeys}
+        for inc in incidents:
+            j = j_map.get(inc.get("journey_id"), {})
+            inc_data.append({
+                "Fecha Ruta": j.get("date", ""),
+                "Proveedor": providers_map.get(j.get("provider_id"), ""),
+                "Driver": j.get("driver_name", ""),
+                "Tipo": inc.get("incident_type", ""),
+                "Severidad": inc.get("severity", ""),
+                "Imputabilidad": inc.get("imputability", "Por definir"),
+                "Descripción": inc.get("description", ""),
+                "Estado": inc.get("status", ""),
+            })
+        pd.DataFrame(inc_data).to_excel(writer, sheet_name="Incidencias", index=False)
+        
+        # Sheet 3: Provider Summary
+        prov_summary = {}
+        for j in journeys:
+            pname = providers_map.get(j.get("provider_id"), "")
+            if pname not in prov_summary:
+                prov_summary[pname] = {"days": set(), "routes": 0, "loaded": 0, "delivered": 0, "failed": 0, "km": 0}
+            ps = prov_summary[pname]
+            ps["days"].add(j.get("date", ""))
+            ps["routes"] += 1
+            ps["loaded"] += j.get("packages_total", 0)
+            ps["delivered"] += j.get("packages_delivered", 0)
+            ps["failed"] += j.get("packages_failed", 0)
+            ps["km"] += (j.get("close_data") or {}).get("km_traveled", 0)
+        
+        prov_rows = []
+        for pname, ps in prov_summary.items():
+            prov_rows.append({
+                "Proveedor": pname,
+                "Días Operados": len(ps["days"]),
+                "Total Rutas": ps["routes"],
+                "Paquetes Cargados": ps["loaded"],
+                "Entregados": ps["delivered"],
+                "Fallidos": ps["failed"],
+                "Reintentos": ps["loaded"] - ps["delivered"] - ps["failed"],
+                "Tasa Entrega %": round((ps["delivered"] / ps["loaded"] * 100) if ps["loaded"] > 0 else 0, 2),
+                "Km Totales": ps["km"],
+            })
+        pd.DataFrame(prov_rows).to_excel(writer, sheet_name="Resumen Proveedores", index=False)
+    
+    output.seek(0)
+    filename = f"reporte_{data.date_from}_{data.date_to}.xlsx"
+    return FastResponse(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 # ==================== ROOT ====================
 
 @api_router.get("/")
@@ -1738,6 +2096,8 @@ async def report_journeys(
             "provider_name": providers.get(j.get("provider_id"), ""),
             "driver_name": j.get("driver_name", ""),
             "status": j.get("status"),
+            "route_type": j.get("route_type", "CDMX / Zona Metro"),
+            "city": j.get("city", ""),
             "packages_total": j.get("packages_total", 0),
             "packages_delivered": j.get("packages_delivered", 0),
             "packages_failed": j.get("packages_failed", 0),
@@ -1868,6 +2228,7 @@ async def report_incidents(
             "incident_type": inc.get("incident_type"),
             "description": inc.get("description"),
             "severity": inc.get("severity"),
+            "imputability": inc.get("imputability", "Por definir"),
             "status": inc.get("status"),
             "tracking_number": inc.get("tracking_number", ""),
             "action_taken": inc.get("action_taken", ""),

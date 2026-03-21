@@ -10,7 +10,8 @@ import {
     Bell,
     User,
     ChevronDown,
-    Code
+    Code,
+    FileText
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -25,6 +26,7 @@ const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['agent', 'coordinator', 'executive'] },
     { path: '/journeys', label: 'Rutas', icon: Truck, roles: ['agent', 'coordinator', 'executive'] },
     { path: '/layout', label: 'Layout', icon: Upload, roles: ['agent', 'coordinator'] },
+    { path: '/reports', label: 'Reportes', icon: FileText, roles: ['coordinator', 'executive'] },
     { path: '/api-docs', label: 'API & Reportes', icon: Code, roles: ['coordinator', 'executive'] },
     { path: '/settings', label: 'Configuración', icon: Settings, roles: ['coordinator'] },
 ];

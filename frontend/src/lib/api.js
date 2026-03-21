@@ -162,4 +162,8 @@ export const getReportIncidents = (params) => api.get('/reports/incidents', { pa
 export const getReportKpis = (params) => api.get('/reports/kpis', { params });
 export const getReportSchema = () => api.get('/reports/schema');
 
+// Custom Reports
+export const generateReport = (data) => api.post('/reports/generate', data);
+export const generateReportExcel = (data) => api.post('/reports/generate-excel', data, { responseType: 'blob' });
+
 export default api;

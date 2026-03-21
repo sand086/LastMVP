@@ -261,6 +261,7 @@ const Journeys = () => {
                                         <th>Fecha</th>
                                         <th>Cliente</th>
                                         <th>Proveedor</th>
+                                        <th>Tipo</th>
                                         <th>Paquetes</th>
                                         <th>Progreso</th>
                                         <th>Incidencias</th>
@@ -283,6 +284,17 @@ const Journeys = () => {
                                                 </td>
                                                 <td>{journey.client_name}</td>
                                                 <td>{journey.provider_name}</td>
+                                                <td>
+                                                    {journey.route_type === 'Foránea' ? (
+                                                        <span className="px-1.5 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded">
+                                                            Foránea{journey.city ? ` — ${journey.city}` : ''}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded">
+                                                            CDMX
+                                                        </span>
+                                                    )}
+                                                </td>
                                                 <td className="font-mono">
                                                     {journey.packages_delivered}/{journey.packages_total}
                                                 </td>
