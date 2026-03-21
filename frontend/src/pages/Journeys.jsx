@@ -63,7 +63,7 @@ const Journeys = () => {
             setProviders(providersRes.data);
         } catch (error) {
             console.error('Error fetching journeys:', error);
-            toast.error('Error al cargar jornadas');
+            toast.error('Error al cargar rutas');
         } finally {
             setLoading(false);
         }
@@ -89,10 +89,10 @@ const Journeys = () => {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="font-heading text-2xl font-bold text-slate-900 tracking-tight">
-                        Jornadas
+                        Rutas
                     </h1>
                     <p className="text-slate-500 text-sm">
-                        Gestiona todas las jornadas de entrega
+                        Gestiona todas las rutas de entrega
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -237,12 +237,12 @@ const Journeys = () => {
                         <div className="text-center py-16">
                             <Truck className="w-16 h-16 text-slate-300 mx-auto mb-4" />
                             <h3 className="text-lg font-medium text-slate-700 mb-2">
-                                No hay jornadas
+                                No hay rutas
                             </h3>
                             <p className="text-slate-500 mb-6 max-w-md mx-auto">
                                 {hasActiveFilters 
-                                    ? 'No se encontraron jornadas con los filtros seleccionados'
-                                    : 'Comienza cargando un layout para crear tu primera jornada'}
+                                    ? 'No se encontraron rutas con los filtros seleccionados'
+                                    : 'Comienza cargando un layout para crear tu primera ruta'}
                             </p>
                             {canEdit() && !hasActiveFilters && (
                                 <Link to="/layout">

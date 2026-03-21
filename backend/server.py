@@ -106,6 +106,10 @@ class JourneyStartData(BaseModel):
     packages_loaded: int
     notes: Optional[str] = None
     checklist_completed: bool
+    arrival_time_cedis: Optional[str] = None
+    backup_driver_name: Optional[str] = None
+    backup_request_time: Optional[str] = None
+    backup_arrival_time: Optional[str] = None
 
 class JourneyCloseData(BaseModel):
     closed_at: str
@@ -432,7 +436,7 @@ async def get_journeys(
 async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
-        raise HTTPException(status_code=404, detail="Jornada no encontrada")
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
     
     # Get client and provider names
     client = await db.clients.find_one({"id": journey.get("client_id")}, {"_id": 0})
@@ -495,16 +499,16 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
             {"$set": {"journey_id": journey_id, "status": "pending", "is_retry": True}}
         )
     
-    return {"id": journey_id, "message": "Jornada creada exitosamente"}
+    return {"id": journey_id, "message": "Ruta creada exitosamente"}
 
 @api_router.put("/journeys/{journey_id}/start")
 async def start_journey(journey_id: str, data: JourneyStartData, user: dict = Depends(require_role(["coordinator", "agent"]))):
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
-        raise HTTPException(status_code=404, detail="Jornada no encontrada")
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
     
     if journey["status"] != "scheduled":
-        raise HTTPException(status_code=400, detail="La jornada ya fue iniciada o cerrada")
+        raise HTTPException(status_code=400, detail="La ruta ya fue iniciada o cerrada")
     
     if not data.checklist_completed:
         raise HTTPException(status_code=400, detail="Debe completar el checklist antes de iniciar")
@@ -517,6 +521,10 @@ async def start_journey(journey_id: str, data: JourneyStartData, user: dict = De
         "vehicle_notes": data.vehicle_notes,
         "packages_loaded": data.packages_loaded,
         "notes": data.notes,
+        "arrival_time_cedis": data.arrival_time_cedis,
+        "backup_driver_name": data.backup_driver_name,
+        "backup_request_time": data.backup_request_time,
+        "backup_arrival_time": data.backup_arrival_time,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "started_by": user["id"]
     }
@@ -526,16 +534,16 @@ async def start_journey(journey_id: str, data: JourneyStartData, user: dict = De
         {"$set": {"status": "in_progress", "start_data": start_data}}
     )
     
-    return {"message": "Jornada iniciada exitosamente"}
+    return {"message": "Ruta iniciada exitosamente"}
 
 @api_router.put("/journeys/{journey_id}/close")
 async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = Depends(require_role(["coordinator", "agent"]))):
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
-        raise HTTPException(status_code=404, detail="Jornada no encontrada")
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
     
     if journey["status"] != "in_progress":
-        raise HTTPException(status_code=400, detail="La jornada debe estar en progreso para cerrarla")
+        raise HTTPException(status_code=400, detail="La ruta debe estar en progreso para cerrarla")
     
     if not data.checklist_completed:
         raise HTTPException(status_code=400, detail="Debe completar el checklist antes de cerrar")
@@ -577,7 +585,7 @@ async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = De
             {"$set": {"status": "retry", "failure_reason": failed_pkg.get("failure_reason", "")}}
         )
     
-    return {"message": "Jornada cerrada exitosamente", "close_data": close_data}
+    return {"message": "Ruta cerrada exitosamente", "close_data": close_data}
 
 # ==================== INCIDENTS ====================
 
@@ -977,7 +985,7 @@ async def create_journeys_from_cosmo(
         })
     
     return {
-        "message": f"{len(created_journeys)} jornadas creadas",
+        "message": f"{len(created_journeys)} rutas creadas",
         "created_journeys": created_journeys,
         "skipped_duplicates": skipped_duplicates,
         "errors": errors
@@ -1410,7 +1418,7 @@ async def export_journeys(
     return Response(
         content=output.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename=jornadas_export_{datetime.now().strftime('%Y%m%d')}.xlsx"}
+        headers={"Content-Disposition": f"attachment; filename=rutas_export_{datetime.now().strftime('%Y%m%d')}.xlsx"}
     )
 
 @api_router.get("/export/incidents")
@@ -1957,7 +1965,7 @@ async def report_schema():
                 "name": "Journeys Report",
                 "endpoint": "/api/reports/journeys",
                 "method": "GET",
-                "description": "Datos de jornadas con métricas de entrega",
+                "description": "Datos de rutas con métricas de entrega",
                 "parameters": [
                     {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
                     {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},

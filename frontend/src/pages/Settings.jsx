@@ -467,6 +467,7 @@ const Settings = () => {
                                             <th>Nombre</th>
                                             <th>Email</th>
                                             <th>Rol</th>
+                                            <th>Asignaciones</th>
                                             <th>Acciones</th>
                                         </tr>
                                     </thead>
@@ -481,7 +482,33 @@ const Settings = () => {
                                                     </span>
                                                 </td>
                                                 <td>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {(user.assigned_client_names || []).map((name, i) => (
+                                                            <span key={`c-${i}`} className="px-1.5 py-0.5 text-xs bg-blue-50 text-blue-700 rounded">
+                                                                {name}
+                                                            </span>
+                                                        ))}
+                                                        {(user.assigned_provider_names || []).map((name, i) => (
+                                                            <span key={`p-${i}`} className="px-1.5 py-0.5 text-xs bg-emerald-50 text-emerald-700 rounded">
+                                                                {name}
+                                                            </span>
+                                                        ))}
+                                                        {!(user.assigned_client_names?.length || user.assigned_provider_names?.length) && (
+                                                            <span className="text-xs text-slate-400">Sin asignar</span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td>
                                                     <div className="flex items-center gap-1">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={() => handleOpenAssignmentModal(user)}
+                                                            data-testid={`assign-user-${user.id}`}
+                                                            title="Asignaciones"
+                                                        >
+                                                            <LinkIcon className="w-4 h-4" />
+                                                        </Button>
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"
@@ -759,6 +786,75 @@ const Settings = () => {
                         <Button onClick={handleSaveEntity} disabled={entitySubmitting} data-testid="save-entity-btn">
                             {entitySubmitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                             Crear
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Assignment Modal */}
+            <Dialog open={showAssignmentModal} onOpenChange={setShowAssignmentModal}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading">
+                            Asignaciones de {assignmentUser?.name}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Selecciona los clientes y proveedores asignados a este usuario
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-6">
+                        <div className="space-y-3">
+                            <Label className="font-medium">Clientes asignados</Label>
+                            {clients.length === 0 ? (
+                                <p className="text-sm text-slate-500">No hay clientes registrados</p>
+                            ) : (
+                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                    {clients.map((client) => (
+                                        <div key={client.id} className="flex items-center space-x-3">
+                                            <Checkbox
+                                                id={`assign-client-${client.id}`}
+                                                checked={userAssignments.assigned_clients.includes(client.id)}
+                                                onCheckedChange={() => toggleClientAssignment(client.id)}
+                                                data-testid={`assign-client-${client.id}`}
+                                            />
+                                            <label htmlFor={`assign-client-${client.id}`} className="text-sm text-slate-700 cursor-pointer">
+                                                {client.name}
+                                            </label>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="space-y-3">
+                            <Label className="font-medium">Proveedores asignados</Label>
+                            {providers.length === 0 ? (
+                                <p className="text-sm text-slate-500">No hay proveedores registrados</p>
+                            ) : (
+                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                    {providers.map((provider) => (
+                                        <div key={provider.id} className="flex items-center space-x-3">
+                                            <Checkbox
+                                                id={`assign-provider-${provider.id}`}
+                                                checked={userAssignments.assigned_providers.includes(provider.id)}
+                                                onCheckedChange={() => toggleProviderAssignment(provider.id)}
+                                                data-testid={`assign-provider-${provider.id}`}
+                                            />
+                                            <label htmlFor={`assign-provider-${provider.id}`} className="text-sm text-slate-700 cursor-pointer">
+                                                {provider.name}
+                                            </label>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowAssignmentModal(false)}>
+                            Cancelar
+                        </Button>
+                        <Button onClick={handleSaveAssignments} disabled={assignmentSubmitting} data-testid="save-assignments-btn">
+                            {assignmentSubmitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Guardar asignaciones
                         </Button>
                     </DialogFooter>
                 </DialogContent>

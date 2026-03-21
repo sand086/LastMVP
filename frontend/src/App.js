@@ -9,6 +9,7 @@ import Journeys from './pages/Journeys';
 import JourneyDetail from './pages/JourneyDetail';
 import Layout from './pages/Layout';
 import Settings from './pages/Settings';
+import ApiDocumentation from './pages/ApiDocumentation';
 import './App.css';
 
 // Protected route wrapper
@@ -108,6 +109,15 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute allowedRoles={['coordinator']}>
                         <Settings />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/api-docs" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'executive']}>
+                        <ApiDocumentation />
                     </ProtectedRoute>
                 } 
             />

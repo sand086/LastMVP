@@ -144,7 +144,7 @@ const Dashboard = () => {
                 provider_id: selectedProvider !== 'all' ? selectedProvider : undefined,
             });
             
-            downloadFile(response.data, `jornadas_${dateFromStr}_${dateToStr}.xlsx`);
+            downloadFile(response.data, `rutas_${dateFromStr}_${dateToStr}.xlsx`);
             toast.success('Archivo exportado exitosamente');
         } catch (error) {
             toast.error('Error al exportar');
@@ -162,7 +162,7 @@ const Dashboard = () => {
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <KPICard
-                    title="Jornadas activas"
+                    title="Rutas activas"
                     value={stats?.active_journeys || 0}
                     subValue="en progreso hoy"
                     icon={Truck}
@@ -186,7 +186,7 @@ const Dashboard = () => {
                     loading={loading}
                 />
                 <KPICard
-                    title="Jornadas cerradas"
+                    title="Rutas cerradas"
                     value={stats?.closed_journeys || 0}
                     subValue="completadas hoy"
                     icon={CheckCircle2}
@@ -315,7 +315,7 @@ const Dashboard = () => {
             <Card>
                 <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
-                        <CardTitle className="font-heading text-lg">Jornadas</CardTitle>
+                        <CardTitle className="font-heading text-lg">Rutas</CardTitle>
                         {canEdit() && (
                             <Link to="/layout">
                                 <Button size="sm" data-testid="new-journey-btn">
@@ -330,7 +330,7 @@ const Dashboard = () => {
                     {journeys.length === 0 ? (
                         <div className="text-center py-12">
                             <Truck className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                            <p className="text-slate-500 mb-4">No hay jornadas para mostrar</p>
+                            <p className="text-slate-500 mb-4">No hay rutas para mostrar</p>
                             {canEdit() && (
                                 <Link to="/layout">
                                     <Button variant="outline" data-testid="empty-upload-btn">
@@ -447,7 +447,7 @@ const Dashboard = () => {
                                 </span>
                             </div>
                             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-sm">
-                                <span className="text-sm text-slate-600">Total jornadas</span>
+                                <span className="text-sm text-slate-600">Total rutas</span>
                                 <span className="font-mono font-semibold text-lg">
                                     {stats?.total_journeys || 0}
                                 </span>
@@ -497,7 +497,7 @@ const Dashboard = () => {
                                     <thead>
                                         <tr>
                                             <th>Proveedor</th>
-                                            <th className="text-center">Jornadas</th>
+                                            <th className="text-center">Rutas</th>
                                             <th className="text-center">Entrega %</th>
                                             <th className="text-center">Incidencias</th>
                                             <th className="text-right">Km</th>

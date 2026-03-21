@@ -98,6 +98,7 @@ const JourneyDetail = () => {
     // Images state
     const [startImages, setStartImages] = useState([]);
     const [closeImages, setCloseImages] = useState([]);
+    const [returnEvidenceImages, setReturnEvidenceImages] = useState([]);
     const [incidentImages, setIncidentImages] = useState({});
     const [uploadingImages, setUploadingImages] = useState(false);
 
@@ -110,6 +111,10 @@ const JourneyDetail = () => {
         vehicle_notes: '',
         packages_loaded: 0,
         notes: '',
+        arrival_time_cedis: '',
+        backup_driver_name: '',
+        backup_request_time: '',
+        backup_arrival_time: '',
     });
     const [startChecklist, setStartChecklist] = useState({
         whatsapp: false,
@@ -117,6 +122,10 @@ const JourneyDetail = () => {
         zone_confirmed: false,
         packages_scanned: false,
         retry_registered: false,
+        cedis_arrival: false,
+        cedis_pass: false,
+        cosmo_route: false,
+        cedis_screenshot: false,
     });
     const [startSubmitting, setStartSubmitting] = useState(false);
     const [showStartSummary, setShowStartSummary] = useState(false);
@@ -136,6 +145,7 @@ const JourneyDetail = () => {
         odometer_final: false,
         failed_list: false,
         incidents_reviewed: false,
+        return_evidence: false,
     });
     const [failedPackages, setFailedPackages] = useState([]);
     const [closeSubmitting, setCloseSubmitting] = useState(false);
@@ -170,6 +180,7 @@ const JourneyDetail = () => {
             // Separate images by section
             setStartImages(images.filter(img => img.section === 'start'));
             setCloseImages(images.filter(img => img.section === 'close'));
+            setReturnEvidenceImages(images.filter(img => img.section === 'return_evidence'));
             
             // Group incident images by incident_id
             const incidentImgs = {};
@@ -237,7 +248,7 @@ const JourneyDetail = () => {
                 setActiveTab('fin');
             }
         } catch (error) {
-            toast.error('Error al cargar jornada');
+            toast.error('Error al cargar ruta');
             navigate('/journeys');
         } finally {
             setLoading(false);
@@ -263,10 +274,10 @@ const JourneyDetail = () => {
             setStartSummary(summary);
             setShowStartSummary(true);
             
-            toast.success('Jornada iniciada');
+            toast.success('Ruta iniciada');
             fetchJourney();
         } catch (error) {
-            toast.error(error.response?.data?.detail || 'Error al iniciar jornada');
+            toast.error(error.response?.data?.detail || 'Error al iniciar ruta');
         } finally {
             setStartSubmitting(false);
         }
@@ -274,7 +285,15 @@ const JourneyDetail = () => {
 
     // Close journey handlers
     const handlePreCloseJourney = () => {
-        const allChecked = Object.values(closeChecklist).every(v => v);
+        const hasReturnPackages = parseInt(closeForm.packages_failed) > 0 || metrics.toRetry > 0;
+        const requiredChecks = { ...closeChecklist };
+        
+        // return_evidence is only required when there are packages to return
+        if (!hasReturnPackages) {
+            delete requiredChecks.return_evidence;
+        }
+        
+        const allChecked = Object.values(requiredChecks).every(v => v);
         if (!allChecked) {
             toast.error('Completa todos los items del checklist');
             return;
@@ -302,10 +321,10 @@ const JourneyDetail = () => {
             setCloseSummary(summary);
             setShowCloseSummary(true);
             
-            toast.success('Jornada cerrada');
+            toast.success('Ruta cerrada');
             fetchJourney();
         } catch (error) {
-            toast.error(error.response?.data?.detail || 'Error al cerrar jornada');
+            toast.error(error.response?.data?.detail || 'Error al cerrar ruta');
         } finally {
             setCloseSubmitting(false);
         }
@@ -461,7 +480,7 @@ const JourneyDetail = () => {
                     <div>
                         <div className="flex items-center gap-3">
                             <h1 className="font-heading text-2xl font-bold text-slate-900 tracking-tight">
-                                Jornada {formatDate(journey.date)}
+                                Ruta {formatDate(journey.date)}
                             </h1>
                             <span className={`status-badge ${getStatusColor(journey.status)}`}>
                                 {getStatusLabel(journey.status)}
@@ -544,7 +563,7 @@ const JourneyDetail = () => {
                     {journey.status === 'scheduled' && canEdit() ? (
                         <Card>
                             <CardHeader>
-                                <CardTitle className="font-heading">Iniciar jornada</CardTitle>
+                                <CardTitle className="font-heading">Iniciar ruta</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -619,6 +638,50 @@ const JourneyDetail = () => {
                                             data-testid="packages-loaded-input"
                                         />
                                     </div>
+                                    <div className="space-y-2">
+                                        <Label>Hora de llegada a CEDIS</Label>
+                                        <Input
+                                            type="time"
+                                            value={startForm.arrival_time_cedis}
+                                            onChange={(e) => setStartForm({ ...startForm, arrival_time_cedis: e.target.value })}
+                                            data-testid="arrival-time-cedis-input"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Backup driver fields */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Mensajero de respaldo (opcional)</Label>
+                                        <Input
+                                            value={startForm.backup_driver_name}
+                                            onChange={(e) => setStartForm({ ...startForm, backup_driver_name: e.target.value })}
+                                            placeholder="Nombre del mensajero de respaldo"
+                                            data-testid="backup-driver-name-input"
+                                        />
+                                    </div>
+                                    {startForm.backup_driver_name && (
+                                        <>
+                                            <div className="space-y-2">
+                                                <Label>Hora de solicitud del backup</Label>
+                                                <Input
+                                                    type="time"
+                                                    value={startForm.backup_request_time}
+                                                    onChange={(e) => setStartForm({ ...startForm, backup_request_time: e.target.value })}
+                                                    data-testid="backup-request-time-input"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Hora de incorporación del backup</Label>
+                                                <Input
+                                                    type="time"
+                                                    value={startForm.backup_arrival_time}
+                                                    onChange={(e) => setStartForm({ ...startForm, backup_arrival_time: e.target.value })}
+                                                    data-testid="backup-arrival-time-input"
+                                                />
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
 
                                 <div className="space-y-2">
@@ -653,6 +716,10 @@ const JourneyDetail = () => {
                                         { key: 'zone_confirmed', label: 'Zona de entrega confirmada y cargada en Cosmo' },
                                         { key: 'packages_scanned', label: 'Paquetes escaneados y asignados en Cosmo' },
                                         { key: 'retry_registered', label: 'Paquetes de reintento del día anterior registrados' },
+                                        { key: 'cedis_arrival', label: 'Llegada a CEDIS registrada con hora' },
+                                        { key: 'cedis_pass', label: 'Confirmación de pase a CEDIS' },
+                                        { key: 'cosmo_route', label: 'Confirmación de ruta en Cosmo' },
+                                        { key: 'cedis_screenshot', label: 'Pantallazo CEDIS → 1ª entrega tomado' },
                                     ].map((item) => (
                                         <div key={item.key} className="flex items-center space-x-3">
                                             <Checkbox
@@ -682,7 +749,7 @@ const JourneyDetail = () => {
                                         ) : (
                                             <Play className="w-4 h-4 mr-2" />
                                         )}
-                                        Iniciar jornada
+                                        Iniciar ruta
                                     </Button>
                                 </div>
                             </CardContent>
@@ -692,7 +759,7 @@ const JourneyDetail = () => {
                             <CardHeader>
                                 <CardTitle className="font-heading flex items-center gap-2">
                                     <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                    Jornada iniciada
+                                    Ruta iniciada
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
@@ -748,7 +815,7 @@ const JourneyDetail = () => {
                         <Card>
                             <CardContent className="py-12 text-center">
                                 <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                                <p className="text-slate-500">Jornada pendiente de inicio</p>
+                                <p className="text-slate-500">Ruta pendiente de inicio</p>
                             </CardContent>
                         </Card>
                     )}
@@ -779,7 +846,7 @@ const JourneyDetail = () => {
                             <CardContent className="py-12 text-center">
                                 <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
                                 <p className="text-slate-600 font-medium">Sin incidencias</p>
-                                <p className="text-slate-500 text-sm">No se han registrado incidencias en esta jornada</p>
+                                <p className="text-slate-500 text-sm">No se han registrado incidencias en esta ruta</p>
                             </CardContent>
                         </Card>
                     ) : (
@@ -875,7 +942,7 @@ const JourneyDetail = () => {
                     {journey.status === 'in_progress' && canEdit() ? (
                         <Card>
                             <CardHeader>
-                                <CardTitle className="font-heading">Cerrar jornada</CardTitle>
+                                <CardTitle className="font-heading">Cerrar ruta</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1109,6 +1176,34 @@ const JourneyDetail = () => {
                                             </label>
                                         </div>
                                     ))}
+
+                                    {/* Conditional return evidence item */}
+                                    {(parseInt(closeForm.packages_failed) > 0 || metrics.toRetry > 0) && (
+                                        <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
+                                            <div className="flex items-center space-x-3">
+                                                <Checkbox
+                                                    id="close-return_evidence"
+                                                    checked={closeChecklist.return_evidence}
+                                                    onCheckedChange={(checked) => 
+                                                        setCloseChecklist({ ...closeChecklist, return_evidence: checked })
+                                                    }
+                                                    data-testid="close-checklist-return_evidence"
+                                                />
+                                                <label htmlFor="close-return_evidence" className="text-sm text-slate-700 cursor-pointer font-medium">
+                                                    Evidencia fotográfica de devolución de paquetes
+                                                </label>
+                                            </div>
+                                            <div className="ml-7">
+                                                <ImageUploader
+                                                    images={returnEvidenceImages}
+                                                    onUpload={(files) => handleUploadImages(files, 'return_evidence')}
+                                                    onDelete={handleDeleteImage}
+                                                    uploading={uploadingImages}
+                                                    label="Agregar fotos de devolución"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex justify-end">
@@ -1123,7 +1218,7 @@ const JourneyDetail = () => {
                                         ) : (
                                             <Square className="w-4 h-4 mr-2" />
                                         )}
-                                        Cerrar jornada
+                                        Cerrar ruta
                                     </Button>
                                 </div>
                             </CardContent>
@@ -1133,7 +1228,7 @@ const JourneyDetail = () => {
                             <CardHeader>
                                 <CardTitle className="font-heading flex items-center gap-2">
                                     <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                    Jornada cerrada
+                                    Ruta cerrada
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
@@ -1192,8 +1287,8 @@ const JourneyDetail = () => {
                                 <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                                 <p className="text-slate-500">
                                     {journey.status === 'scheduled' 
-                                        ? 'Primero debes iniciar la jornada' 
-                                        : 'La jornada aún no ha sido cerrada'}
+                                        ? 'Primero debes iniciar la ruta' 
+                                        : 'La ruta aún no ha sido cerrada'}
                                 </p>
                             </CardContent>
                         </Card>
@@ -1314,7 +1409,7 @@ const JourneyDetail = () => {
             <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle className="font-heading">¿Cerrar jornada?</AlertDialogTitle>
+                        <AlertDialogTitle className="font-heading">¿Cerrar ruta?</AlertDialogTitle>
                         <AlertDialogDescription>
                             Esta acción es irreversible. Los paquetes no entregados serán marcados para reintento.
                         </AlertDialogDescription>
@@ -1322,7 +1417,7 @@ const JourneyDetail = () => {
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
                         <AlertDialogAction onClick={handleCloseJourney} data-testid="confirm-close-btn">
-                            Cerrar jornada
+                            Cerrar ruta
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

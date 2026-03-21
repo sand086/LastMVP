@@ -375,7 +375,7 @@ print(df.head())`;
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="journeys">Jornadas</SelectItem>
+                                            <SelectItem value="journeys">Rutas</SelectItem>
                                             <SelectItem value="packages">Paquetes</SelectItem>
                                             <SelectItem value="incidents">Incidencias</SelectItem>
                                             <SelectItem value="kpis">KPIs</SelectItem>

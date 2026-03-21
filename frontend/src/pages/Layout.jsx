@@ -261,7 +261,7 @@ const Layout = () => {
                 }, 2000);
             }
         } catch (error) {
-            toast.error(error.response?.data?.detail || 'Error al crear jornadas');
+            toast.error(error.response?.data?.detail || 'Error al crear rutas');
         } finally {
             setCreating(false);
         }
@@ -525,7 +525,7 @@ const Layout = () => {
                                 {/* Date and Client */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label>Fecha de las jornadas</Label>
+                                        <Label>Fecha de las rutas</Label>
                                         <Popover>
                                             <PopoverTrigger asChild>
                                                 <Button 
@@ -631,7 +631,7 @@ const Layout = () => {
                                         ) : (
                                             <Package className="w-4 h-4 mr-2" />
                                         )}
-                                        Crear Jornadas
+                                        Crear Rutas
                                     </Button>
                                 </div>
                             </CardContent>
@@ -650,7 +650,7 @@ const Layout = () => {
                             <CardContent className="space-y-4">
                                 {creationResult.created_journeys?.length > 0 && (
                                     <div>
-                                        <p className="text-sm font-medium text-emerald-800 mb-2">Jornadas creadas:</p>
+                                        <p className="text-sm font-medium text-emerald-800 mb-2">Rutas creadas:</p>
                                         <ul className="space-y-1 text-sm text-emerald-700">
                                             {creationResult.created_journeys.map((j, idx) => (
                                                 <li key={idx}>
@@ -768,10 +768,10 @@ const Layout = () => {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle className="font-heading">
-                            Confirmar creación de jornadas
+                            Confirmar creación de rutas
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            Se crearán jornadas con los siguientes datos:
+                            Se crearán rutas con los siguientes datos:
                             <ul className="mt-3 space-y-1 text-slate-700">
                                 <li>• Fecha: <strong>{format(selectedDate, 'dd/MM/yyyy')}</strong></li>
                                 <li>• Cliente: <strong>{clients.find(c => c.id === selectedClient)?.name}</strong></li>
@@ -797,7 +797,7 @@ const Layout = () => {
                                     Creando...
                                 </>
                             ) : (
-                                'Crear jornadas'
+                                'Crear rutas'
                             )}
                         </AlertDialogAction>
                     </AlertDialogFooter>
