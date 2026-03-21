@@ -1,68 +1,59 @@
 # LastMile OS MVP - Product Requirements Document
 
 ## Original Problem Statement
-Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard polling, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), and dynamic assignment.
+Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, custom reports with AI, and system observability tools.
 
 ## User Personas
 - **Agent**: Field delivery operator (upload layouts, manage routes)
-- **Coordinator**: Operations manager (full access, user management, assignments, reports)
+- **Coordinator**: Operations manager (full access, user management, assignments, reports, system)
 - **Executive**: Business oversight (dashboard, reports, API docs)
+- **Developer**: IT/Dev team (system observability, health monitoring, logs, error tracking)
 
 ## Tech Stack
 - **Frontend**: React + TailwindCSS + Shadcn UI + Lucide Icons
 - **Backend**: FastAPI + JWT Auth + Pandas/Openpyxl
-- **Database**: MongoDB
-- **AI Integration**: Claude Sonnet 4.5 via emergentintegrations (Emergent LLM Key)
+- **Database**: MongoDB (collections: users, journeys, packages, incidents, clients, providers, audit_logs, system_errors, request_metrics, integrity_results)
+- **AI**: Claude Sonnet 4.5 via emergentintegrations (Emergent LLM Key)
 
 ## Completed Features
 
-### Core (Phase 1)
-- [x] FastAPI Backend & React Frontend scaffolding with Seed Data
-- [x] JWT role-based auth (Agent, Coordinator, Executive)
+### Phase 1 - Core
+- [x] JWT role-based auth (Agent, Coordinator, Executive, Developer)
 - [x] 2-step Cosmo layout upload (history-orders + route-summary)
-- [x] Image uploads in Start, Incidents, Close, and Return Evidence
-- [x] Failed packages search filter with magnifying glass
-- [x] Global rename: "Jornada" → "Ruta" in all UI
+- [x] Route management (Start with 9-item checklist + backup fields, Incidents, Close with conditional return evidence)
+- [x] Image uploads for all sections
+- [x] Failed packages search filter
+- [x] Global rename "Jornada" → "Ruta"
 
-### Phase 2 (March 21, 2026)
-- [x] Extended start checklist (9 items: 5 original + 4 CEDIS items)
-- [x] Backup driver fields (name, request/arrival time - conditionally visible)
-- [x] Conditional return evidence in close route (photos when failed/retry > 0)
-- [x] API Documentation page at /api-docs
-- [x] Dynamic user assignment (client/provider) in Settings page
-- [x] Database cleanup endpoint/script
-
-### Phase 3 (March 21, 2026)
+### Phase 2 - Assignments & Reports
 - [x] Dashboard filtering by user assignments (assigned_clients/assigned_providers)
-- [x] Imputability field in incidents (ME/Mensajero | Cliente | Por definir) with colored badges
-- [x] Route type (CDMX/Zona Metro | Foránea) with conditional city/max_packages fields
-- [x] Layout re-upload updates existing packages instead of skipping (X new, Y updated)
-- [x] Custom Report page with lego-style section selector + period presets
-- [x] Claude AI insights generation for reports
-- [x] Excel report download (routes, incidents, provider summary sheets)
-- [x] Imputability summary in close route ("Imputables a ME: X | al cliente: Y")
+- [x] Imputability in incidents (ME/Mensajero | Cliente | Por definir) with colored badges
+- [x] Route type (CDMX/Foránea) with conditional city/max_packages
+- [x] Layout re-upload updates existing packages (X new, Y updated)
+- [x] Custom Reports page with lego-style sections + Claude AI insights + Excel download
+- [x] Dynamic user assignment (client/provider) in Settings
+- [x] API Documentation page at /api-docs
+
+### Phase 3 - System Observability (March 21, 2026)
+- [x] **Health Dashboard** (/system/health): API status, MongoDB status/latency, avg latency, 4xx/5xx error counts, upload space, uptime, error timeline. Polling every 30s.
+- [x] **Performance Metrics** (within health): Requests per hour chart, slowest endpoints top 10, most active users, layout file stats
+- [x] **Log Viewer** (/system/logs): Audit log table with filters (date, user, action, errors-only), pagination, CSV export. Actions logged: login, route CRUD, incidents, layout uploads, user management
+- [x] **Error Tracker** (/system/errors): Grouped errors by type (API/parsing/validation), occurrence count, first/last seen, mark-as-reviewed. Badge in sidebar with unreviewed count.
+- [x] **Data Integrity Checker** (/system/integrity): Validates routes without start data, closed routes without close data, inconsistent package counts, open incidents on closed routes, inactive users. Export to CSV.
+- [x] **Environment Config** (Settings > System tab): Backend/Python version, MongoDB host, DB size, JWT expiry, CORS, last deploy timestamp, uptime
+- [x] Non-blocking audit middleware (async, doesn't affect request latency)
+- [x] Developer role with dedicated user (dev@me.mx)
+
+## Credentials
+- Agent: agente@me.mx / LastMile2026
+- Coordinator: yael@me.mx / LastMile2026
+- Executive: karina@me.mx / LastMile2026
+- Developer: dev@me.mx / LastMile2026
 
 ## Upcoming Tasks (P1)
 - [ ] Add clickable tracking_url view in package details
-- [ ] Add search functionality in main packages table of Journey Detail page
+- [ ] Add search in main packages table of Journey Detail
 
 ## Future Tasks (P2)
-- [ ] Automatic compression for large image uploads
+- [ ] Automatic image compression for large uploads
 - [ ] Mobile-optimized views for field agents
-
-## Key API Endpoints
-- POST /api/auth/login
-- POST /api/upload/step1-orders, /api/upload/step2-routes
-- POST /api/journeys/from-cosmo (accepts route_type, city, max_packages)
-- POST /api/journeys/{id}/start (accepts arrival_time_cedis, backup fields)
-- POST /api/journeys/{id}/close
-- POST /api/incidents (accepts imputability field)
-- POST /api/reports/generate (AI insights)
-- POST /api/reports/generate-excel (Excel download)
-- GET /api/reports/journeys, /api/reports/packages, /api/reports/schema
-
-## DB Schema
-- users: {email, password_hash, role, assigned_clients, assigned_providers}
-- journeys: {client_id, provider_id, date, status, route_type, city, max_packages, packages_total, start_data, close_data}
-- packages: {tracking_number, order_reference_id, recipient_name, address, status, cosmo_status, tracking_url, journey_id}
-- incidents: {journey_id, type, severity, imputability, images}
