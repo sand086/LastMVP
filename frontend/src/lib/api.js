@@ -166,4 +166,8 @@ export const getReportSchema = () => api.get('/reports/schema');
 export const generateReport = (data) => api.post('/reports/generate', data);
 export const generateReportExcel = (data) => api.post('/reports/generate-excel', data, { responseType: 'blob' });
 
+// Kosmo Sync
+export const syncKosmoTracking = () => api.post('/sync/tracking');
+export const getKosmoSyncStatus = () => api.get('/sync/status');
+
 export default api;

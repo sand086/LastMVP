@@ -19,6 +19,7 @@ import shutil
 
 from middleware import AuditMiddleware, log_audit_event, log_system_error
 from system_routes import create_system_router, SERVER_START_TIME
+from kosmo_sync import create_kosmo_router, start_periodic_sync, stop_periodic_sync
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -2456,6 +2457,12 @@ api_system_router = APIRouter(prefix="/api")
 api_system_router.include_router(system_router)
 app.include_router(api_system_router)
 
+# Create and include Kosmo sync routes
+kosmo_router = create_kosmo_router(db, get_current_user)
+api_kosmo_router = APIRouter(prefix="/api")
+api_kosmo_router.include_router(kosmo_router)
+app.include_router(api_kosmo_router)
+
 # Add audit middleware (must be after CORS)
 app.add_middleware(AuditMiddleware)
 
@@ -2468,6 +2475,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    start_periodic_sync(db)
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    stop_periodic_sync()
     client.close()

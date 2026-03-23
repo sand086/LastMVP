@@ -8,7 +8,9 @@ import {
     getProviderComparison,
     exportJourneys,
     getClients,
-    getProviders
+    getProviders,
+    syncKosmoTracking,
+    getKosmoSyncStatus
 } from '../lib/api';
 import { 
     formatDate, 
@@ -35,7 +37,8 @@ import {
     Eye,
     RefreshCw,
     Upload,
-    TrendingUp
+    TrendingUp,
+    Radio
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -81,6 +84,8 @@ const Dashboard = () => {
     const [providers, setProviders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState(false);
+    const [kosmoSync, setKosmoSync] = useState({ last_sync: null, total_checked: 0, updated: 0, errors: 0 });
+    const [syncing, setSyncing] = useState(false);
 
     // Filters
     const [dateFrom, setDateFrom] = useState(new Date());
@@ -94,7 +99,7 @@ const Dashboard = () => {
             const dateFromStr = format(dateFrom, 'yyyy-MM-dd');
             const dateToStr = format(dateTo, 'yyyy-MM-dd');
 
-            const [statsRes, journeysRes, breakdownRes, comparisonRes, clientsRes, providersRes] = await Promise.all([
+            const [statsRes, journeysRes, breakdownRes, comparisonRes, clientsRes, providersRes, kosmoRes] = await Promise.all([
                 getDashboardStats(dateFromStr),
                 getJourneys({
                     date_from: dateFromStr,
@@ -107,6 +112,7 @@ const Dashboard = () => {
                 getProviderComparison(dateFromStr, dateToStr),
                 getClients(),
                 getProviders(),
+                getKosmoSyncStatus().catch(() => ({ data: { last_sync: null } })),
             ]);
 
             setStats(statsRes.data);
@@ -115,6 +121,7 @@ const Dashboard = () => {
             setProviderComparison(comparisonRes.data);
             setClients(clientsRes.data);
             setProviders(providersRes.data);
+            if (kosmoRes.data) setKosmoSync(kosmoRes.data);
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
             toast.error('Error al cargar datos');
@@ -157,6 +164,32 @@ const Dashboard = () => {
         fetchData();
     };
 
+    const handleKosmoSync = async () => {
+        setSyncing(true);
+        try {
+            const res = await syncKosmoTracking();
+            const d = res.data;
+            const msg = `Sincronización completada: ${d.total_checked} verificados, ${d.updated} actualizados` +
+                (d.errors > 0 ? `, ${d.errors} errores` : '');
+            d.errors > 0 ? toast.warning(msg) : toast.success(msg);
+            setKosmoSync({ last_sync: new Date().toISOString(), total_checked: d.total_checked, updated: d.updated, errors: d.errors || 0 });
+            fetchData();
+        } catch (error) {
+            toast.error('Error al sincronizar con Kosmo');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const getTimeSince = (isoDate) => {
+        if (!isoDate) return null;
+        const diff = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
+        if (diff < 1) return 'ahora';
+        if (diff < 60) return `hace ${diff} min`;
+        if (diff < 1440) return `hace ${Math.floor(diff / 60)}h`;
+        return `hace ${Math.floor(diff / 1440)}d`;
+    };
+
     return (
         <div className="space-y-6">
             {/* KPI Cards */}
@@ -193,6 +226,35 @@ const Dashboard = () => {
                     color="#2E6096"
                     loading={loading}
                 />
+            </div>
+
+            {/* Kosmo Sync Indicator */}
+            <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-sm" data-testid="kosmo-sync-bar">
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <Radio className="w-4 h-4 text-slate-400" />
+                    <span>Sincronización Kosmo:</span>
+                    {kosmoSync.last_sync ? (
+                        <span className="font-mono text-xs text-slate-500">
+                            {getTimeSince(kosmoSync.last_sync)} — {kosmoSync.total_checked} verificados, {kosmoSync.updated} actualizados
+                            {kosmoSync.errors > 0 && (
+                                <span className="text-amber-600 font-medium ml-1">· {kosmoSync.errors} errores</span>
+                            )}
+                        </span>
+                    ) : (
+                        <span className="text-xs text-slate-400">Sin sincronización previa</span>
+                    )}
+                </div>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleKosmoSync}
+                    disabled={syncing}
+                    data-testid="kosmo-sync-btn"
+                    className="h-7 text-xs"
+                >
+                    <RefreshCw className={`h-3 w-3 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
+                    {syncing ? 'Sincronizando...' : 'Sincronizar ahora'}
+                </Button>
             </div>
 
             {/* Filters */}

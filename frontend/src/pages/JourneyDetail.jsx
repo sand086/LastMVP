@@ -83,7 +83,9 @@ import {
     CheckCircle2,
     XCircle,
     RefreshCw,
-    Search
+    Search,
+    MessageSquare,
+    ExternalLink
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
@@ -168,6 +170,7 @@ const JourneyDetail = () => {
         action_taken: '',
     });
     const [incidentSubmitting, setIncidentSubmitting] = useState(false);
+    const [showPackagesList, setShowPackagesList] = useState(false);
 
     useEffect(() => {
         fetchJourney();
@@ -471,6 +474,21 @@ const JourneyDetail = () => {
     const metrics = calculateCloseMetrics();
     const pendingPackages = journey.packages?.filter(p => p.status === 'pending') || [];
 
+    const getKosmoTimeSince = (isoDate) => {
+        if (!isoDate) return '';
+        const diff = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
+        if (diff < 1) return 'ahora';
+        if (diff < 60) return `hace ${diff} min`;
+        if (diff < 1440) return `hace ${Math.floor(diff / 60)}h`;
+        return `hace ${Math.floor(diff / 1440)}d`;
+    };
+
+    const formatMsTimestamp = (ms) => {
+        if (!ms) return null;
+        const d = new Date(ms);
+        return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+    };
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -554,6 +572,146 @@ const JourneyDetail = () => {
                     </div>
                 </Card>
             </div>
+
+            {/* Packages Overview with Kosmo Sync Indicators */}
+            {journey.packages && journey.packages.length > 0 && (
+                <Card>
+                    <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="font-heading text-base flex items-center gap-2">
+                                <Package className="w-4 h-4" />
+                                Paquetes ({journey.packages.length})
+                            </CardTitle>
+                            <button
+                                onClick={() => setShowPackagesList(!showPackagesList)}
+                                className="text-xs text-slate-500 hover:text-slate-700 underline"
+                                data-testid="toggle-packages-list"
+                            >
+                                {showPackagesList ? 'Ocultar' : 'Ver todos'}
+                            </button>
+                        </div>
+                    </CardHeader>
+                    {showPackagesList && (
+                        <CardContent className="p-0">
+                            <div className="max-h-96 overflow-y-auto">
+                                <table className="data-table w-full text-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>No. Guía</th>
+                                            <th>Destinatario</th>
+                                            <th>Estado</th>
+                                            <th>Kosmo</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {journey.packages.map((pkg) => (
+                                            <tr key={pkg.id} data-testid={`pkg-row-${pkg.id}`}>
+                                                <td className="font-mono text-xs">
+                                                    {pkg.tracking_url ? (
+                                                        <a href={pkg.tracking_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                                            {pkg.tracking_number || pkg.order_reference_id}
+                                                        </a>
+                                                    ) : (
+                                                        pkg.tracking_number || pkg.order_reference_id
+                                                    )}
+                                                </td>
+                                                <td className="truncate max-w-[140px]">{pkg.recipient_name}</td>
+                                                <td>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className={`status-badge ${getStatusColor(pkg.status)}`}>
+                                                            {getStatusLabel(pkg.status)}
+                                                        </span>
+                                                        {pkg.status === 'delivered' && pkg.kosmo_finished_at && (
+                                                            <span className="text-xs text-slate-400 font-mono">
+                                                                {formatMsTimestamp(pkg.kosmo_finished_at)}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div className="flex items-center gap-1.5">
+                                                        {pkg.kosmo_proof_count > 0 && pkg.tracking_url && (
+                                                            <a
+                                                                href={pkg.tracking_url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700 cursor-pointer"
+                                                                title="Ver evidencias en Kosmo"
+                                                                data-testid={`kosmo-proof-${pkg.id}`}
+                                                            >
+                                                                <Camera className="w-3.5 h-3.5" />
+                                                                <span className="text-xs font-mono">{pkg.kosmo_proof_count}</span>
+                                                            </a>
+                                                        )}
+                                                        {pkg.kosmo_driver_note && (
+                                                            <span
+                                                                className="text-amber-500 cursor-help"
+                                                                title={pkg.kosmo_driver_note}
+                                                                data-testid={`kosmo-note-${pkg.id}`}
+                                                            >
+                                                                <MessageSquare className="w-3.5 h-3.5" />
+                                                            </span>
+                                                        )}
+                                                        {pkg.kosmo_scraped_at && (
+                                                            <span
+                                                                className="text-slate-400 cursor-help"
+                                                                title={`Sincronizado ${getKosmoTimeSince(pkg.kosmo_scraped_at)}`}
+                                                                data-testid={`kosmo-sync-icon-${pkg.id}`}
+                                                            >
+                                                                <Clock className="w-3 h-3" />
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Kosmo Evidence Panel for delivered packages */}
+                            {journey.packages.some(p => p.status === 'delivered' && p.tracking_url && (p.kosmo_proof_count > 0 || p.kosmo_driver_note)) && (
+                                <div className="border-t border-slate-200 p-3 bg-slate-50">
+                                    <p className="text-xs font-medium text-slate-600 uppercase mb-2">Evidencias de Kosmo</p>
+                                    <div className="space-y-1.5">
+                                        {journey.packages
+                                            .filter(p => p.status === 'delivered' && p.tracking_url && (p.kosmo_proof_count > 0 || p.kosmo_driver_note))
+                                            .slice(0, 10)
+                                            .map((pkg) => (
+                                                <div key={pkg.id} className="flex items-center justify-between text-xs" data-testid={`kosmo-evidence-${pkg.id}`}>
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span className="font-mono text-slate-700 shrink-0">{pkg.tracking_number || pkg.order_reference_id}</span>
+                                                        {pkg.kosmo_driver_note && (
+                                                            <span className="text-slate-400 italic truncate max-w-[200px]">"{pkg.kosmo_driver_note}"</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        {pkg.kosmo_finished_at && (
+                                                            <span className="text-slate-400 font-mono">{formatMsTimestamp(pkg.kosmo_finished_at)}</span>
+                                                        )}
+                                                        {pkg.kosmo_proof_count > 0 && (
+                                                            <span className="text-slate-500">{pkg.kosmo_proof_count} fotos</span>
+                                                        )}
+                                                        <a
+                                                            href={pkg.tracking_url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-blue-500 hover:text-blue-700"
+                                                            title="Abrir en Kosmo"
+                                                        >
+                                                            <ExternalLink className="w-3.5 h-3.5" />
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        }
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    )}
+                </Card>
+            )}
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
