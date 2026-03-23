@@ -138,22 +138,50 @@ export function generateWhatsAppCloseSummary(journey, closeData) {
         const mins = diff % 60;
         totalTime = `${hours}h ${mins}m`;
     }
+
+    // Quality stats from packages
+    const packages = journey.packages || [];
+    const scored = packages.filter(p => p.evidence_score != null);
+    const avgScore = scored.length > 0 ? Math.round(scored.reduce((a, p) => a + p.evidence_score, 0) / scored.length) : 0;
+    const complete = scored.filter(p => p.evidence_score === 100).length;
+    const partial = scored.filter(p => p.evidence_score >= 60 && p.evidence_score < 100).length;
+    const incomplete = scored.filter(p => p.evidence_score < 60).length;
+    const attentionPkgs = packages.filter(p => p.evidence_score != null && p.evidence_score < 60);
+
+    let qualityBlock = '';
+    if (scored.length > 0) {
+        qualityBlock = `
+━━━━━━━━━━━━━━━━━━
+Calidad de soporte:
+Soporte completo: ${complete} paquetes
+Soporte parcial: ${partial} paquetes
+Sin soporte: ${incomplete} paquetes
+Score promedio: ${avgScore}%`;
+
+        if (attentionPkgs.length > 0) {
+            qualityBlock += '\n\nPaquetes que requieren atención:';
+            attentionPkgs.slice(0, 5).forEach(p => {
+                const missing = (p.evidence_detail?.missing_items || []).join(', ');
+                qualityBlock += `\n- ${p.tracking_number || p.order_reference_id} Falta: ${missing || 'Sin detalle'}`;
+            });
+        }
+    }
     
-    return `📦 CIERRE DE RUTA - LastMile OS
+    return `CIERRE DE RUTA - LastMile OS
 ━━━━━━━━━━━━━━━━━━
-📅 Fecha: ${date}
-🚚 Proveedor: ${provider}
+Fecha: ${date}
+Proveedor: ${provider}
 ━━━━━━━━━━━━━━━━━━
-✅ Entregados: ${delivered}
-❌ Fallidos: ${failed}
-🔄 Para reintento: ${toRetry}
+Entregados: ${delivered}
+Fallidos: ${failed}
+Para reintento: ${toRetry}
 ━━━━━━━━━━━━━━━━━━
-📊 Tasa de entrega: ${rate}%
-🛣️ Km recorridos: ${km.toLocaleString()}
-⏱️ Tiempo total: ${totalTime}
-⚠️ Incidencias: ${incidents}
+Tasa de entrega: ${rate}%
+Km recorridos: ${km.toLocaleString()}
+Tiempo total: ${totalTime}
+Incidencias: ${incidents}${qualityBlock}
 ━━━━━━━━━━━━━━━━━━
-✅ Ruta cerrada correctamente`;
+Ruta cerrada correctamente`;
 }
 
 export function copyToClipboard(text) {

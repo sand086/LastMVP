@@ -11,7 +11,8 @@ import {
     exportIncidents,
     uploadJourneyImages,
     getJourneyImages,
-    deleteJourneyImage
+    deleteJourneyImage,
+    evaluateJourneyQuality
 } from '../lib/api';
 import { 
     formatDate, 
@@ -89,6 +90,184 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
+
+// Quality Tab Component
+const QualityTab = ({ journey, packages, onEvaluate }) => {
+    const [filterIncomplete, setFilterIncomplete] = useState(false);
+
+    const scoredPackages = packages.filter(p => p.evidence_score != null);
+    const allScores = scoredPackages.map(p => p.evidence_score);
+    const avgScore = allScores.length > 0 ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : 0;
+    const complete = allScores.filter(s => s === 100).length;
+    const partial = allScores.filter(s => s >= 60 && s < 100).length;
+    const incomplete = allScores.filter(s => s < 60).length;
+    const total = scoredPackages.length;
+
+    const displayPackages = (filterIncomplete
+        ? scoredPackages.filter(p => p.evidence_score < 100)
+        : scoredPackages
+    ).sort((a, b) => (a.evidence_score || 0) - (b.evidence_score || 0));
+
+    const completePct = total > 0 ? Math.round(complete / total * 100) : 0;
+    const partialPct = total > 0 ? Math.round(partial / total * 100) : 0;
+    const incompletePct = total > 0 ? Math.round(incomplete / total * 100) : 0;
+
+    if (scoredPackages.length === 0) {
+        return (
+            <Card>
+                <CardContent className="py-12 text-center">
+                    <CheckCircle2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                    <p className="text-slate-500 mb-4">No hay evaluaciones de calidad disponibles para esta ruta.</p>
+                    {journey.status === 'closed' && (
+                        <Button variant="outline" onClick={onEvaluate} data-testid="evaluate-quality-btn">
+                            <RefreshCw className="w-4 h-4 mr-2" /> Evaluar calidad ahora
+                        </Button>
+                    )}
+                </CardContent>
+            </Card>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-3 gap-4">
+                <Card>
+                    <CardContent className="p-4 text-center">
+                        <p className="text-xs text-slate-500 uppercase">Score promedio</p>
+                        <p className={`text-3xl font-mono font-bold ${
+                            avgScore >= 90 ? 'text-emerald-600' : avgScore >= 70 ? 'text-amber-600' : 'text-red-600'
+                        }`} data-testid="quality-avg-score">{avgScore}%</p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-4 text-center">
+                        <p className="text-xs text-slate-500 uppercase">Soporte completo</p>
+                        <p className="text-3xl font-mono font-bold text-emerald-600" data-testid="quality-complete-count">
+                            {complete}<span className="text-lg text-slate-400">/{total}</span>
+                        </p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-4 text-center">
+                        <p className="text-xs text-slate-500 uppercase">Sin soporte</p>
+                        <p className="text-3xl font-mono font-bold text-red-600" data-testid="quality-incomplete-count">
+                            {incomplete}
+                        </p>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Distribution Bar */}
+            <Card>
+                <CardContent className="p-4">
+                    <p className="text-xs text-slate-500 uppercase mb-2">Distribución de calidad</p>
+                    <div className="flex h-6 rounded-sm overflow-hidden" data-testid="quality-distribution-bar">
+                        {completePct > 0 && (
+                            <div className="bg-emerald-500 flex items-center justify-center text-white text-xs font-mono" style={{ width: `${completePct}%` }}>
+                                {completePct}%
+                            </div>
+                        )}
+                        {partialPct > 0 && (
+                            <div className="bg-amber-500 flex items-center justify-center text-white text-xs font-mono" style={{ width: `${partialPct}%` }}>
+                                {partialPct}%
+                            </div>
+                        )}
+                        {incompletePct > 0 && (
+                            <div className="bg-red-500 flex items-center justify-center text-white text-xs font-mono" style={{ width: `${incompletePct}%` }}>
+                                {incompletePct}%
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex gap-4 mt-2 text-xs text-slate-500">
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Completos ({complete})</span>
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> Parciales ({partial})</span>
+                        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-500" /> Incompletos ({incomplete})</span>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Packages Table */}
+            <Card>
+                <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">Detalle por paquete</CardTitle>
+                        <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+                                <Checkbox
+                                    checked={filterIncomplete}
+                                    onCheckedChange={setFilterIncomplete}
+                                    data-testid="filter-incomplete-checkbox"
+                                />
+                                Solo incompletos
+                            </label>
+                            <Button variant="outline" size="sm" onClick={onEvaluate} className="h-7 text-xs" data-testid="re-evaluate-btn">
+                                <RefreshCw className="w-3 h-3 mr-1" /> Re-evaluar
+                            </Button>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <div className="max-h-96 overflow-y-auto">
+                        <table className="data-table w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>Guía</th>
+                                    <th>Tipo entrega</th>
+                                    <th>Score</th>
+                                    <th>Faltante</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {displayPackages.map((pkg) => (
+                                    <tr key={pkg.id} data-testid={`quality-row-${pkg.id}`}>
+                                        <td className="font-mono text-xs">{pkg.tracking_number || pkg.order_reference_id}</td>
+                                        <td>
+                                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                                pkg.evidence_type === 'exitosa' ? 'bg-emerald-100 text-emerald-700' :
+                                                pkg.evidence_type === 'terceros' ? 'bg-blue-100 text-blue-700' :
+                                                pkg.evidence_type === 'fallida' ? 'bg-red-100 text-red-700' :
+                                                'bg-slate-100 text-slate-600'
+                                            }`}>
+                                                {pkg.evidence_type === 'exitosa' ? 'Exitosa' :
+                                                 pkg.evidence_type === 'terceros' ? 'Terceros' :
+                                                 pkg.evidence_type === 'fallida' ? 'Fallida' : '-'}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span className={`font-mono font-bold ${
+                                                pkg.evidence_score === 100 ? 'text-emerald-600' :
+                                                pkg.evidence_score >= 60 ? 'text-amber-600' : 'text-red-600'
+                                            }`}>
+                                                {pkg.evidence_score}
+                                            </span>
+                                        </td>
+                                        <td className="text-xs text-slate-500 max-w-[200px]">
+                                            {pkg.evidence_detail?.missing_items?.length > 0
+                                                ? pkg.evidence_detail.missing_items.join(', ')
+                                                : <span className="text-emerald-500">-</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            {pkg.tracking_url && (
+                                                <a href={pkg.tracking_url} target="_blank" rel="noopener noreferrer"
+                                                    className="text-blue-500 hover:text-blue-700 text-xs flex items-center gap-1"
+                                                    data-testid={`quality-kosmo-link-${pkg.id}`}>
+                                                    <ExternalLink className="w-3.5 h-3.5" /> Kosmo
+                                                </a>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
+    );
+};
 
 const JourneyDetail = () => {
     const { id } = useParams();
@@ -262,9 +441,12 @@ const JourneyDetail = () => {
 
     // Start journey handlers
     const handleStartJourney = async () => {
-        const allChecked = Object.values(startChecklist).every(v => v);
-        if (!allChecked) {
-            toast.error('Completa todos los items del checklist');
+        const optionalKeys = ['odometer_photo', 'cedis_screenshot'];
+        const requiredChecks = Object.entries(startChecklist)
+            .filter(([key]) => !optionalKeys.includes(key))
+            .every(([, v]) => v);
+        if (!requiredChecks) {
+            toast.error('Completa todos los items obligatorios del checklist');
             return;
         }
 
@@ -600,7 +782,8 @@ const JourneyDetail = () => {
                                             <th>No. Guía</th>
                                             <th>Destinatario</th>
                                             <th>Estado</th>
-                                            <th>Kosmo</th>
+                                            <th>Soporte</th>
+                                            <th>Evidencias</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -615,7 +798,7 @@ const JourneyDetail = () => {
                                                         pkg.tracking_number || pkg.order_reference_id
                                                     )}
                                                 </td>
-                                                <td className="truncate max-w-[140px]">{pkg.recipient_name}</td>
+                                                <td className="truncate max-w-[120px]">{pkg.recipient_name}</td>
                                                 <td>
                                                     <div className="flex items-center gap-1.5">
                                                         <span className={`status-badge ${getStatusColor(pkg.status)}`}>
@@ -627,6 +810,20 @@ const JourneyDetail = () => {
                                                             </span>
                                                         )}
                                                     </div>
+                                                </td>
+                                                <td>
+                                                    {pkg.evidence_score != null ? (
+                                                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                                            pkg.evidence_score === 100 ? 'bg-emerald-100 text-emerald-700' :
+                                                            pkg.evidence_score >= 60 ? 'bg-amber-100 text-amber-700' :
+                                                            'bg-red-100 text-red-700'
+                                                        }`} data-testid={`evidence-badge-${pkg.id}`}>
+                                                            {pkg.evidence_score === 100 ? 'Completo' :
+                                                             pkg.evidence_score >= 60 ? 'Parcial' : 'Incompleto'}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Pendiente</span>
+                                                    )}
                                                 </td>
                                                 <td>
                                                     <div className="flex items-center gap-1.5">
@@ -650,6 +847,15 @@ const JourneyDetail = () => {
                                                                 data-testid={`kosmo-note-${pkg.id}`}
                                                             >
                                                                 <MessageSquare className="w-3.5 h-3.5" />
+                                                            </span>
+                                                        )}
+                                                        {pkg.evidence_detail?.missing_items?.length > 0 && (
+                                                            <span
+                                                                className="text-red-400 cursor-help"
+                                                                title={`Falta: ${pkg.evidence_detail.missing_items.join(', ')}`}
+                                                                data-testid={`missing-evidence-${pkg.id}`}
+                                                            >
+                                                                <AlertTriangle className="w-3.5 h-3.5" />
                                                             </span>
                                                         )}
                                                         {pkg.kosmo_scraped_at && (
@@ -715,10 +921,10 @@ const JourneyDetail = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="inicio" data-testid="tab-inicio">
                         <Play className="w-4 h-4 mr-2" />
-                        Inicio de Ruta
+                        Inicio
                     </TabsTrigger>
                     <TabsTrigger value="incidencias" data-testid="tab-incidencias">
                         <AlertTriangle className="w-4 h-4 mr-2" />
@@ -726,7 +932,11 @@ const JourneyDetail = () => {
                     </TabsTrigger>
                     <TabsTrigger value="fin" data-testid="tab-fin">
                         <Square className="w-4 h-4 mr-2" />
-                        Fin de Ruta
+                        Fin
+                    </TabsTrigger>
+                    <TabsTrigger value="calidad" data-testid="tab-calidad">
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        Calidad
                     </TabsTrigger>
                 </TabsList>
 
@@ -868,8 +1078,8 @@ const JourneyDetail = () => {
                                 </div>
 
                                 {/* Image upload for start */}
-                                <div className="space-y-2">
-                                    <Label>Evidencia fotográfica</Label>
+                                <div className="space-y-1">
+                                    <Label>Evidencia fotográfica <span className="text-slate-400 font-normal">(opcional)</span></Label>
                                     <ImageUploader
                                         images={startImages}
                                         onUpload={(files) => handleUploadImages(files, 'start')}
@@ -877,21 +1087,22 @@ const JourneyDetail = () => {
                                         uploading={uploadingImages}
                                         label="Agregar fotos de inicio"
                                     />
+                                    <p className="text-xs text-slate-400">Solo si genera valor adicional — las evidencias en WhatsApp y Cosmo son el respaldo principal.</p>
                                 </div>
 
                                 {/* Checklist */}
                                 <div className="border border-slate-200 rounded-sm p-4 space-y-3">
                                     <p className="font-medium text-slate-900 mb-3">Checklist de salida</p>
                                     {[
-                                        { key: 'whatsapp', label: 'Driver notificó salida del almacén en WhatsApp' },
-                                        { key: 'odometer_photo', label: 'Evidencia fotográfica del odómetro tomada' },
-                                        { key: 'zone_confirmed', label: 'Zona de entrega confirmada y cargada en Cosmo' },
-                                        { key: 'packages_scanned', label: 'Paquetes escaneados y asignados en Cosmo' },
-                                        { key: 'retry_registered', label: 'Paquetes de reintento del día anterior registrados' },
                                         { key: 'cedis_arrival', label: 'Llegada a CEDIS registrada con hora' },
                                         { key: 'cedis_pass', label: 'Confirmación de pase a CEDIS' },
-                                        { key: 'cosmo_route', label: 'Confirmación de ruta en Cosmo' },
-                                        { key: 'cedis_screenshot', label: 'Pantallazo CEDIS → 1ª entrega tomado' },
+                                        { key: 'cosmo_route', label: 'Confirmación de ruta en Cosmo / plataforma' },
+                                        { key: 'packages_scanned', label: 'Paquetes escaneados y asignados en la plataforma del cliente' },
+                                        { key: 'retry_registered', label: 'Paquetes de reintento del día anterior registrados' },
+                                        { key: 'whatsapp', label: 'Driver / mensajero notificó salida del almacén' },
+                                        { key: 'odometer_photo', label: 'Evidencia fotográfica del odómetro tomada', optional: true },
+                                        { key: 'cedis_screenshot', label: 'Pantallazo CEDIS → 1ª entrega tomado', optional: true },
+                                        { key: 'zone_confirmed', label: 'Zona de entrega confirmada' },
                                     ].map((item) => (
                                         <div key={item.key} className="flex items-center space-x-3">
                                             <Checkbox
@@ -904,6 +1115,7 @@ const JourneyDetail = () => {
                                             />
                                             <label htmlFor={item.key} className="text-sm text-slate-700 cursor-pointer">
                                                 {item.label}
+                                                {item.optional && <span className="text-slate-400 ml-1">(opcional)</span>}
                                             </label>
                                         </div>
                                     ))}
@@ -1335,8 +1547,8 @@ const JourneyDetail = () => {
                                 </div>
 
                                 {/* Image upload for close */}
-                                <div className="space-y-2">
-                                    <Label>Evidencia fotográfica de cierre</Label>
+                                <div className="space-y-1">
+                                    <Label>Evidencia fotográfica de cierre <span className="text-slate-400 font-normal">(opcional)</span></Label>
                                     <ImageUploader
                                         images={closeImages}
                                         onUpload={(files) => handleUploadImages(files, 'close')}
@@ -1344,6 +1556,7 @@ const JourneyDetail = () => {
                                         uploading={uploadingImages}
                                         label="Agregar fotos de cierre"
                                     />
+                                    <p className="text-xs text-slate-400">Solo si genera valor adicional — las evidencias en WhatsApp y Cosmo son el respaldo principal.</p>
                                 </div>
 
                                 {/* Checklist */}
@@ -1503,6 +1716,19 @@ const JourneyDetail = () => {
                             </CardContent>
                         </Card>
                     )}
+                </TabsContent>
+
+                {/* Tab: Calidad */}
+                <TabsContent value="calidad" className="space-y-6" data-testid="tab-calidad-content">
+                    <QualityTab journey={journey} packages={journey.packages || []} onEvaluate={async () => {
+                        try {
+                            await evaluateJourneyQuality(journey.id);
+                            toast.success('Evaluación de calidad actualizada');
+                            fetchJourney();
+                        } catch (e) {
+                            toast.error('Error al evaluar calidad');
+                        }
+                    }} />
                 </TabsContent>
             </Tabs>
 

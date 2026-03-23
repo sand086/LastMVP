@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { generateReport, generateReportExcel } from '../lib/api';
+import { generateReport, generateReportExcel, getQualityReport, exportQualityReport } from '../lib/api';
 import { downloadFile } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -18,6 +18,8 @@ import {
     Sparkles,
     Calendar,
     FileSpreadsheet,
+    ShieldCheck,
+    ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -72,6 +74,9 @@ const Reports = () => {
     const [loading, setLoading] = useState(false);
     const [excelLoading, setExcelLoading] = useState(false);
     const [reportData, setReportData] = useState(null);
+    const [qualityData, setQualityData] = useState(null);
+    const [qualityLoading, setQualityLoading] = useState(false);
+    const [cubboExporting, setCubboExporting] = useState(false);
 
     const handlePeriodChange = (preset) => {
         setPeriodPreset(preset);
@@ -129,6 +134,35 @@ const Reports = () => {
             toast.error('Error al descargar Excel');
         } finally {
             setExcelLoading(false);
+        }
+    };
+
+    const handleLoadQuality = async () => {
+        setQualityLoading(true);
+        try {
+            const res = await getQualityReport({ date_from: dateFrom, date_to: dateTo });
+            setQualityData(res.data);
+            toast.success('Reporte de calidad cargado');
+        } catch (error) {
+            toast.error('Error al cargar reporte de calidad');
+        } finally {
+            setQualityLoading(false);
+        }
+    };
+
+    const handleExportCubbo = async () => {
+        setCubboExporting(true);
+        try {
+            const formData = new FormData();
+            formData.append('date_from', dateFrom);
+            formData.append('date_to', dateTo);
+            const res = await exportQualityReport(formData);
+            downloadFile(res.data, `calidad_cubbo_${dateFrom}_${dateTo}.xlsx`);
+            toast.success('Excel para Cubbo descargado');
+        } catch (error) {
+            toast.error('Error al exportar');
+        } finally {
+            setCubboExporting(false);
         }
     };
 
@@ -433,6 +467,178 @@ const Reports = () => {
                     )}
                 </div>
             )}
+
+            {/* Quality Report Section */}
+            <Card className="mt-6">
+                <CardHeader>
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="font-heading flex items-center gap-2">
+                            <ShieldCheck className="w-5 h-5" />
+                            Calidad de soporte
+                        </CardTitle>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleLoadQuality}
+                                disabled={qualityLoading}
+                                data-testid="load-quality-report-btn"
+                            >
+                                {qualityLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BarChart3 className="w-4 h-4 mr-2" />}
+                                Cargar datos
+                            </Button>
+                            {qualityData && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleExportCubbo}
+                                    disabled={cubboExporting}
+                                    data-testid="export-cubbo-btn"
+                                >
+                                    {cubboExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                                    Exportar para Cubbo
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                        Usa las mismas fechas seleccionadas arriba. Basado en el estándar de evidencias de Cubbo (3 fotos por entrega).
+                    </p>
+                </CardHeader>
+                {qualityData && (
+                    <CardContent className="space-y-6">
+                        {/* Summary */}
+                        <div className="grid grid-cols-4 gap-4">
+                            <div className="p-3 bg-slate-50 rounded-sm text-center">
+                                <p className="text-xs text-slate-500 uppercase">Score promedio</p>
+                                <p className={`text-2xl font-mono font-bold ${
+                                    qualityData.summary.avg_score >= 90 ? 'text-emerald-600' :
+                                    qualityData.summary.avg_score >= 70 ? 'text-amber-600' : 'text-red-600'
+                                }`} data-testid="quality-report-avg">{qualityData.summary.avg_score}%</p>
+                            </div>
+                            <div className="p-3 bg-emerald-50 rounded-sm text-center">
+                                <p className="text-xs text-emerald-600 uppercase">Completos</p>
+                                <p className="text-2xl font-mono font-bold text-emerald-700">{qualityData.summary.complete}</p>
+                            </div>
+                            <div className="p-3 bg-amber-50 rounded-sm text-center">
+                                <p className="text-xs text-amber-600 uppercase">Parciales</p>
+                                <p className="text-2xl font-mono font-bold text-amber-700">{qualityData.summary.partial}</p>
+                            </div>
+                            <div className="p-3 bg-red-50 rounded-sm text-center">
+                                <p className="text-xs text-red-600 uppercase">Incompletos</p>
+                                <p className="text-2xl font-mono font-bold text-red-700">{qualityData.summary.incomplete}</p>
+                            </div>
+                        </div>
+
+                        {/* By Provider */}
+                        {qualityData.by_provider.length > 0 && (
+                            <div className="border border-slate-200 rounded-sm overflow-hidden">
+                                <div className="p-3 bg-slate-50 border-b border-slate-200">
+                                    <p className="font-medium text-slate-900 text-sm">Métricas por proveedor</p>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="data-table w-full text-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Proveedor</th>
+                                                <th className="text-center">Rutas</th>
+                                                <th className="text-center">Entregados</th>
+                                                <th className="text-center">% Completo</th>
+                                                <th className="text-center">% Parcial</th>
+                                                <th className="text-center">% Sin soporte</th>
+                                                <th className="text-center">Score</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {qualityData.by_provider.map((p, i) => (
+                                                <tr key={i}>
+                                                    <td className="font-medium">{p.provider_name}</td>
+                                                    <td className="text-center">{p.routes}</td>
+                                                    <td className="text-center">{p.delivered}</td>
+                                                    <td className="text-center text-emerald-600">{p.complete_pct}%</td>
+                                                    <td className="text-center text-amber-600">{p.partial_pct}%</td>
+                                                    <td className="text-center text-red-600">{p.incomplete_pct}%</td>
+                                                    <td className="text-center font-mono font-bold">{p.avg_score}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* By Type */}
+                        {qualityData.by_type.length > 0 && (
+                            <div className="border border-slate-200 rounded-sm overflow-hidden">
+                                <div className="p-3 bg-slate-50 border-b border-slate-200">
+                                    <p className="font-medium text-slate-900 text-sm">Métricas por tipo de entrega</p>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="data-table w-full text-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Tipo</th>
+                                                <th className="text-center">Cantidad</th>
+                                                <th className="text-center">% Score 100</th>
+                                                <th className="text-center">Score promedio</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {qualityData.by_type.map((t, i) => (
+                                                <tr key={i}>
+                                                    <td className="font-medium capitalize">{t.type}</td>
+                                                    <td className="text-center">{t.count}</td>
+                                                    <td className="text-center text-emerald-600">{t.perfect_pct}%</td>
+                                                    <td className="text-center font-mono font-bold">{t.avg_score}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Worst Packages */}
+                        {qualityData.worst_packages.length > 0 && (
+                            <div className="border border-slate-200 rounded-sm overflow-hidden">
+                                <div className="p-3 bg-red-50 border-b border-red-200">
+                                    <p className="font-medium text-red-900 text-sm">TOP 5 paquetes con peor soporte</p>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="data-table w-full text-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Guía</th>
+                                                <th>Proveedor</th>
+                                                <th className="text-center">Score</th>
+                                                <th>Faltante</th>
+                                                <th>Link</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {qualityData.worst_packages.map((p, i) => (
+                                                <tr key={i}>
+                                                    <td className="font-mono text-xs">{p.tracking_number}</td>
+                                                    <td>{p.provider_name}</td>
+                                                    <td className="text-center text-red-600 font-mono font-bold">{p.score}</td>
+                                                    <td className="text-xs text-slate-500">{p.missing.join(', ')}</td>
+                                                    <td>
+                                                        {p.tracking_url && (
+                                                            <a href={p.tracking_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700">
+                                                                <ExternalLink className="w-3.5 h-3.5" />
+                                                            </a>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                )}
+            </Card>
         </div>
     );
 };

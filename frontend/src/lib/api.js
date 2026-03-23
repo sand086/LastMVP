@@ -170,4 +170,9 @@ export const generateReportExcel = (data) => api.post('/reports/generate-excel',
 export const syncKosmoTracking = () => api.post('/sync/tracking');
 export const getKosmoSyncStatus = () => api.get('/sync/status');
 
+// Quality Reports
+export const getQualityReport = (params) => api.get('/reports/quality', { params });
+export const exportQualityReport = (data) => api.post('/reports/quality-export', data, { responseType: 'blob' });
+export const evaluateJourneyQuality = (journeyId) => api.post(`/reports/evaluate-journey/${journeyId}`);
+
 export default api;

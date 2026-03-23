@@ -20,6 +20,7 @@ import shutil
 from middleware import AuditMiddleware, log_audit_event, log_system_error
 from system_routes import create_system_router, SERVER_START_TIME
 from kosmo_sync import create_kosmo_router, start_periodic_sync, stop_periodic_sync
+from evidence_scoring import evaluate_packages_for_journey, calculate_evidence_score
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -627,6 +628,10 @@ async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = De
         )
     
     await log_audit_event(db, user["id"], user["role"], "route_closed", "journey", journey_id)
+    
+    # Evaluate evidence quality for all packages in the closed route
+    await evaluate_packages_for_journey(db, journey_id)
+    
     return {"message": "Ruta cerrada exitosamente", "close_data": close_data}
 
 # ==================== INCIDENTS ====================
@@ -1360,6 +1365,20 @@ async def get_dashboard_stats(
         if close_data:
             total_km += close_data.get("km_traveled", 0)
     
+    # Evidence quality stats for today's closed routes
+    closed_journey_ids = [j["id"] for j in journeys_today if j.get("status") == "closed"]
+    avg_evidence_score = 0
+    packages_incomplete = 0
+    if closed_journey_ids:
+        scored_pkgs = await db.packages.find(
+            {"journey_id": {"$in": closed_journey_ids}, "evidence_score": {"$ne": None}},
+            {"_id": 0, "evidence_score": 1}
+        ).to_list(10000)
+        if scored_pkgs:
+            scores = [p["evidence_score"] for p in scored_pkgs]
+            avg_evidence_score = round(sum(scores) / len(scores), 1)
+            packages_incomplete = sum(1 for s in scores if s < 100)
+
     return {
         "date": date,
         "active_journeys": active_journeys,
@@ -1369,7 +1388,9 @@ async def get_dashboard_stats(
         "delivered_packages": delivered_packages,
         "delivery_rate": round(delivery_rate, 2),
         "open_incidents": open_incidents,
-        "total_km": total_km
+        "total_km": total_km,
+        "avg_evidence_score": avg_evidence_score,
+        "packages_incomplete_support": packages_incomplete,
     }
 
 @api_router.get("/dashboard/incidents-breakdown")
@@ -2055,6 +2076,212 @@ async def generate_report_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+# ==================== QUALITY REPORTS ====================
+
+@api_router.get("/reports/quality")
+async def get_quality_report(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Quality report data for evidence scoring analysis."""
+    if not date_from:
+        d = datetime.now(timezone.utc)
+        date_from = (d - timedelta(days=6)).strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    journey_query = {"date": {"$gte": date_from, "$lte": date_to}, "status": "closed"}
+    journey_query = apply_assignment_filter(user, journey_query)
+    if provider_id:
+        journey_query["provider_id"] = provider_id
+
+    journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
+    journey_ids = [j["id"] for j in journeys]
+
+    if not journey_ids:
+        return {
+            "by_provider": [],
+            "by_type": [],
+            "worst_packages": [],
+            "summary": {"avg_score": 0, "total_evaluated": 0, "complete": 0, "partial": 0, "incomplete": 0},
+        }
+
+    # Get scored packages
+    packages = await db.packages.find(
+        {"journey_id": {"$in": journey_ids}, "evidence_score": {"$ne": None}},
+        {"_id": 0}
+    ).to_list(50000)
+
+    # Build provider lookup
+    providers_data = {}
+    for j in journeys:
+        pid = j.get("provider_id", "unknown")
+        pname = j.get("provider_name", pid)
+        if pid not in providers_data:
+            providers_data[pid] = {"name": pname, "routes": 0, "packages": [], "days": set()}
+        providers_data[pid]["routes"] += 1
+        providers_data[pid]["days"].add(j["date"])
+
+    # Assign packages to providers via journey
+    journey_provider_map = {j["id"]: j.get("provider_id", "unknown") for j in journeys}
+    for pkg in packages:
+        pid = journey_provider_map.get(pkg.get("journey_id"), "unknown")
+        if pid in providers_data:
+            providers_data[pid]["packages"].append(pkg)
+
+    by_provider = []
+    for pid, pd_data in providers_data.items():
+        pkgs = pd_data["packages"]
+        delivered_pkgs = [p for p in pkgs if p.get("evidence_type") in ("exitosa", "terceros")]
+        scores = [p["evidence_score"] for p in pkgs]
+        complete = sum(1 for s in scores if s == 100)
+        partial = sum(1 for s in scores if 60 <= s < 100)
+        incomplete = sum(1 for s in scores if s < 60)
+        avg = round(sum(scores) / len(scores), 1) if scores else 0
+
+        by_provider.append({
+            "provider_id": pid,
+            "provider_name": pd_data["name"],
+            "routes": pd_data["routes"],
+            "delivered": len(delivered_pkgs),
+            "complete_pct": round(complete / len(scores) * 100, 1) if scores else 0,
+            "partial_pct": round(partial / len(scores) * 100, 1) if scores else 0,
+            "incomplete_pct": round(incomplete / len(scores) * 100, 1) if scores else 0,
+            "avg_score": avg,
+        })
+
+    # By evidence type
+    type_map = {}
+    for pkg in packages:
+        et = pkg.get("evidence_type", "desconocido")
+        if et not in type_map:
+            type_map[et] = {"count": 0, "scores": [], "perfect": 0}
+        type_map[et]["count"] += 1
+        type_map[et]["scores"].append(pkg["evidence_score"])
+        if pkg["evidence_score"] == 100:
+            type_map[et]["perfect"] += 1
+
+    by_type = []
+    for et, data in type_map.items():
+        by_type.append({
+            "type": et,
+            "count": data["count"],
+            "perfect_pct": round(data["perfect"] / data["count"] * 100, 1) if data["count"] else 0,
+            "avg_score": round(sum(data["scores"]) / len(data["scores"]), 1) if data["scores"] else 0,
+        })
+
+    # Worst 5 packages
+    worst = sorted(packages, key=lambda p: p.get("evidence_score", 999))[:5]
+    worst_packages = []
+    for pkg in worst:
+        pid = journey_provider_map.get(pkg.get("journey_id"), "unknown")
+        pname = providers_data.get(pid, {}).get("name", pid)
+        worst_packages.append({
+            "tracking_number": pkg.get("tracking_number") or pkg.get("order_reference_id"),
+            "provider_name": pname,
+            "score": pkg["evidence_score"],
+            "missing": pkg.get("evidence_detail", {}).get("missing_items", []),
+            "tracking_url": pkg.get("tracking_url"),
+        })
+
+    # Summary
+    all_scores = [p["evidence_score"] for p in packages]
+    summary = {
+        "avg_score": round(sum(all_scores) / len(all_scores), 1) if all_scores else 0,
+        "total_evaluated": len(all_scores),
+        "complete": sum(1 for s in all_scores if s == 100),
+        "partial": sum(1 for s in all_scores if 60 <= s < 100),
+        "incomplete": sum(1 for s in all_scores if s < 60),
+    }
+
+    return {
+        "by_provider": by_provider,
+        "by_type": by_type,
+        "worst_packages": worst_packages,
+        "summary": summary,
+    }
+
+
+@api_router.post("/reports/quality-export")
+async def export_quality_report(
+    date_from: str = Form(...),
+    date_to: str = Form(...),
+    provider_id: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user)
+):
+    """Export Cubbo quality report as Excel (only packages with score < 100)."""
+    import io
+    from fastapi.responses import Response as FastResponse
+    
+    journey_query = {"date": {"$gte": date_from, "$lte": date_to}, "status": "closed"}
+    journey_query = apply_assignment_filter(user, journey_query)
+    if provider_id:
+        journey_query["provider_id"] = provider_id
+
+    journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
+    journey_map = {j["id"]: j for j in journeys}
+    journey_ids = list(journey_map.keys())
+
+    packages = await db.packages.find(
+        {"journey_id": {"$in": journey_ids}, "evidence_score": {"$ne": None, "$lt": 100}},
+        {"_id": 0}
+    ).to_list(50000)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        rows = []
+        for pkg in packages:
+            j = journey_map.get(pkg.get("journey_id"), {})
+            rows.append({
+                "Fecha": j.get("date", ""),
+                "Guía": pkg.get("tracking_number") or pkg.get("order_reference_id", ""),
+                "Proveedor": j.get("provider_name", ""),
+                "Tipo de entrega": pkg.get("evidence_type", ""),
+                "Score": pkg.get("evidence_score", 0),
+                "Evidencias faltantes": ", ".join(pkg.get("evidence_detail", {}).get("missing_items", [])),
+                "Fotos": pkg.get("kosmo_proof_count", 0),
+                "Nota del mensajero": pkg.get("kosmo_driver_note", ""),
+            })
+        pd.DataFrame(rows).to_excel(writer, sheet_name="Calidad de soporte", index=False)
+
+    output.seek(0)
+    filename = f"calidad_cubbo_{date_from}_{date_to}.xlsx"
+    return FastResponse(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@api_router.post("/reports/evaluate-journey/{journey_id}")
+async def evaluate_journey_quality(
+    journey_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Manually trigger evidence quality evaluation for a journey."""
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    await evaluate_packages_for_journey(db, journey_id)
+    
+    # Get updated packages with scores
+    packages = await db.packages.find(
+        {"journey_id": journey_id, "evidence_score": {"$ne": None}},
+        {"_id": 0, "evidence_score": 1}
+    ).to_list(5000)
+    
+    scores = [p["evidence_score"] for p in packages]
+    return {
+        "evaluated": len(scores),
+        "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+        "complete": sum(1 for s in scores if s == 100),
+        "partial": sum(1 for s in scores if 60 <= s < 100),
+        "incomplete": sum(1 for s in scores if s < 60),
+    }
 
 # ==================== ROOT ====================
 

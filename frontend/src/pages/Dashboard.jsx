@@ -38,7 +38,8 @@ import {
     RefreshCw,
     Upload,
     TrendingUp,
-    Radio
+    Radio,
+    ShieldCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -193,7 +194,7 @@ const Dashboard = () => {
     return (
         <div className="space-y-6">
             {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 <KPICard
                     title="Rutas activas"
                     value={stats?.active_journeys || 0}
@@ -224,6 +225,17 @@ const Dashboard = () => {
                     subValue="completadas hoy"
                     icon={CheckCircle2}
                     color="#2E6096"
+                    loading={loading}
+                />
+                <KPICard
+                    title="Calidad de soporte"
+                    value={`${stats?.avg_evidence_score || 0}%`}
+                    subValue={stats?.packages_incomplete_support > 0 ? `${stats.packages_incomplete_support} sin soporte completo` : 'Todos completos'}
+                    icon={ShieldCheck}
+                    color={
+                        (stats?.avg_evidence_score || 0) >= 90 ? '#1A7A4A' :
+                        (stats?.avg_evidence_score || 0) >= 70 ? '#C07000' : '#B91C1C'
+                    }
                     loading={loading}
                 />
             </div>

@@ -14,6 +14,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from evidence_scoring import evaluate_packages_by_ids
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,11 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase) -> dict:
         }},
         upsert=True,
     )
+
+    # Evaluate evidence scores for packages whose status changed
+    changed_ids = [d["package_id"] for d in details if d.get("changed")]
+    if changed_ids:
+        await evaluate_packages_by_ids(db, changed_ids, journey_ids_to_recount)
 
     return {
         "total_checked": len(packages),
