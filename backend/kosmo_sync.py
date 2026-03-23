@@ -73,6 +73,15 @@ async def scrape_kosmo_page(tracking_url: str) -> dict:
 
         recipient = order.get("recipient", {})
         proof_of_deliveries = recipient.get("proofOfDeliveries") or []
+        # Extract proof photo URLs
+        proof_urls = []
+        for proof in proof_of_deliveries:
+            if isinstance(proof, dict):
+                url = proof.get("url") or proof.get("photoUrl") or proof.get("imageUrl")
+                if url:
+                    proof_urls.append(url)
+            elif isinstance(proof, str):
+                proof_urls.append(proof)
 
         return {
             "error": None,
@@ -84,6 +93,7 @@ async def scrape_kosmo_page(tracking_url: str) -> dict:
             "finished_at_ms": recipient.get("finishedAt"),
             "driver_note": recipient.get("noteFromDriver"),
             "proof_count": len(proof_of_deliveries),
+            "proof_urls": proof_urls,
         }
 
     except Exception as e:
@@ -100,15 +110,42 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase) -> dict:
     4. Recalculate journey counts for affected routes.
     """
     now = datetime.now(timezone.utc)
-    thirty_min_ago = now - timedelta(minutes=30)
+    ten_min_ago = now - timedelta(minutes=10)
 
+    # Query: packages that need scraping
+    # 1. Pending packages (not recently scraped)
+    # 2. Delivered/failed packages that were NEVER scraped (proof_count is null)
+    # 3. Delivered/failed packages with zero proofs (re-check for late-uploaded photos)
     query = {
         "tracking_url": {"$nin": [None, ""]},
-        "status": {"$nin": ["delivered", "failed"]},
         "$or": [
-            {"kosmo_scraped_at": None},
-            {"kosmo_scraped_at": {"$exists": False}},
-            {"kosmo_scraped_at": {"$lt": thirty_min_ago.isoformat()}},
+            # Pending packages not recently scraped
+            {
+                "status": {"$nin": ["delivered", "failed", "returned"]},
+                "$or": [
+                    {"kosmo_scraped_at": None},
+                    {"kosmo_scraped_at": {"$exists": False}},
+                    {"kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()}},
+                ],
+            },
+            # Delivered/failed packages never scraped
+            {
+                "status": {"$in": ["delivered", "failed"]},
+                "$or": [
+                    {"kosmo_scraped_at": None},
+                    {"kosmo_scraped_at": {"$exists": False}},
+                ],
+            },
+            # Delivered/failed with 0 proofs (re-check, max once per 10 min)
+            {
+                "status": {"$in": ["delivered", "failed"]},
+                "$or": [
+                    {"kosmo_proof_count": 0},
+                    {"kosmo_proof_count": None},
+                    {"kosmo_proof_count": {"$exists": False}},
+                ],
+                "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()},
+            },
         ],
     }
 
@@ -174,6 +211,8 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase) -> dict:
             if result.get("driver_note"):
                 update_fields["kosmo_driver_note"] = result["driver_note"]
             update_fields["kosmo_proof_count"] = result.get("proof_count", 0)
+            if result.get("proof_urls"):
+                update_fields["kosmo_proof_urls"] = result["proof_urls"]
 
             detail["driver_note"] = result.get("driver_note")
             detail["proof_count"] = result.get("proof_count", 0)
@@ -270,11 +309,29 @@ def stop_periodic_sync():
 def create_kosmo_router(db: AsyncIOMotorDatabase, get_current_user_dep):
     router = APIRouter(prefix="/sync", tags=["Kosmo Sync"])
 
+    _manual_sync_task: Optional[asyncio.Task] = None
+
     @router.post("/tracking")
     async def sync_tracking(user: dict = Depends(get_current_user_dep)):
-        """Manually trigger Kosmo tracking sync."""
-        result = await run_tracking_sync(db)
-        return result
+        """Manually trigger Kosmo tracking sync as a background task."""
+        nonlocal _manual_sync_task
+        
+        # Check if a sync is already running
+        if _manual_sync_task and not _manual_sync_task.done():
+            return {"status": "in_progress", "message": "Sincronización ya en curso"}
+        
+        async def _run_sync():
+            try:
+                result = await run_tracking_sync(db)
+                logger.info(
+                    f"Manual Kosmo sync: {result['total_checked']} checked, "
+                    f"{result['updated']} updated, {result['errors']} errors"
+                )
+            except Exception as e:
+                logger.error(f"Manual Kosmo sync error: {e}")
+        
+        _manual_sync_task = asyncio.create_task(_run_sync())
+        return {"status": "started", "message": "Sincronización iniciada en segundo plano"}
 
     @router.get("/status")
     async def get_sync_status(user: dict = Depends(get_current_user_dep)):
