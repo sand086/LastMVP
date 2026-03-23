@@ -13,6 +13,7 @@ import {
     getKosmoSyncStatus,
     searchPackages
 } from '../lib/api';
+import api from '../lib/api';
 import { 
     formatDate, 
     getTodayDate, 
@@ -173,16 +174,22 @@ const Dashboard = () => {
     const handleKosmoSync = async () => {
         setSyncing(true);
         try {
-            const res = await syncKosmoTracking();
-            const d = res.data;
-            const msg = `Sincronización completada: ${d.total_checked} verificados, ${d.updated} actualizados` +
-                (d.errors > 0 ? `, ${d.errors} errores` : '');
-            d.errors > 0 ? toast.warning(msg) : toast.success(msg);
-            setKosmoSync({ last_sync: new Date().toISOString(), total_checked: d.total_checked, updated: d.updated, errors: d.errors || 0 });
-            fetchData();
+            await syncKosmoTracking();
+            toast.success('Sincronización iniciada en segundo plano');
+            // Poll sync status after a short delay
+            setTimeout(async () => {
+                try {
+                    const statusRes = await api.get('/sync/status');
+                    const s = statusRes.data;
+                    if (s.total_checked !== undefined) {
+                        setKosmoSync({ last_sync: s.last_sync || new Date().toISOString(), total_checked: s.total_checked, updated: s.updated, errors: s.errors || 0 });
+                    }
+                } catch (_) {}
+                fetchData();
+                setSyncing(false);
+            }, 5000);
         } catch (error) {
             toast.error('Error al sincronizar con Kosmo');
-        } finally {
             setSyncing(false);
         }
     };

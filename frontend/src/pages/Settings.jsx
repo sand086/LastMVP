@@ -390,7 +390,10 @@ const Settings = () => {
         }
     };
 
+    const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+
     const handleCleanupData = async () => {
+        setShowCleanupConfirm(false);
         try {
             const res = await cleanupRoutesPackages();
             const d = res.data.deleted;
@@ -451,7 +454,7 @@ const Settings = () => {
                         <Database className="w-4 h-4 mr-2" />
                         Inicializar datos
                     </Button>
-                    <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={handleCleanupData} data-testid="cleanup-btn">
+                    <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setShowCleanupConfirm(true)} data-testid="cleanup-btn">
                         <Trash2 className="w-4 h-4 mr-2" />
                         Limpiar rutas y pedidos
                     </Button>
@@ -1082,6 +1085,29 @@ const Settings = () => {
                             data-testid="confirm-delete-btn"
                         >
                             Eliminar
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Cleanup Confirmation Dialog */}
+            <AlertDialog open={showCleanupConfirm} onOpenChange={setShowCleanupConfirm}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="font-heading text-red-700">¿Eliminar todas las rutas y paquetes?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta acción eliminará permanentemente todas las rutas, paquetes e incidencias de la base de datos. 
+                            Los usuarios, clientes y proveedores NO se verán afectados. Esta acción no se puede deshacer.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction 
+                            onClick={handleCleanupData}
+                            className="bg-red-600 hover:bg-red-700"
+                            data-testid="confirm-cleanup-btn"
+                        >
+                            Sí, eliminar todo
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

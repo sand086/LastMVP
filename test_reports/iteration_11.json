@@ -1,0 +1,86 @@
+{
+  "summary": "Completed testing of 7 findings from operational roleplay. All backend tests passed (9/9). Frontend UI verified: Sync button shows correct toast, Intentos column visible, cleanup confirmation dialog works, Layout page has correct date picker label.",
+  
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "packages",
+        "issue": "Existing packages created before composite key fix don't have cosmo_route_id field - only new packages will have it",
+        "priority": "LOW"
+      }
+    ]
+  },
+  
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11_findings.py",
+    "/app/test_reports/pytest/pytest_results_iter11.xml"
+  ],
+  
+  "action_items": [],
+  
+  "critical_code_review_comments": [],
+  
+  "updated_files": [
+    "/app/backend/tests/test_iteration11_findings.py"
+  ],
+  
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  
+  "features_verified": {
+    "Fix_1_Sync_Button_Toast": {
+      "status": "PASS",
+      "details": "POST /api/sync/tracking returns {status: 'started'}. Dashboard shows 'Sincronización iniciada en segundo plano' toast (NOT 'undefined verificados'). Verified via UI screenshot."
+    },
+    "Fix_2_Evidence_Re_Evaluation": {
+      "status": "PASS",
+      "details": "Backend code at kosmo_sync.py lines 260-264 evaluates ALL scraped packages post-sync. Delivered packages have evidence_score and evidence_type fields populated."
+    },
+    "Fix_3_Cleanup_Confirmation_Dialog": {
+      "status": "PASS",
+      "details": "Settings page 'Limpiar rutas y pedidos' button shows AlertDialog confirmation with title '¿Eliminar todas las rutas y paquetes?' and 'Sí, eliminar todo' / 'Cancelar' buttons before executing cleanup."
+    },
+    "Fix_4_Close_Form_Text": {
+      "status": "PASS",
+      "details": "JourneyDetail.jsx line 1703 has correct text: 'paquete(s) Fallido(s) marcado(s) para devolución'. Text appears when failed packages are selected for return."
+    },
+    "Fix_5_Composite_Key_Deduplication": {
+      "status": "PASS",
+      "details": "Backend server.py lines 1083-1094 uses composite key (cosmo_route_id + order_reference_id) for package deduplication. New packages include cosmo_route_id field (line 1263). Journeys have cosmo_route_id field."
+    },
+    "Fix_6_Delivery_Attempts_Column": {
+      "status": "PASS",
+      "details": "Journey detail API enriches packages with delivery_attempt field via aggregation pipeline (lines 573-585). Frontend shows 'INTENTOS' column between EVIDENCIAS and REVISADO columns. All current packages show '1' as no duplicate order_reference_ids exist across routes yet."
+    },
+    "Fix_7_Creation_Date_Usage": {
+      "status": "PASS",
+      "details": "Route-summary parser extracts creation_date field (line 980). Journey creation uses route's creation_date as journey date when available (lines 1221-1226). Layout page date picker label says 'Fecha de las rutas (respaldo)' with helper text about Creation Date (lines 549, 570)."
+    }
+  },
+  
+  "test_credentials": {
+    "developer": "dev@me.mx / LastMile2026 (full access, cannot access /layout)",
+    "coordinator": "yael@me.mx / LastMile2026 (can access /layout, /settings)"
+  },
+  
+  "seed_data_creation": "No new seed data created. Used existing journeys and packages.",
+  
+  "database_notes": {
+    "existing_packages": "Packages created before composite key fix don't have cosmo_route_id field",
+    "delivery_attempt": "All packages show delivery_attempt=1 since no duplicate order_reference_ids exist across routes yet"
+  },
+  
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  
+  "context_for_next_testing_agent": "Iteration 11 tested 7 findings from operational roleplay. All features verified working: (1) Sync button toast shows correct message, (2) Evidence re-evaluation for all scraped packages, (3) Cleanup confirmation dialog, (4) Close form text for failed packages, (5) Composite key deduplication, (6) Delivery attempts column, (7) Creation Date usage. Note: Layout page requires agent/coordinator role (not developer). The delivery_attempt field will show values > 1 only when same order_reference_id appears in multiple routes."
+}

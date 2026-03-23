@@ -569,6 +569,21 @@ async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
     
     # Get packages
     packages = await db.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(1000)
+    
+    # Enrich with delivery_attempt count if not already set
+    order_refs = [p.get("order_reference_id") for p in packages if p.get("order_reference_id")]
+    if order_refs:
+        pipeline = [
+            {"$match": {"order_reference_id": {"$in": order_refs}}},
+            {"$group": {"_id": "$order_reference_id", "count": {"$sum": 1}}}
+        ]
+        attempt_map = {}
+        async for doc in db.packages.aggregate(pipeline):
+            attempt_map[doc["_id"]] = doc["count"]
+        for p in packages:
+            ref = p.get("order_reference_id", "")
+            p["delivery_attempt"] = p.get("delivery_attempt") or attempt_map.get(ref, 1)
+    
     journey["packages"] = packages
     
     # Get incidents
@@ -962,6 +977,7 @@ async def upload_route_summary(
                     "team": cleaned_route.get("Team", ""),
                     "status": cleaned_route.get("Status", ""),
                     "zones": cleaned_route.get("Zones", ""),
+                    "creation_date": cleaned_route.get("Creation Date", ""),
                     "planned_distance": cleaned_route.get("Planned Distance", ""),
                     "actual_distance": cleaned_route.get("Actual Distance", ""),
                     "total_stops": cleaned_route.get("Total Stops", "0"),
@@ -1064,9 +1080,18 @@ async def create_journeys_from_cosmo(
                 upsert=True
             )
     
-    # Get all existing orders to check for duplicates - include journey_id for updates
-    existing_orders = await db.packages.find({}, {"order_reference_id": 1, "id": 1, "journey_id": 1, "_id": 0}).to_list(10000)
-    existing_order_map = {o.get("order_reference_id", ""): o for o in existing_orders if o.get("order_reference_id")}
+    # Get all existing orders to check for duplicates using composite key (cosmo_route_id + order_reference_id)
+    existing_orders = await db.packages.find({}, {"order_reference_id": 1, "cosmo_route_id": 1, "id": 1, "journey_id": 1, "_id": 0}).to_list(10000)
+    existing_order_map = {}
+    # Count previous attempts per order_reference_id
+    attempt_counts = {}
+    for o in existing_orders:
+        ref = o.get("order_reference_id", "")
+        route = o.get("cosmo_route_id", "")
+        if ref:
+            composite_key = f"{route}|{ref}"
+            existing_order_map[composite_key] = o
+            attempt_counts[ref] = attempt_counts.get(ref, 0) + 1
     
     # Build order lookup from history-orders
     orders_by_route = {}
@@ -1110,8 +1135,9 @@ async def create_journeys_from_cosmo(
             route_updated = 0
             for order in route_orders:
                 order_ref = order.get("order_reference_id", "")
-                if order_ref and order_ref in existing_order_map:
-                    # Update existing package
+                composite_key = f"{route_id}|{order_ref}"
+                if order_ref and composite_key in existing_order_map:
+                    # Update existing package in this route
                     update_fields = {}
                     new_cosmo_status = order.get("order_status", "")
                     if new_cosmo_status:
@@ -1126,8 +1152,9 @@ async def create_journeys_from_cosmo(
                         update_fields["tracking_url"] = tracking_url
                     
                     if update_fields:
+                        pkg_data = existing_order_map[composite_key]
                         await db.packages.update_one(
-                            {"order_reference_id": order_ref},
+                            {"id": pkg_data["id"]},
                             {"$set": update_fields}
                         )
                         route_updated += 1
@@ -1155,8 +1182,10 @@ async def create_journeys_from_cosmo(
         updated_in_other = 0
         for order in route_orders:
             order_ref = order.get("order_reference_id", "")
-            if order_ref in existing_order_map:
-                # Update existing package in another journey
+            composite_key = f"{route_id}|{order_ref}"
+            if composite_key in existing_order_map:
+                # This exact route+order combo already exists → update it
+                pkg_data = existing_order_map[composite_key]
                 update_fields = {}
                 new_cosmo_status = order.get("order_status", "")
                 if new_cosmo_status:
@@ -1169,12 +1198,14 @@ async def create_journeys_from_cosmo(
                 if tracking_url:
                     update_fields["tracking_url"] = tracking_url
                 if update_fields:
-                    await db.packages.update_one({"order_reference_id": order_ref}, {"$set": update_fields})
+                    await db.packages.update_one({"id": pkg_data["id"]}, {"$set": update_fields})
                     updated_in_other += 1
                     total_updated_packages += 1
             else:
+                # New order in this route (could be a re-attempt of an existing order_ref in another route)
                 new_orders.append(order)
-                existing_order_map[order_ref] = True
+                existing_order_map[composite_key] = True
+                attempt_counts[order_ref] = attempt_counts.get(order_ref, 0) + 1
         
         if not new_orders and route_orders:
             if updated_in_other > 0:
@@ -1187,12 +1218,18 @@ async def create_journeys_from_cosmo(
                 skipped_duplicates.append(f"{route_id} (todas las órdenes duplicadas)")
             continue
         
-        # Create journey
+        # Create journey - use creation_date from route-summary if available, else fallback to payload date
+        route_creation_date = route.get("creation_date", "")
+        journey_date = route_creation_date if route_creation_date else data.date
+        # Normalize date format (e.g., "2026-03-21T00:00:00" → "2026-03-21")
+        if journey_date and "T" in journey_date:
+            journey_date = journey_date.split("T")[0]
+        
         journey_id = str(uuid.uuid4())
         journey = {
             "id": journey_id,
             "cosmo_route_id": route_id,
-            "date": data.date,
+            "date": journey_date,
             "client_id": data.client_id,
             "provider_id": provider_id,
             "driver_name": driver_name,
@@ -1219,11 +1256,13 @@ async def create_journeys_from_cosmo(
         
         # Create packages from orders
         for order in new_orders:
+            order_ref = order.get("order_reference_id", "")
             package = {
                 "id": str(uuid.uuid4()),
                 "journey_id": journey_id,
-                "order_reference_id": order.get("order_reference_id", ""),
-                "tracking_number": order.get("order_reference_id", ""),
+                "cosmo_route_id": route_id,
+                "order_reference_id": order_ref,
+                "tracking_number": order_ref,
                 "tracking_url": order.get("tracking_url", ""),
                 "recipient_name": order.get("recipient_name", ""),
                 "address": order.get("recipient_address", ""),
@@ -1235,7 +1274,8 @@ async def create_journeys_from_cosmo(
                 "failure_reason": order.get("failure_reason", ""),
                 "failure_reason_note": order.get("failure_reason_note", ""),
                 "created_date": order.get("created_date", ""),
-                "is_retry": False
+                "delivery_attempt": attempt_counts.get(order_ref, 1),
+                "is_retry": attempt_counts.get(order_ref, 1) > 1
             }
             await db.packages.insert_one(package)
             total_new_packages += 1
@@ -2931,6 +2971,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
+    # Create indexes for composite unique key
+    await db.packages.create_index(
+        [("cosmo_route_id", 1), ("order_reference_id", 1)],
+        unique=False,
+        background=True
+    )
+    await db.packages.create_index("order_reference_id", background=True)
     start_periodic_sync(db)
 
 @app.on_event("shutdown")

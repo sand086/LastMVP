@@ -257,10 +257,11 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase) -> dict:
         upsert=True,
     )
 
-    # Evaluate evidence scores for packages whose status changed
-    changed_ids = [d["package_id"] for d in details if d.get("changed")]
-    if changed_ids:
-        await evaluate_packages_by_ids(db, changed_ids, journey_ids_to_recount)
+    # Evaluate evidence scores for ALL scraped packages (not just changed)
+    all_scraped_ids = [d["package_id"] for d in details]
+    all_journey_ids = set(pkg.get("journey_id") for pkg in packages if pkg.get("journey_id"))
+    if all_scraped_ids:
+        await evaluate_packages_by_ids(db, all_scraped_ids, all_journey_ids)
 
     return {
         "total_checked": len(packages),

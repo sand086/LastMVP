@@ -844,6 +844,7 @@ const JourneyDetail = () => {
                                             <th>Estado</th>
                                             <th>Soporte</th>
                                             <th>Evidencias</th>
+                                            <th>Intentos</th>
                                             <th>Revisado</th>
                                         </tr>
                                     </thead>
@@ -962,6 +963,15 @@ const JourneyDetail = () => {
                                                             </span>
                                                         )}
                                                     </div>
+                                                </td>
+                                                <td className="text-center">
+                                                    {(pkg.delivery_attempt || 1) > 1 ? (
+                                                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold" title={`Intento ${pkg.delivery_attempt}`}>
+                                                            {pkg.delivery_attempt}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-300 text-xs">1</span>
+                                                    )}
                                                 </td>
                                                 <td>
                                                     {pkg.reviewed_by ? (
@@ -1690,7 +1700,7 @@ const JourneyDetail = () => {
                                         {failedPackages.length > 0 && (
                                             <div className="p-3 bg-slate-100 border-t border-slate-300 flex items-center justify-between">
                                                 <span className="text-sm text-slate-700">
-                                                    <strong>{failedPackages.length}</strong> paquete(s) marcados para devolución
+                                                    <strong>{failedPackages.length}</strong> paquete(s) Fallido(s) marcado(s) para devolución
                                                 </span>
                                                 <Button
                                                     variant="ghost"

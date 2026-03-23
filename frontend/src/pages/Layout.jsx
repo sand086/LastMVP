@@ -198,6 +198,19 @@ const Layout = () => {
             const res = await uploadRouteSummary(file);
             setRouteData(res.data);
             toast.success(`${res.data.total_routes} rutas encontradas con ${res.data.drivers.length} mensajeros`);
+            
+            // Auto-set date from first route's creation_date if available
+            if (res.data.routes?.length > 0) {
+                const firstCreationDate = res.data.routes[0].creation_date;
+                if (firstCreationDate) {
+                    const dateStr = firstCreationDate.includes('T') ? firstCreationDate.split('T')[0] : firstCreationDate;
+                    const parsed = new Date(dateStr + 'T12:00:00');
+                    if (!isNaN(parsed.getTime())) {
+                        setSelectedDate(parsed);
+                    }
+                }
+            }
+            
             setCurrentStep(3);
         } catch (error) {
             setRouteError(error.response?.data?.detail || 'Error al procesar archivo');
@@ -533,7 +546,7 @@ const Layout = () => {
                                 {/* Date and Client */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label>Fecha de las rutas</Label>
+                                        <Label>Fecha de las rutas (respaldo)</Label>
                                         <Popover>
                                             <PopoverTrigger asChild>
                                                 <Button 
@@ -554,6 +567,7 @@ const Layout = () => {
                                                 />
                                             </PopoverContent>
                                         </Popover>
+                                        <p className="text-xs text-slate-400">Se usa "Creation Date" del route-summary por ruta. Esta fecha es respaldo si no existe.</p>
                                     </div>
                                     <div className="space-y-2">
                                         <Label>Cliente</Label>
