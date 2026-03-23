@@ -62,8 +62,16 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Checklist reordered to chronological operation order
 - [x] Items 7-8 (odometer photo, CEDIS screenshot) marked as "(opcional)"
 
+### Phase 6 - Deployment Readiness (March 23, 2026)
+- [x] Removed DB_NAME hardcoded fallback (fails fast if not set)
+- [x] Strengthened JWT_SECRET to 46 bytes (above 32-byte SHA256 minimum)
+- [x] Added JWT_SECRET to backend .env
+- [x] Optimized N+1 incident query with MongoDB aggregation pipeline
+- [x] Database cleanup verified and functional
+- [x] Deployment health check passed (18/18 backend tests, all frontend verified)
+
 ## Architecture
-- `/app/backend/server.py`: Core API (~2700 lines)
+- `/app/backend/server.py`: Core API (~2800 lines)
 - `/app/backend/kosmo_sync.py`: Kosmo scraper, sync logic, scheduler, router
 - `/app/backend/evidence_scoring.py`: Evidence quality scoring functions
 - `/app/backend/middleware.py`: Audit/error middleware
@@ -79,6 +87,8 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - POST /api/reports/evaluate-journey/{id}
 - POST /api/reports/generate, /generate-excel
 - GET /api/system/health, /logs, /errors, /integrity
+- POST /api/cleanup/routes-packages
+- PUT/DELETE /api/clients/{id}, /api/providers/{id}
 
 ## Credentials
 - Agent: agente@me.mx / LastMile2026
