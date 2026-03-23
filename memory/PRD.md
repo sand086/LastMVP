@@ -1,7 +1,7 @@
 # LastMile OS MVP - Product Requirements Document
 
 ## Original Problem Statement
-Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, custom reports with AI, system observability tools, and automated Kosmo tracking sync.
+Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, custom reports with AI, system observability, automated Kosmo tracking sync, and evidence quality scoring based on Cubbo standards.
 
 ## User Personas
 - **Agent**: Field delivery operator (upload layouts, manage routes)
@@ -41,22 +41,44 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Developer role (dev@me.mx)
 
 ### Phase 4 - Kosmo Tracking Sync (March 23, 2026)
-- [x] **Scraper**: Extracts order data from public Kosmo tracking pages (Next.js SSR __NEXT_DATA__)
-- [x] **New Package Fields**: kosmo_order_id, kosmo_status_raw, kosmo_updated_at, kosmo_finished_at, kosmo_driver_note, kosmo_proof_count, kosmo_scraped_at
-- [x] **Status Mapping**: delivered→delivered, cancelled→failed, picked_up/in_transit/assigned→pending
-- [x] **Sync Endpoint**: POST /api/sync/tracking (max 50 pkgs, Semaphore(5) concurrency)
-- [x] **Status Endpoint**: GET /api/sync/status (last_sync, total_checked, updated, errors)
-- [x] **Auto Scheduler**: Background task runs every 30 min
-- [x] **Dashboard Sync Bar**: Shows last sync time, stats, errors (amber), manual sync button
-- [x] **Package Table**: Clickable tracking links, delivery time, camera icon + proof count, driver note tooltip, sync clock
-- [x] **Evidence Panel**: Driver notes, delivery time, photo count, external Kosmo link
+- [x] Scraper: Extracts order data from public Kosmo tracking pages (Next.js SSR __NEXT_DATA__)
+- [x] Package fields: kosmo_order_id, kosmo_status_raw, kosmo_updated_at, kosmo_finished_at, kosmo_driver_note, kosmo_proof_count, kosmo_scraped_at
+- [x] Status mapping: delivered→delivered, cancelled→failed, picked_up/in_transit/assigned→pending
+- [x] Sync endpoint: POST /api/sync/tracking (max 50 pkgs, Semaphore(5))
+- [x] Status endpoint: GET /api/sync/status
+- [x] Auto scheduler: Background task every 30 min
+- [x] Dashboard sync bar with manual sync button
+
+### Phase 5 - Evidence Quality Scoring (March 23, 2026)
+- [x] Scoring function based on Cubbo 3-photo standard
+- [x] Evidence types: exitosa, terceros (with driver note keywords), fallida
+- [x] Auto-evaluation after sync and route close
+- [x] Dashboard 5th KPI: "Calidad de soporte" with color coding
+- [x] Package table: Soporte column (Completo/Parcial/Incompleto badges) + Evidencias column
+- [x] New "Calidad" tab: Score summary, distribution bar, scored packages table, filter, re-evaluate
+- [x] Quality Reports section: by provider, by type, worst packages, Cubbo Excel export
+- [x] WhatsApp close summary includes quality block with attention items
+- [x] Odometer photo marked optional in Start/Close forms with help text
+- [x] Checklist reordered to chronological operation order
+- [x] Items 7-8 (odometer photo, CEDIS screenshot) marked as "(opcional)"
 
 ## Architecture
-- `/app/backend/server.py`: Core API (~2490 lines)
+- `/app/backend/server.py`: Core API (~2700 lines)
 - `/app/backend/kosmo_sync.py`: Kosmo scraper, sync logic, scheduler, router
+- `/app/backend/evidence_scoring.py`: Evidence quality scoring functions
 - `/app/backend/middleware.py`: Audit/error middleware
 - `/app/backend/system_routes.py`: System observability endpoints
 - `/app/frontend/src/pages/`: Dashboard, JourneyDetail, Layout, Reports, Settings, System*, etc.
+
+## Key API Endpoints
+- POST /api/auth/login
+- POST /api/upload/step1-orders, step2-routes
+- POST /api/journeys/{id}/start, /close
+- POST /api/sync/tracking, GET /api/sync/status
+- GET /api/reports/quality, POST /api/reports/quality-export
+- POST /api/reports/evaluate-journey/{id}
+- POST /api/reports/generate, /generate-excel
+- GET /api/system/health, /logs, /errors, /integrity
 
 ## Credentials
 - Agent: agente@me.mx / LastMile2026
