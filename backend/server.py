@@ -28,10 +28,10 @@ load_dotenv(ROOT_DIR / '.env')
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ.get('DB_NAME', 'lastmile_os')]
+db = client[os.environ['DB_NAME']]
 
 # JWT Configuration
-JWT_SECRET = os.environ.get('JWT_SECRET', 'lastmile-secret-key-2026')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'lastmile-os-secret-key-2026-production-v1')
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 8
 
@@ -529,14 +529,29 @@ async def get_journeys(
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
     providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
     
+    # Batch query incident counts to avoid N+1 problem
+    journey_ids = [j["id"] for j in journeys]
+    incident_counts = {}
+    open_incident_counts = {}
+    if journey_ids:
+        pipeline_total = [
+            {"$match": {"journey_id": {"$in": journey_ids}}},
+            {"$group": {"_id": "$journey_id", "count": {"$sum": 1}}}
+        ]
+        pipeline_open = [
+            {"$match": {"journey_id": {"$in": journey_ids}, "status": "open"}},
+            {"$group": {"_id": "$journey_id", "count": {"$sum": 1}}}
+        ]
+        async for doc in db.incidents.aggregate(pipeline_total):
+            incident_counts[doc["_id"]] = doc["count"]
+        async for doc in db.incidents.aggregate(pipeline_open):
+            open_incident_counts[doc["_id"]] = doc["count"]
+    
     for j in journeys:
         j["client_name"] = clients.get(j.get("client_id"), "")
         j["provider_name"] = providers.get(j.get("provider_id"), "")
-        # Count incidents
-        incidents = await db.incidents.count_documents({"journey_id": j["id"]})
-        j["incidents_count"] = incidents
-        open_incidents = await db.incidents.count_documents({"journey_id": j["id"], "status": "open"})
-        j["open_incidents_count"] = open_incidents
+        j["incidents_count"] = incident_counts.get(j["id"], 0)
+        j["open_incidents_count"] = open_incident_counts.get(j["id"], 0)
     
     return journeys
 
