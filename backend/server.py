@@ -107,17 +107,20 @@ class PackageResponse(PackageBase):
 
 class JourneyStartData(BaseModel):
     departure_time: str
-    odometer_start: int
-    fuel_level: str
-    vehicle_condition: str
+    odometer_start: int = 0
+    fuel_level: str = ""
+    vehicle_condition: str = ""
     vehicle_notes: Optional[str] = None
-    packages_loaded: int
+    packages_loaded: int = 0
     notes: Optional[str] = None
-    checklist_completed: bool
+    checklist_completed: bool = True
     arrival_time_cedis: Optional[str] = None
     backup_driver_name: Optional[str] = None
     backup_request_time: Optional[str] = None
     backup_arrival_time: Optional[str] = None
+    route_type: Optional[str] = None
+    city: Optional[str] = None
+    max_packages: Optional[int] = None
 
 class JourneyCloseData(BaseModel):
     closed_at: str
@@ -269,7 +272,7 @@ async def logout(user: dict = Depends(get_current_user)):
 # ==================== USER MANAGEMENT (COORDINATOR ONLY) ====================
 
 @api_router.get("/users")
-async def get_users(user: dict = Depends(require_role(["coordinator"]))):
+async def get_users(user: dict = Depends(require_role(["coordinator", "developer"]))):
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
     
     # Enrich with client and provider names
@@ -285,7 +288,7 @@ async def get_users(user: dict = Depends(require_role(["coordinator"]))):
     return users
 
 @api_router.post("/users")
-async def create_user(data: UserCreate, user: dict = Depends(require_role(["coordinator"]))):
+async def create_user(data: UserCreate, user: dict = Depends(require_role(["coordinator", "developer"]))):
     existing = await db.users.find_one({"email": data.email})
     if existing:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
@@ -304,7 +307,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_role(["coor
     return {k: v for k, v in new_user.items() if k not in ["_id", "password"]}
 
 @api_router.put("/users/{user_id}")
-async def update_user(user_id: str, data: dict, admin: dict = Depends(require_role(["coordinator"]))):
+async def update_user(user_id: str, data: dict, admin: dict = Depends(require_role(["coordinator", "developer"]))):
     update_data = {k: v for k, v in data.items() if k not in ["id", "password", "_id"]}
     result = await db.users.update_one({"id": user_id}, {"$set": update_data})
     if result.modified_count == 0:
@@ -315,7 +318,7 @@ async def update_user(user_id: str, data: dict, admin: dict = Depends(require_ro
 async def update_user_assignments(
     user_id: str, 
     data: dict,
-    admin: dict = Depends(require_role(["coordinator"]))
+    admin: dict = Depends(require_role(["coordinator", "developer"]))
 ):
     """Update client and provider assignments for a user"""
     update_data = {}
@@ -337,14 +340,14 @@ async def update_user_assignments(
     return {"message": "Asignaciones actualizadas"}
 
 @api_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, admin: dict = Depends(require_role(["coordinator"]))):
+async def delete_user(user_id: str, admin: dict = Depends(require_role(["coordinator", "developer"]))):
     result = await db.users.delete_one({"id": user_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return {"message": "Usuario eliminado"}
 
 @api_router.post("/users/change-password")
-async def change_password_by_admin(data: PasswordChangeByAdmin, admin: dict = Depends(require_role(["coordinator"]))):
+async def change_password_by_admin(data: PasswordChangeByAdmin, admin: dict = Depends(require_role(["coordinator", "developer"]))):
     result = await db.users.update_one(
         {"id": data.user_id},
         {"$set": {"password": hash_password(data.new_password)}}
@@ -380,12 +383,12 @@ async def request_password_reset(data: PasswordResetRequestCreate):
     return {"message": "Solicitud enviada. El administrador procesará tu solicitud."}
 
 @api_router.get("/password-reset-requests")
-async def get_password_reset_requests(admin: dict = Depends(require_role(["coordinator"]))):
+async def get_password_reset_requests(admin: dict = Depends(require_role(["coordinator", "developer"]))):
     requests = await db.password_reset_requests.find({}, {"_id": 0}).sort("requested_at", -1).to_list(100)
     return requests
 
 @api_router.delete("/password-reset-requests/{request_id}")
-async def dismiss_password_reset_request(request_id: str, admin: dict = Depends(require_role(["coordinator"]))):
+async def dismiss_password_reset_request(request_id: str, admin: dict = Depends(require_role(["coordinator", "developer"]))):
     result = await db.password_reset_requests.delete_one({"id": request_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
@@ -426,6 +429,73 @@ async def create_provider(data: ProviderBase, user: dict = Depends(require_role(
     }
     await db.providers.insert_one(new_provider)
     return {k: v for k, v in new_provider.items() if k != "_id"}
+
+@api_router.put("/clients/{client_id}")
+async def update_client(client_id: str, data: dict, user: dict = Depends(require_role(["coordinator", "developer"]))):
+    update_fields = {}
+    if "name" in data:
+        update_fields["name"] = data["name"]
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No hay campos para actualizar")
+    result = await db.clients.update_one({"id": client_id}, {"$set": update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return {"message": "Cliente actualizado"}
+
+@api_router.delete("/clients/{client_id}")
+async def delete_client(client_id: str, user: dict = Depends(require_role(["coordinator", "developer"]))):
+    result = await db.clients.delete_one({"id": client_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return {"message": "Cliente eliminado"}
+
+@api_router.put("/providers/{provider_id}")
+async def update_provider(provider_id: str, data: dict, user: dict = Depends(require_role(["coordinator", "developer"]))):
+    update_fields = {}
+    for field in ["name", "contact_name", "contact_phone"]:
+        if field in data:
+            update_fields[field] = data[field]
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No hay campos para actualizar")
+    result = await db.providers.update_one({"id": provider_id}, {"$set": update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+    return {"message": "Proveedor actualizado"}
+
+@api_router.delete("/providers/{provider_id}")
+async def delete_provider(provider_id: str, user: dict = Depends(require_role(["coordinator", "developer"]))):
+    result = await db.providers.delete_one({"id": provider_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+    return {"message": "Proveedor eliminado"}
+
+# ==================== DASHBOARD SEARCH ====================
+
+@api_router.get("/packages/search")
+async def search_packages(q: str, user: dict = Depends(get_current_user)):
+    """Search packages by order_reference_id or tracking_number."""
+    if not q or len(q) < 2:
+        return []
+    query = {
+        "$or": [
+            {"order_reference_id": {"$regex": q, "$options": "i"}},
+            {"tracking_number": {"$regex": q, "$options": "i"}},
+        ]
+    }
+    packages = await db.packages.find(query, {"_id": 0}).to_list(20)
+    # Enrich with journey info
+    journey_ids = list({p.get("journey_id") for p in packages if p.get("journey_id")})
+    journeys = await db.journeys.find(
+        {"id": {"$in": journey_ids}},
+        {"_id": 0, "id": 1, "date": 1, "provider_name": 1, "client_name": 1}
+    ).to_list(100)
+    j_map = {j["id"]: j for j in journeys}
+    for p in packages:
+        j = j_map.get(p.get("journey_id"), {})
+        p["journey_date"] = j.get("date")
+        p["provider_name"] = j.get("provider_name")
+        p["client_name"] = j.get("client_name")
+    return packages
 
 # ==================== JOURNEYS ====================
 
@@ -570,9 +640,18 @@ async def start_journey(journey_id: str, data: JourneyStartData, user: dict = De
         "started_by": user["id"]
     }
     
+    update_fields = {"status": "in_progress", "start_data": start_data}
+    # Store route_type from start form if provided
+    if hasattr(data, 'route_type') and data.route_type:
+        update_fields["route_type"] = data.route_type
+    if hasattr(data, 'city') and data.city:
+        update_fields["city"] = data.city
+    if hasattr(data, 'max_packages') and data.max_packages:
+        update_fields["max_packages"] = data.max_packages
+    
     await db.journeys.update_one(
         {"id": journey_id},
-        {"$set": {"status": "in_progress", "start_data": start_data}}
+        {"$set": update_fields}
     )
     await log_audit_event(db, user["id"], user["role"], "route_started", "journey", journey_id)
     
@@ -1833,6 +1912,21 @@ async def seed_database():
         }
     }
 
+@api_router.post("/cleanup/routes-packages")
+async def cleanup_routes_packages(user: dict = Depends(require_role(["coordinator", "developer"]))):
+    """Clear all journeys, packages, and incidents data for fresh testing."""
+    j_del = await db.journeys.delete_many({})
+    p_del = await db.packages.delete_many({})
+    i_del = await db.incidents.delete_many({})
+    return {
+        "message": "Datos limpiados",
+        "deleted": {
+            "journeys": j_del.deleted_count,
+            "packages": p_del.deleted_count,
+            "incidents": i_del.deleted_count,
+        }
+    }
+
 # ==================== CUSTOM REPORT GENERATION ====================
 
 class ReportRequest(BaseModel):
@@ -2665,6 +2759,70 @@ async def report_schema():
                     {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": True}
                 ],
                 "fields": ["Archivo .xlsx con 3 hojas: Rutas, Incidencias, Resumen Proveedores"]
+            },
+            {
+                "name": "Kosmo Tracking Sync",
+                "endpoint": "/api/sync/tracking",
+                "method": "POST",
+                "description": "Sincroniza estatus de paquetes scrapeando páginas públicas de Kosmo. Máx 50 por llamada.",
+                "parameters": [],
+                "fields": ["total_checked", "updated", "no_change", "errors", "details[]"]
+            },
+            {
+                "name": "Kosmo Sync Status",
+                "endpoint": "/api/sync/status",
+                "method": "GET",
+                "description": "Timestamp y stats de la última sincronización de Kosmo.",
+                "parameters": [],
+                "fields": ["last_sync", "total_checked", "updated", "errors"]
+            },
+            {
+                "name": "Quality Report",
+                "endpoint": "/api/reports/quality",
+                "method": "GET",
+                "description": "Reporte de calidad de soporte basado en estándar Cubbo (3 fotos por entrega).",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "provider_id", "type": "string", "required": False}
+                ],
+                "fields": [
+                    "by_provider[]", "by_type[]", "worst_packages[]",
+                    "summary.avg_score", "summary.complete", "summary.partial", "summary.incomplete"
+                ]
+            },
+            {
+                "name": "Quality Excel Export (Cubbo)",
+                "endpoint": "/api/reports/quality-export",
+                "method": "POST",
+                "description": "Exporta Excel para Cubbo con paquetes que tienen score < 100.",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "provider_id", "type": "string", "required": False}
+                ],
+                "fields": ["Archivo .xlsx: fecha, guía, proveedor, tipo entrega, score, evidencias faltantes"]
+            },
+            {
+                "name": "Package Search",
+                "endpoint": "/api/packages/search",
+                "method": "GET",
+                "description": "Busca paquetes por guía o referencia (order_reference_id).",
+                "parameters": [
+                    {"name": "q", "type": "string", "required": True}
+                ],
+                "fields": [
+                    "id", "tracking_number", "order_reference_id", "recipient_name",
+                    "status", "journey_id", "journey_date", "provider_name"
+                ]
+            },
+            {
+                "name": "Cleanup Routes & Packages",
+                "endpoint": "/api/cleanup/routes-packages",
+                "method": "POST",
+                "description": "Elimina todas las rutas, paquetes e incidencias. Solo coordinator/developer.",
+                "parameters": [],
+                "fields": ["deleted.journeys", "deleted.packages", "deleted.incidents"]
             }
         ],
         "authentication": {

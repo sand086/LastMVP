@@ -11,9 +11,14 @@ import {
     dismissPasswordResetRequest,
     getClients,
     createClient,
+    updateClient,
+    deleteClient,
     getProviders,
     createProvider,
-    seedDatabase
+    updateProvider,
+    deleteProvider,
+    seedDatabase,
+    cleanupRoutesPackages
 } from '../lib/api';
 import api from '../lib/api';
 import { formatDateTime } from '../lib/utils';
@@ -60,7 +65,8 @@ import {
     Link as LinkIcon,
     Settings2,
     Server,
-    Clock
+    Clock,
+    Search
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -113,12 +119,18 @@ const Settings = () => {
     // Client/Provider modal
     const [showEntityModal, setShowEntityModal] = useState(false);
     const [entityType, setEntityType] = useState('');
+    const [editingEntity, setEditingEntity] = useState(null);
     const [entityForm, setEntityForm] = useState({
         name: '',
         contact_name: '',
         contact_phone: '',
     });
     const [entitySubmitting, setEntitySubmitting] = useState(false);
+
+    // Search filters
+    const [searchUsers, setSearchUsers] = useState('');
+    const [searchClients, setSearchClients] = useState('');
+    const [searchProviders, setSearchProviders] = useState('');
 
     useEffect(() => {
         fetchData();
@@ -214,17 +226,6 @@ const Settings = () => {
         }
     };
 
-    const handleDeleteUser = async () => {
-        setShowDeleteConfirm(false);
-        try {
-            await deleteUser(deleteTarget.id);
-            toast.success('Usuario eliminado');
-            fetchData();
-        } catch (error) {
-            toast.error('Error al eliminar usuario');
-        }
-    };
-
     // Assignment handlers
     const handleOpenAssignmentModal = (user) => {
         setAssignmentUser(user);
@@ -304,13 +305,14 @@ const Settings = () => {
     };
 
     // Entity handlers
-    const handleOpenEntityModal = (type) => {
+    const handleOpenEntityModal = (type, entity = null) => {
         setEntityType(type);
-        setEntityForm({
-            name: '',
-            contact_name: '',
-            contact_phone: '',
-        });
+        setEditingEntity(entity);
+        setEntityForm(entity ? {
+            name: entity.name || '',
+            contact_name: entity.contact_name || '',
+            contact_phone: entity.contact_phone || '',
+        } : { name: '', contact_name: '', contact_phone: '' });
         setShowEntityModal(true);
     };
 
@@ -322,19 +324,58 @@ const Settings = () => {
 
         setEntitySubmitting(true);
         try {
-            if (entityType === 'client') {
-                await createClient({ name: entityForm.name });
-                toast.success('Cliente creado');
+            if (editingEntity) {
+                if (entityType === 'client') {
+                    await updateClient(editingEntity.id, { name: entityForm.name });
+                    toast.success('Cliente actualizado');
+                } else {
+                    await updateProvider(editingEntity.id, entityForm);
+                    toast.success('Proveedor actualizado');
+                }
             } else {
-                await createProvider(entityForm);
-                toast.success('Proveedor creado');
+                if (entityType === 'client') {
+                    await createClient({ name: entityForm.name });
+                    toast.success('Cliente creado');
+                } else {
+                    await createProvider(entityForm);
+                    toast.success('Proveedor creado');
+                }
             }
             setShowEntityModal(false);
+            setEditingEntity(null);
             fetchData();
         } catch (error) {
             toast.error('Error al guardar');
         } finally {
             setEntitySubmitting(false);
+        }
+    };
+
+    const handleDeleteEntity = async (type, id) => {
+        setDeleteTarget({ id, type });
+        setDeleteType(type === 'client' ? 'cliente' : 'proveedor');
+        setShowDeleteConfirm(true);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!deleteTarget) return;
+        try {
+            if (deleteTarget.type === 'user') {
+                await deleteUser(deleteTarget.id);
+                toast.success('Usuario eliminado');
+            } else if (deleteTarget.type === 'client') {
+                await deleteClient(deleteTarget.id);
+                toast.success('Cliente eliminado');
+            } else if (deleteTarget.type === 'provider') {
+                await deleteProvider(deleteTarget.id);
+                toast.success('Proveedor eliminado');
+            }
+            setShowDeleteConfirm(false);
+            setDeleteTarget(null);
+            fetchData();
+        } catch (error) {
+            toast.error(error.response?.data?.detail || 'Error al eliminar');
+            setShowDeleteConfirm(false);
         }
     };
 
@@ -346,6 +387,16 @@ const Settings = () => {
             fetchData();
         } catch (error) {
             toast.error(error.response?.data?.detail || 'Error al inicializar');
+        }
+    };
+
+    const handleCleanupData = async () => {
+        try {
+            const res = await cleanupRoutesPackages();
+            const d = res.data.deleted;
+            toast.success(`Limpieza completada: ${d.journeys} rutas, ${d.packages} paquetes, ${d.incidents} incidencias eliminadas`);
+        } catch (error) {
+            toast.error('Error al limpiar datos');
         }
     };
 
@@ -395,10 +446,16 @@ const Settings = () => {
                         Administra usuarios, clientes y proveedores
                     </p>
                 </div>
-                <Button variant="outline" onClick={handleSeedDatabase} data-testid="seed-btn">
-                    <Database className="w-4 h-4 mr-2" />
-                    Inicializar datos
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={handleSeedDatabase} data-testid="seed-btn">
+                        <Database className="w-4 h-4 mr-2" />
+                        Inicializar datos
+                    </Button>
+                    <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={handleCleanupData} data-testid="cleanup-btn">
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Limpiar rutas y pedidos
+                    </Button>
+                </div>
             </div>
 
             {/* Password Reset Requests Alert */}
@@ -472,7 +529,17 @@ const Settings = () => {
 
                 {/* Users Tab */}
                 <TabsContent value="users" className="space-y-4">
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="relative flex-1 max-w-sm">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <Input
+                                value={searchUsers}
+                                onChange={(e) => setSearchUsers(e.target.value)}
+                                placeholder="Buscar usuario..."
+                                className="pl-9"
+                                data-testid="search-users-input"
+                            />
+                        </div>
                         <Button onClick={() => handleOpenUserModal()} data-testid="add-user-btn">
                             <Plus className="w-4 h-4 mr-2" />
                             Nuevo usuario
@@ -485,10 +552,10 @@ const Settings = () => {
                                 <div className="p-8 flex justify-center">
                                     <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
                                 </div>
-                            ) : users.length === 0 ? (
+                            ) : users.filter(u => !searchUsers || u.name?.toLowerCase().includes(searchUsers.toLowerCase()) || u.email?.toLowerCase().includes(searchUsers.toLowerCase())).length === 0 ? (
                                 <div className="text-center py-12">
                                     <Users className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                                    <p className="text-slate-500">No hay usuarios registrados</p>
+                                    <p className="text-slate-500">{searchUsers ? 'Sin resultados' : 'No hay usuarios registrados'}</p>
                                 </div>
                             ) : (
                                 <table className="data-table w-full">
@@ -502,7 +569,7 @@ const Settings = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {users.map((user) => (
+                                        {users.filter(u => !searchUsers || u.name?.toLowerCase().includes(searchUsers.toLowerCase()) || u.email?.toLowerCase().includes(searchUsers.toLowerCase())).map((user) => (
                                             <tr key={user.id} data-testid={`user-row-${user.id}`}>
                                                 <td className="font-medium">{user.name}</td>
                                                 <td className="text-slate-600">{user.email}</td>
@@ -560,8 +627,8 @@ const Settings = () => {
                                                             size="icon"
                                                             className="text-red-600"
                                                             onClick={() => {
-                                                                setDeleteTarget(user);
-                                                                setDeleteType('user');
+                                                                setDeleteTarget({ id: user.id, type: 'user' });
+                                                                setDeleteType('usuario');
                                                                 setShowDeleteConfirm(true);
                                                             }}
                                                             data-testid={`delete-user-${user.id}`}
@@ -581,7 +648,17 @@ const Settings = () => {
 
                 {/* Clients Tab */}
                 <TabsContent value="clients" className="space-y-4">
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="relative flex-1 max-w-sm">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <Input
+                                value={searchClients}
+                                onChange={(e) => setSearchClients(e.target.value)}
+                                placeholder="Buscar cliente..."
+                                className="pl-9"
+                                data-testid="search-clients-input"
+                            />
+                        </div>
                         <Button onClick={() => handleOpenEntityModal('client')} data-testid="add-client-btn">
                             <Plus className="w-4 h-4 mr-2" />
                             Nuevo cliente
@@ -594,10 +671,10 @@ const Settings = () => {
                                 <div className="p-8 flex justify-center">
                                     <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
                                 </div>
-                            ) : clients.length === 0 ? (
+                            ) : clients.filter(c => !searchClients || c.name?.toLowerCase().includes(searchClients.toLowerCase())).length === 0 ? (
                                 <div className="text-center py-12">
                                     <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                                    <p className="text-slate-500">No hay clientes registrados</p>
+                                    <p className="text-slate-500">{searchClients ? 'Sin resultados' : 'No hay clientes registrados'}</p>
                                 </div>
                             ) : (
                                 <table className="data-table w-full">
@@ -605,13 +682,24 @@ const Settings = () => {
                                         <tr>
                                             <th>Nombre</th>
                                             <th>ID</th>
+                                            <th>Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {clients.map((client) => (
+                                        {clients.filter(c => !searchClients || c.name?.toLowerCase().includes(searchClients.toLowerCase())).map((client) => (
                                             <tr key={client.id} data-testid={`client-row-${client.id}`}>
                                                 <td className="font-medium">{client.name}</td>
                                                 <td className="font-mono text-xs text-slate-500">{client.id}</td>
+                                                <td>
+                                                    <div className="flex items-center gap-1">
+                                                        <Button variant="ghost" size="icon" onClick={() => handleOpenEntityModal('client', client)} data-testid={`edit-client-${client.id}`}>
+                                                            <Pencil className="w-4 h-4" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="text-red-600" onClick={() => handleDeleteEntity('client', client.id)} data-testid={`delete-client-${client.id}`}>
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </Button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -623,7 +711,17 @@ const Settings = () => {
 
                 {/* Providers Tab */}
                 <TabsContent value="providers" className="space-y-4">
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="relative flex-1 max-w-sm">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <Input
+                                value={searchProviders}
+                                onChange={(e) => setSearchProviders(e.target.value)}
+                                placeholder="Buscar proveedor..."
+                                className="pl-9"
+                                data-testid="search-providers-input"
+                            />
+                        </div>
                         <Button onClick={() => handleOpenEntityModal('provider')} data-testid="add-provider-btn">
                             <Plus className="w-4 h-4 mr-2" />
                             Nuevo proveedor
@@ -636,10 +734,10 @@ const Settings = () => {
                                 <div className="p-8 flex justify-center">
                                     <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
                                 </div>
-                            ) : providers.length === 0 ? (
+                            ) : providers.filter(p => !searchProviders || p.name?.toLowerCase().includes(searchProviders.toLowerCase()) || p.contact_name?.toLowerCase().includes(searchProviders.toLowerCase())).length === 0 ? (
                                 <div className="text-center py-12">
                                     <Truck className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                                    <p className="text-slate-500">No hay proveedores registrados</p>
+                                    <p className="text-slate-500">{searchProviders ? 'Sin resultados' : 'No hay proveedores registrados'}</p>
                                 </div>
                             ) : (
                                 <table className="data-table w-full">
@@ -648,14 +746,25 @@ const Settings = () => {
                                             <th>Nombre</th>
                                             <th>Contacto</th>
                                             <th>Teléfono</th>
+                                            <th>Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {providers.map((provider) => (
+                                        {providers.filter(p => !searchProviders || p.name?.toLowerCase().includes(searchProviders.toLowerCase()) || p.contact_name?.toLowerCase().includes(searchProviders.toLowerCase())).map((provider) => (
                                             <tr key={provider.id} data-testid={`provider-row-${provider.id}`}>
                                                 <td className="font-medium">{provider.name}</td>
                                                 <td className="text-slate-600">{provider.contact_name || '-'}</td>
                                                 <td className="font-mono text-sm">{provider.contact_phone || '-'}</td>
+                                                <td>
+                                                    <div className="flex items-center gap-1">
+                                                        <Button variant="ghost" size="icon" onClick={() => handleOpenEntityModal('provider', provider)} data-testid={`edit-provider-${provider.id}`}>
+                                                            <Pencil className="w-4 h-4" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="text-red-600" onClick={() => handleDeleteEntity('provider', provider.id)} data-testid={`delete-provider-${provider.id}`}>
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </Button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -837,7 +946,7 @@ const Settings = () => {
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle className="font-heading">
-                            Nuevo {entityType === 'client' ? 'cliente' : 'proveedor'}
+                            {editingEntity ? 'Editar' : 'Nuevo'} {entityType === 'client' ? 'cliente' : 'proveedor'}
                         </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
@@ -879,7 +988,7 @@ const Settings = () => {
                         </Button>
                         <Button onClick={handleSaveEntity} disabled={entitySubmitting} data-testid="save-entity-btn">
                             {entitySubmitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                            Crear
+                            {editingEntity ? 'Guardar' : 'Crear'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -959,17 +1068,16 @@ const Settings = () => {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle className="font-heading">
-                            ¿Eliminar {deleteType === 'user' ? 'usuario' : deleteType}?
+                            ¿Eliminar {deleteType}?
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            Esta acción no se puede deshacer. Se eliminará permanentemente{' '}
-                            <strong>{deleteTarget?.name || deleteTarget?.email}</strong>.
+                            Esta acción no se puede deshacer.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
                         <AlertDialogAction 
-                            onClick={handleDeleteUser}
+                            onClick={handleConfirmDelete}
                             className="bg-red-600 hover:bg-red-700"
                             data-testid="confirm-delete-btn"
                         >

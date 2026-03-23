@@ -10,7 +10,8 @@ import {
     getClients,
     getProviders,
     syncKosmoTracking,
-    getKosmoSyncStatus
+    getKosmoSyncStatus,
+    searchPackages
 } from '../lib/api';
 import { 
     formatDate, 
@@ -39,7 +40,8 @@ import {
     Upload,
     TrendingUp,
     Radio,
-    ShieldCheck
+    ShieldCheck,
+    Search
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -87,6 +89,9 @@ const Dashboard = () => {
     const [exporting, setExporting] = useState(false);
     const [kosmoSync, setKosmoSync] = useState({ last_sync: null, total_checked: 0, updated: 0, errors: 0 });
     const [syncing, setSyncing] = useState(false);
+    const [packageSearch, setPackageSearch] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
+    const [searching, setSearching] = useState(false);
 
     // Filters
     const [dateFrom, setDateFrom] = useState(new Date());
@@ -191,6 +196,17 @@ const Dashboard = () => {
         return `hace ${Math.floor(diff / 1440)}d`;
     };
 
+    const handlePackageSearch = async (query) => {
+        setPackageSearch(query);
+        if (query.length < 2) { setSearchResults([]); return; }
+        setSearching(true);
+        try {
+            const res = await searchPackages(query);
+            setSearchResults(res.data || []);
+        } catch { setSearchResults([]); }
+        finally { setSearching(false); }
+    };
+
     return (
         <div className="space-y-6">
             {/* KPI Cards */}
@@ -238,6 +254,49 @@ const Dashboard = () => {
                     }
                     loading={loading}
                 />
+            </div>
+
+            {/* Package Search Bar */}
+            <div className="relative" data-testid="package-search-container">
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-sm">
+                    <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                        type="text"
+                        value={packageSearch}
+                        onChange={(e) => handlePackageSearch(e.target.value)}
+                        placeholder="Buscar paquete por guía o referencia..."
+                        className="flex-1 text-sm bg-transparent outline-none placeholder:text-slate-400"
+                        data-testid="package-search-input"
+                    />
+                    {searching && <RefreshCw className="w-3.5 h-3.5 text-slate-400 animate-spin" />}
+                </div>
+                {searchResults.length > 0 && packageSearch.length >= 2 && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-64 overflow-y-auto">
+                        {searchResults.map((pkg) => (
+                            <a
+                                key={pkg.id}
+                                href={`/journeys/${pkg.journey_id}`}
+                                className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                                data-testid={`search-result-${pkg.id}`}
+                            >
+                                <div className="min-w-0">
+                                    <p className="text-sm font-mono font-medium text-slate-900 truncate">
+                                        {pkg.order_reference_id || pkg.tracking_number}
+                                    </p>
+                                    <p className="text-xs text-slate-500 truncate">{pkg.recipient_name} — {pkg.address}</p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0 ml-3">
+                                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                        pkg.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                                        pkg.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                        'bg-amber-100 text-amber-700'
+                                    }`}>{pkg.status}</span>
+                                    <span className="text-xs text-slate-400">{pkg.journey_date}</span>
+                                </div>
+                            </a>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Kosmo Sync Indicator */}

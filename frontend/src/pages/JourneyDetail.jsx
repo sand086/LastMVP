@@ -298,6 +298,9 @@ const JourneyDetail = () => {
         backup_driver_name: '',
         backup_request_time: '',
         backup_arrival_time: '',
+        route_type: 'CDMX / Zona Metro',
+        city: '',
+        max_packages: 50,
     });
     const [startChecklist, setStartChecklist] = useState({
         whatsapp: false,
@@ -1060,6 +1063,44 @@ const JourneyDetail = () => {
                                                     value={startForm.backup_arrival_time}
                                                     onChange={(e) => setStartForm({ ...startForm, backup_arrival_time: e.target.value })}
                                                     data-testid="backup-arrival-time-input"
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Route Type Selection */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Tipo de ruta</Label>
+                                        <Select value={startForm.route_type} onValueChange={(v) => setStartForm({ ...startForm, route_type: v })}>
+                                            <SelectTrigger data-testid="select-route-type">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="CDMX / Zona Metro">CDMX / Zona Metro</SelectItem>
+                                                <SelectItem value="Foránea">Foránea</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    {startForm.route_type === 'Foránea' && (
+                                        <>
+                                            <div className="space-y-2">
+                                                <Label>Ciudad</Label>
+                                                <Input
+                                                    value={startForm.city}
+                                                    onChange={(e) => setStartForm({ ...startForm, city: e.target.value })}
+                                                    placeholder="Ej: Pachuca, Guadalajara"
+                                                    data-testid="route-city-input"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Máx. paquetes</Label>
+                                                <Input
+                                                    type="number"
+                                                    value={startForm.max_packages}
+                                                    onChange={(e) => setStartForm({ ...startForm, max_packages: parseInt(e.target.value) || 50 })}
+                                                    data-testid="route-max-packages-input"
                                                 />
                                             </div>
                                         </>

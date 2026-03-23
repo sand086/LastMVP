@@ -80,15 +80,9 @@ def calculate_evidence_score(package: dict, has_incident: bool = False) -> dict 
 
         if proof_count == 0:
             missing_items.append("Foto de fachada antes de retirarse")
-        if not has_incident:
-            missing_items.append("Incidencia registrada en sistema")
 
-        if proof_count >= 1 and has_incident:
+        if proof_count >= 1:
             score = 100
-        elif proof_count >= 1 and not has_incident:
-            score = 60
-        elif proof_count == 0 and has_incident:
-            score = 50
         else:
             score = 0
 

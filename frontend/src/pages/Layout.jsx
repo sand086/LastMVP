@@ -253,9 +253,6 @@ const Layout = () => {
                 history_orders: allOrders,
                 route_summary: routeData?.routes || [],
                 messenger_provider_mappings: mappings,
-                route_type: routeType,
-                city: routeType === 'Foránea' ? routeCity : null,
-                max_packages: routeType === 'Foránea' ? routeMaxPackages : null,
             };
 
             const res = await createJourneysFromCosmo(payload);
@@ -570,48 +567,6 @@ const Layout = () => {
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                </div>
-
-                                {/* Route Type Selection */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="space-y-2">
-                                        <Label>Tipo de ruta</Label>
-                                        <Select value={routeType} onValueChange={setRouteType}>
-                                            <SelectTrigger data-testid="select-route-type">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="CDMX / Zona Metro">CDMX / Zona Metro</SelectItem>
-                                                <SelectItem value="Foránea">Foránea</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    {routeType === 'Foránea' && (
-                                        <>
-                                            <div className="space-y-2">
-                                                <Label>Ciudad</Label>
-                                                <input
-                                                    type="text"
-                                                    value={routeCity}
-                                                    onChange={(e) => setRouteCity(e.target.value)}
-                                                    placeholder="Ej: Pachuca, Guadalajara"
-                                                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                                                    data-testid="route-city-input"
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label>Máx. paquetes</Label>
-                                                <input
-                                                    type="number"
-                                                    value={routeMaxPackages}
-                                                    onChange={(e) => setRouteMaxPackages(parseInt(e.target.value) || 50)}
-                                                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                                                    data-testid="route-max-packages-input"
-                                                />
-                                                <p className="text-xs text-slate-500">Máximo de paquetes para ruta foránea</p>
-                                            </div>
-                                        </>
-                                    )}
                                 </div>
 
                                 {/* Driver-Provider Mapping */}

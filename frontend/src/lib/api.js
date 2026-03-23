@@ -175,4 +175,16 @@ export const getQualityReport = (params) => api.get('/reports/quality', { params
 export const exportQualityReport = (data) => api.post('/reports/quality-export', data, { responseType: 'blob' });
 export const evaluateJourneyQuality = (journeyId) => api.post(`/reports/evaluate-journey/${journeyId}`);
 
+// Package Search
+export const searchPackages = (q) => api.get('/packages/search', { params: { q } });
+
+// CRUD Clients & Providers
+export const updateClient = (id, data) => api.put(`/clients/${id}`, data);
+export const deleteClient = (id) => api.delete(`/clients/${id}`);
+export const updateProvider = (id, data) => api.put(`/providers/${id}`, data);
+export const deleteProvider = (id) => api.delete(`/providers/${id}`);
+
+// Cleanup
+export const cleanupRoutesPackages = () => api.post('/cleanup/routes-packages');
+
 export default api;
