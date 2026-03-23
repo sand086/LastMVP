@@ -8,11 +8,13 @@ import {
     createIncident,
     updateIncident,
     deleteIncident,
+    resolveAllIncidents,
     exportIncidents,
     uploadJourneyImages,
     getJourneyImages,
     deleteJourneyImage,
-    evaluateJourneyQuality
+    evaluateJourneyQuality,
+    reviewPackage
 } from '../lib/api';
 import { 
     formatDate, 
@@ -86,7 +88,10 @@ import {
     RefreshCw,
     Search,
     MessageSquare,
-    ExternalLink
+    ExternalLink,
+    CheckCheck,
+    Circle,
+    Users
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
@@ -156,6 +161,11 @@ const QualityTab = ({ journey, packages, onEvaluate }) => {
                         </p>
                     </CardContent>
                 </Card>
+            </div>
+
+            {/* Reviewed count */}
+            <div className="text-sm text-slate-500 text-right">
+                {packages.filter(p => p.reviewed_by).length}/{packages.length} revisados
             </div>
 
             {/* Distribution Bar */}
@@ -322,8 +332,6 @@ const JourneyDetail = () => {
     const [closeForm, setCloseForm] = useState({
         closed_at: new Date().toISOString().slice(0, 16),
         odometer_end: '',
-        packages_delivered: '',
-        packages_failed: '',
         notes: '',
     });
     const [closeChecklist, setCloseChecklist] = useState({
@@ -343,6 +351,8 @@ const JourneyDetail = () => {
     // Incident state
     const [showIncidentModal, setShowIncidentModal] = useState(false);
     const [editingIncident, setEditingIncident] = useState(null);
+    const [showResolveAllConfirm, setShowResolveAllConfirm] = useState(false);
+    const [resolvingAll, setResolvingAll] = useState(false);
     const [incidentForm, setIncidentForm] = useState({
         occurred_at: new Date().toISOString().slice(0, 16),
         incident_type: '',
@@ -426,6 +436,18 @@ const JourneyDetail = () => {
                 }));
             }
 
+            // Pre-populate failed packages for close form (P0-4)
+            if (res.data.status === 'in_progress' && res.data.packages) {
+                const autoFailed = res.data.packages
+                    .filter(p => 
+                        p.status === 'failed' || 
+                        p.kosmo_status_raw === 'cancelled' || 
+                        p.kosmo_status_raw === 'failed'
+                    )
+                    .map(p => ({ id: p.id, failure_reason: p.failure_reason || 'Otro' }));
+                setFailedPackages(autoFailed);
+            }
+
             // Set active tab based on status
             if (res.data.status === 'scheduled') {
                 setActiveTab('inicio');
@@ -475,11 +497,10 @@ const JourneyDetail = () => {
 
     // Close journey handlers
     const handlePreCloseJourney = () => {
-        const hasReturnPackages = parseInt(closeForm.packages_failed) > 0 || metrics.toRetry > 0;
         const requiredChecks = { ...closeChecklist };
         
         // return_evidence is only required when there are packages to return
-        if (!hasReturnPackages) {
+        if (failedPackages.length === 0) {
             delete requiredChecks.return_evidence;
         }
         
@@ -496,10 +517,15 @@ const JourneyDetail = () => {
         setCloseSubmitting(true);
 
         try {
+            // Auto-calculate delivered and failed from package statuses
+            const packages = journey.packages || [];
+            const deliveredCount = packages.filter(p => p.status === 'delivered').length;
+            const failedCount = packages.filter(p => p.status === 'failed').length;
+
             const closeData = {
                 ...closeForm,
-                packages_delivered: parseInt(closeForm.packages_delivered),
-                packages_failed: parseInt(closeForm.packages_failed),
+                packages_delivered: deliveredCount,
+                packages_failed: failedCount,
                 failed_packages: failedPackages,
                 checklist_completed: true,
             };
@@ -599,6 +625,30 @@ const JourneyDetail = () => {
         }
     };
 
+    const handleResolveAllIncidents = async () => {
+        setShowResolveAllConfirm(false);
+        setResolvingAll(true);
+        try {
+            const res = await resolveAllIncidents(id);
+            toast.success(`${res.data.resolved_count} incidencias marcadas como resueltas`);
+            fetchJourney();
+        } catch (error) {
+            toast.error('Error al resolver incidencias');
+        } finally {
+            setResolvingAll(false);
+        }
+    };
+
+    const handleReviewPackage = async (packageId) => {
+        try {
+            await reviewPackage(packageId);
+            toast.success('Paquete marcado como revisado');
+            fetchJourney();
+        } catch (error) {
+            toast.error('Error al marcar como revisado');
+        }
+    };
+
     const handleExportIncidents = async () => {
         try {
             const res = await exportIncidents({ journey_id: id });
@@ -629,18 +679,19 @@ const JourneyDetail = () => {
         });
     };
 
-    // Calculate close metrics
+    // Calculate close metrics from actual package data
     const calculateCloseMetrics = () => {
+        const packages = journey?.packages || [];
+        const delivered = packages.filter(p => p.status === 'delivered').length;
+        const failed = packages.filter(p => p.status === 'failed').length;
+        const toReturn = failedPackages.length;
         const packagesLoaded = journey?.start_data?.packages_loaded || journey?.packages_total || 0;
-        const delivered = parseInt(closeForm.packages_delivered) || 0;
-        const failed = parseInt(closeForm.packages_failed) || 0;
-        const toRetry = packagesLoaded - delivered - failed;
         const odometerStart = journey?.start_data?.odometer_start || 0;
         const odometerEnd = parseInt(closeForm.odometer_end) || 0;
         const kmTraveled = odometerEnd - odometerStart;
         const deliveryRate = packagesLoaded > 0 ? ((delivered / packagesLoaded) * 100).toFixed(1) : 0;
 
-        return { toRetry, kmTraveled, deliveryRate };
+        return { delivered, failed, toReturn, kmTraveled, deliveryRate };
     };
 
     if (loading) {
@@ -657,7 +708,10 @@ const JourneyDetail = () => {
     const progressColor = getProgressColor(deliveryRate);
     const openIncidents = journey.incidents?.filter(i => i.status === 'open') || [];
     const metrics = calculateCloseMetrics();
-    const pendingPackages = journey.packages?.filter(p => p.status === 'pending') || [];
+    const returnCandidates = journey.packages?.filter(p => 
+        p.status === 'pending' || p.status === 'failed' || 
+        p.kosmo_status_raw === 'cancelled' || p.kosmo_status_raw === 'failed'
+    ) || [];
 
     const getKosmoTimeSince = (isoDate) => {
         if (!isoDate) return '';
@@ -749,10 +803,13 @@ const JourneyDetail = () => {
                 </Card>
                 <Card className="p-4">
                     <div className="flex items-center gap-3">
-                        <RefreshCw className="w-8 h-8 text-slate-400" strokeWidth={1.5} />
+                        <Users className="w-8 h-8 text-slate-400" strokeWidth={1.5} />
                         <div>
-                            <p className="text-xs text-slate-500 uppercase tracking-wider">Reintentos</p>
-                            <p className="text-xl font-heading font-bold">{journey.packages_retry}</p>
+                            <p className="text-xs text-slate-500 uppercase tracking-wider">Visitas</p>
+                            <p className="text-xl font-heading font-bold">
+                                {(journey.packages?.filter(p => p.status === 'delivered' || p.status === 'failed' || p.status === 'returned').length) || 0}
+                            </p>
+                            <p className="text-xs text-slate-400">intentos registrados</p>
                         </div>
                     </div>
                 </Card>
@@ -787,10 +844,16 @@ const JourneyDetail = () => {
                                             <th>Estado</th>
                                             <th>Soporte</th>
                                             <th>Evidencias</th>
+                                            <th>Revisado</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {journey.packages.map((pkg) => (
+                                        {[...(journey.packages || [])].sort((a, b) => {
+                                            // "returned" packages go to the end
+                                            if (a.status === 'returned' && b.status !== 'returned') return 1;
+                                            if (a.status !== 'returned' && b.status === 'returned') return -1;
+                                            return 0;
+                                        }).map((pkg) => (
                                             <tr key={pkg.id} data-testid={`pkg-row-${pkg.id}`}>
                                                 <td className="font-mono text-xs">
                                                     {pkg.tracking_url ? (
@@ -804,7 +867,9 @@ const JourneyDetail = () => {
                                                 <td className="truncate max-w-[120px]">{pkg.recipient_name}</td>
                                                 <td>
                                                     <div className="flex items-center gap-1.5">
-                                                        <span className={`status-badge ${getStatusColor(pkg.status)}`}>
+                                                        <span className={`status-badge ${
+                                                            pkg.status === 'returned' ? 'bg-slate-600 text-white' : getStatusColor(pkg.status)
+                                                        }`}>
                                                             {getStatusLabel(pkg.status)}
                                                         </span>
                                                         {pkg.status === 'delivered' && pkg.kosmo_finished_at && (
@@ -871,6 +936,26 @@ const JourneyDetail = () => {
                                                             </span>
                                                         )}
                                                     </div>
+                                                </td>
+                                                <td>
+                                                    {pkg.reviewed_by ? (
+                                                        <span
+                                                            className="text-emerald-500 cursor-help"
+                                                            title={`Revisado por ${pkg.reviewed_by} a las ${formatTime(pkg.reviewed_at)}`}
+                                                            data-testid={`reviewed-${pkg.id}`}
+                                                        >
+                                                            <CheckCircle2 className="w-4 h-4" />
+                                                        </span>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleReviewPackage(pkg.id)}
+                                                            className="text-slate-300 hover:text-emerald-500 transition-colors"
+                                                            title="Marcar como revisado"
+                                                            data-testid={`review-btn-${pkg.id}`}
+                                                        >
+                                                            <Circle className="w-4 h-4" />
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         ))}
@@ -1257,6 +1342,21 @@ const JourneyDetail = () => {
                                     Exportar CSV
                                 </Button>
                             )}
+                            {canEdit() && openIncidents.length > 0 && (
+                                <Button 
+                                    variant="outline" 
+                                    onClick={() => setShowResolveAllConfirm(true)}
+                                    disabled={resolvingAll}
+                                    data-testid="resolve-all-incidents-btn"
+                                >
+                                    {resolvingAll ? (
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <CheckCheck className="w-4 h-4 mr-2" />
+                                    )}
+                                    Resolver todas
+                                </Button>
+                            )}
                             {canEdit() && journey.status !== 'closed' && (
                                 <Button onClick={() => handleOpenIncidentModal()} data-testid="add-incident-btn">
                                     <Plus className="w-4 h-4 mr-2" />
@@ -1376,7 +1476,7 @@ const JourneyDetail = () => {
                                 <CardTitle className="font-heading">Cerrar ruta</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-6">
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label>Hora de cierre</Label>
                                         <Input
@@ -1396,32 +1496,35 @@ const JourneyDetail = () => {
                                             data-testid="odometer-end-input"
                                         />
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Paquetes entregados</Label>
-                                        <Input
-                                            type="number"
-                                            value={closeForm.packages_delivered}
-                                            onChange={(e) => setCloseForm({ ...closeForm, packages_delivered: e.target.value })}
-                                            data-testid="packages-delivered-input"
-                                        />
+                                </div>
+
+                                {/* Auto-calculated metrics (read-only) */}
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-sm text-center">
+                                        <p className="text-xs text-emerald-600 uppercase font-medium">Entregados</p>
+                                        <p className="font-mono font-bold text-2xl text-emerald-700" data-testid="auto-delivered-count">
+                                            {metrics.delivered}
+                                        </p>
+                                        <p className="text-xs text-emerald-500 mt-1">calculado automáticamente</p>
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Paquetes fallidos</Label>
-                                        <Input
-                                            type="number"
-                                            value={closeForm.packages_failed}
-                                            onChange={(e) => setCloseForm({ ...closeForm, packages_failed: e.target.value })}
-                                            data-testid="packages-failed-input"
-                                        />
+                                    <div className="p-4 bg-red-50 border border-red-200 rounded-sm text-center">
+                                        <p className="text-xs text-red-600 uppercase font-medium">Fallidos</p>
+                                        <p className="font-mono font-bold text-2xl text-red-700" data-testid="auto-failed-count">
+                                            {metrics.failed}
+                                        </p>
+                                        <p className="text-xs text-red-500 mt-1">calculado automáticamente</p>
+                                    </div>
+                                    <div className="p-4 bg-slate-100 border border-slate-300 rounded-sm text-center">
+                                        <p className="text-xs text-slate-600 uppercase font-medium">Devoluciones</p>
+                                        <p className="font-mono font-bold text-2xl text-slate-700" data-testid="auto-return-count">
+                                            {metrics.toReturn}
+                                        </p>
+                                        <p className="text-xs text-slate-500 mt-1">seleccionados abajo</p>
                                     </div>
                                 </div>
 
-                                {/* Calculated metrics */}
-                                <div className="grid grid-cols-3 gap-4 p-4 bg-slate-50 rounded-sm">
-                                    <div>
-                                        <p className="text-xs text-slate-500 uppercase">Para reintento</p>
-                                        <p className="font-mono font-bold text-lg">{metrics.toRetry}</p>
-                                    </div>
+                                {/* Calculated operational metrics */}
+                                <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-sm">
                                     <div>
                                         <p className="text-xs text-slate-500 uppercase">Km recorridos</p>
                                         <p className="font-mono font-bold text-lg">{metrics.kmTraveled.toLocaleString()}</p>
@@ -1452,17 +1555,17 @@ const JourneyDetail = () => {
                                     </div>
                                 )}
 
-                                {/* Failed packages */}
-                                {pendingPackages.length > 0 && (
+                                {/* Packages for return (pre-populated from Kosmo) */}
+                                {returnCandidates.length > 0 && (
                                     <div className="border border-slate-200 rounded-sm">
                                         <div className="p-3 bg-slate-50 border-b border-slate-200">
                                             <div className="flex items-center justify-between mb-2">
                                                 <div>
-                                                    <p className="font-medium text-slate-900">Paquetes no entregados</p>
-                                                    <p className="text-sm text-slate-500">Marca los paquetes fallidos y selecciona el motivo</p>
+                                                    <p className="font-medium text-slate-900">Paquetes para devolución</p>
+                                                    <p className="text-sm text-slate-500">Pre-seleccionados de Kosmo. Desmarca los que no aplican.</p>
                                                 </div>
                                                 <span className="text-sm text-slate-500">
-                                                    {pendingPackages.length} paquetes pendientes
+                                                    {returnCandidates.length} candidatos
                                                 </span>
                                             </div>
                                             {/* Search input */}
@@ -1498,7 +1601,7 @@ const JourneyDetail = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {pendingPackages
+                                                    {returnCandidates
                                                         .filter(pkg => {
                                                             if (!packageSearchTerm) return true;
                                                             const search = packageSearchTerm.toLowerCase();
@@ -1543,7 +1646,7 @@ const JourneyDetail = () => {
                                                 </tbody>
                                             </table>
                                             {/* No results message */}
-                                            {packageSearchTerm && pendingPackages.filter(pkg => {
+                                            {packageSearchTerm && returnCandidates.filter(pkg => {
                                                 const search = packageSearchTerm.toLowerCase();
                                                 return (
                                                     (pkg.tracking_number || '').toLowerCase().includes(search) ||
@@ -1559,15 +1662,15 @@ const JourneyDetail = () => {
                                         </div>
                                         {/* Selected count */}
                                         {failedPackages.length > 0 && (
-                                            <div className="p-3 bg-red-50 border-t border-red-200 flex items-center justify-between">
-                                                <span className="text-sm text-red-700">
-                                                    <strong>{failedPackages.length}</strong> paquete(s) marcados como fallidos
+                                            <div className="p-3 bg-slate-100 border-t border-slate-300 flex items-center justify-between">
+                                                <span className="text-sm text-slate-700">
+                                                    <strong>{failedPackages.length}</strong> paquete(s) marcados para devolución
                                                 </span>
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() => setFailedPackages([])}
-                                                    className="text-red-600 hover:text-red-700"
+                                                    className="text-slate-600 hover:text-slate-700"
                                                 >
                                                     Limpiar selección
                                                 </Button>
@@ -1625,7 +1728,7 @@ const JourneyDetail = () => {
                                     ))}
 
                                     {/* Conditional return evidence item */}
-                                    {(parseInt(closeForm.packages_failed) > 0 || metrics.toRetry > 0) && (
+                                    {failedPackages.length > 0 && (
                                         <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
                                             <div className="flex items-center space-x-3">
                                                 <Checkbox
@@ -1712,7 +1815,7 @@ const JourneyDetail = () => {
                                         <p className="font-mono font-bold text-2xl text-red-700">{journey.close_data.packages_failed}</p>
                                     </div>
                                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-sm text-center">
-                                        <p className="text-xs text-amber-600 uppercase">Para reintento</p>
+                                        <p className="text-xs text-amber-600 uppercase">Devoluciones</p>
                                         <p className="font-mono font-bold text-2xl text-amber-700">{journey.close_data.packages_to_retry}</p>
                                     </div>
                                 </div>
@@ -1904,7 +2007,7 @@ const JourneyDetail = () => {
                     <AlertDialogHeader>
                         <AlertDialogTitle className="font-heading">¿Cerrar ruta?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Esta acción es irreversible. Los paquetes no entregados serán marcados para reintento.
+                            Esta acción es irreversible. Los paquetes seleccionados serán marcados como devueltos.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -1953,6 +2056,24 @@ const JourneyDetail = () => {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Resolve All Incidents Confirm Dialog */}
+            <AlertDialog open={showResolveAllConfirm} onOpenChange={setShowResolveAllConfirm}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="font-heading">¿Resolver todas las incidencias?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            ¿Confirmas que deseas marcar las {openIncidents.length} incidencias abiertas como resueltas?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleResolveAllIncidents} data-testid="confirm-resolve-all-btn">
+                            Resolver todas
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 };

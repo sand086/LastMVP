@@ -70,6 +70,7 @@ export const getIncidents = (params) => api.get('/incidents', { params });
 export const createIncident = (data) => api.post('/incidents', data);
 export const updateIncident = (id, data) => api.put(`/incidents/${id}`, data);
 export const deleteIncident = (id) => api.delete(`/incidents/${id}`);
+export const resolveAllIncidents = (journeyId) => api.put(`/incidents/journey/${journeyId}/resolve-all`);
 
 // File uploads
 export const uploadLayout = (file) => {
@@ -177,6 +178,9 @@ export const evaluateJourneyQuality = (journeyId) => api.post(`/reports/evaluate
 
 // Package Search
 export const searchPackages = (q) => api.get('/packages/search', { params: { q } });
+
+// Package Review
+export const reviewPackage = (packageId) => api.put(`/packages/${packageId}/review`);
 
 // CRUD Clients & Providers
 export const updateClient = (id, data) => api.put(`/clients/${id}`, data);

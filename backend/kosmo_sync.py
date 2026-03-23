@@ -35,7 +35,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
 }
 
-MAX_PACKAGES_PER_SYNC = 50
+MAX_PACKAGES_PER_SYNC = 250
 
 
 async def scrape_kosmo_page(tracking_url: str) -> dict:
@@ -237,10 +237,10 @@ _sync_task: Optional[asyncio.Task] = None
 
 
 async def _periodic_sync(db: AsyncIOMotorDatabase):
-    """Run sync every 30 minutes in the background."""
+    """Run sync every 10 minutes in the background."""
     while True:
         try:
-            await asyncio.sleep(30 * 60)
+            await asyncio.sleep(10 * 60)
             logger.info("Running scheduled Kosmo tracking sync...")
             result = await run_tracking_sync(db)
             logger.info(
@@ -256,7 +256,7 @@ async def _periodic_sync(db: AsyncIOMotorDatabase):
 def start_periodic_sync(db: AsyncIOMotorDatabase):
     global _sync_task
     _sync_task = asyncio.create_task(_periodic_sync(db))
-    logger.info("Kosmo periodic sync scheduled (every 30 min)")
+    logger.info("Kosmo periodic sync scheduled (every 10 min)")
 
 
 def stop_periodic_sync():

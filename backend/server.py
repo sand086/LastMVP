@@ -714,11 +714,11 @@ async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = De
         }}
     )
     
-    # Update failed packages
+    # Update return packages with status "returned"
     for failed_pkg in data.failed_packages:
         await db.packages.update_one(
             {"id": failed_pkg["id"]},
-            {"$set": {"status": "retry", "failure_reason": failed_pkg.get("failure_reason", "")}}
+            {"$set": {"status": "returned", "failure_reason": failed_pkg.get("failure_reason", "")}}
         )
     
     await log_audit_event(db, user["id"], user["role"], "route_closed", "journey", journey_id)
@@ -785,6 +785,36 @@ async def delete_incident(incident_id: str, user: dict = Depends(require_role(["
         raise HTTPException(status_code=404, detail="Incidencia no encontrada")
     return {"message": "Incidencia eliminada"}
 
+@api_router.put("/incidents/journey/{journey_id}/resolve-all")
+async def resolve_all_incidents(journey_id: str, user: dict = Depends(require_role(["coordinator", "agent"]))):
+    """Resolve all open incidents for a journey in a single operation."""
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.incidents.update_many(
+        {"journey_id": journey_id, "status": "open"},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": now,
+            "resolved_by": user["id"],
+            "action_taken": "Resuelta en lote por el coordinador"
+        }}
+    )
+    return {"message": f"{result.modified_count} incidencias resueltas", "resolved_count": result.modified_count}
+
+@api_router.put("/packages/{package_id}/review")
+async def review_package(package_id: str, user: dict = Depends(get_current_user)):
+    """Mark a package as reviewed by the current user."""
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.packages.update_one(
+        {"id": package_id},
+        {"$set": {
+            "reviewed_by": user.get("name", user["email"]),
+            "reviewed_at": now
+        }}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Paquete no encontrado")
+    return {"message": "Paquete marcado como revisado", "reviewed_by": user.get("name", user["email"]), "reviewed_at": now}
+
 # ==================== FILE UPLOAD ====================
 
 # Upload history-orders CSV file (Step 1)
@@ -826,6 +856,29 @@ async def upload_history_orders(
                     cleaned_order[key] = str(order[key])
             cleaned_orders.append(cleaned_order)
         
+        # Auto-filter: discard invalid rows (P0)
+        ignored_count = 0
+        valid_orders = []
+        for order in cleaned_orders:
+            tracking = order.get("order_reference_id", "").strip()
+            # Skip empty/null/whitespace tracking numbers
+            if not tracking:
+                ignored_count += 1
+                continue
+            # Skip OWN_FLEET with empty tracking
+            provider_val = order.get("provider", "").strip()
+            if provider_val.upper() == "OWN_FLEET" and not tracking:
+                ignored_count += 1
+                continue
+            # Skip repeated header rows (first column value == column name)
+            first_key = list(order.keys())[0] if order else ""
+            first_val = order.get(first_key, "").strip().lower()
+            if first_val == first_key.lower():
+                ignored_count += 1
+                continue
+            valid_orders.append(order)
+        cleaned_orders = valid_orders
+        
         # Group orders by order_id (route)
         routes = {}
         for order in cleaned_orders:
@@ -855,6 +908,7 @@ async def upload_history_orders(
             "filename": file.filename,
             "total_orders": len(cleaned_orders),
             "total_routes": len(routes),
+            "ignored_rows": ignored_count,
             "routes": list(routes.values()),
             "preview": cleaned_orders[:10]
         }

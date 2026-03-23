@@ -67,6 +67,7 @@ export function getStatusLabel(status) {
         pending: 'Pendiente',
         delivered: 'Entregado',
         failed: 'Fallido',
+        returned: 'Devuelto',
         retry: 'Reintento',
     };
     return labels[status] || status;
@@ -98,22 +99,24 @@ export function calculateDeliveryRate(delivered, total) {
 
 export function generateWhatsAppStartSummary(journey, startData) {
     const date = formatDate(journey.date);
+    const driverName = journey.driver_name || 'Sin asignar';
     const provider = journey.provider_name || 'N/A';
     const zone = journey.packages?.[0]?.zone || 'N/A';
     const packagesLoaded = startData.packages_loaded || 0;
     const retryPackages = journey.packages_retry || 0;
     const odometer = startData.odometer_start || 0;
     
-    return `📦 INICIO DE RUTA - LastMile OS
+    return `INICIO DE RUTA - LastMile OS
 ━━━━━━━━━━━━━━━━━━
-📅 Fecha: ${date}
-🚚 Proveedor: ${provider}
-📍 Zona: ${zone}
-📦 Paquetes cargados: ${packagesLoaded}
-🔄 Reintentos: ${retryPackages}
-🔢 Odómetro inicial: ${odometer.toLocaleString()} km
+Fecha: ${date}
+Driver: ${driverName}
+Proveedor: ${provider}
+Zona: ${zone}
+Paquetes cargados: ${packagesLoaded}
+Reintentos: ${retryPackages}
+Odómetro inicial: ${odometer.toLocaleString()} km
 ━━━━━━━━━━━━━━━━━━
-✅ Ruta iniciada correctamente`;
+Ruta iniciada correctamente`;
 }
 
 export function generateWhatsAppCloseSummary(journey, closeData) {
@@ -174,7 +177,7 @@ Proveedor: ${provider}
 ━━━━━━━━━━━━━━━━━━
 Entregados: ${delivered}
 Fallidos: ${failed}
-Para reintento: ${toRetry}
+Devoluciones: ${toRetry}
 ━━━━━━━━━━━━━━━━━━
 Tasa de entrega: ${rate}%
 Km recorridos: ${km.toLocaleString()}

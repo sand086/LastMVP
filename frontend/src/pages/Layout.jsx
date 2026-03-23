@@ -162,7 +162,7 @@ const Layout = () => {
         try {
             const res = await uploadHistoryOrders(file);
             setHistoryData(res.data);
-            toast.success(`${res.data.total_orders} órdenes encontradas en ${res.data.total_routes} rutas`);
+            toast.success(`${res.data.total_orders} órdenes encontradas en ${res.data.total_routes} rutas${res.data.ignored_rows ? ` (${res.data.ignored_rows} filas ignoradas)` : ''}`);
             setCurrentStep(2);
         } catch (error) {
             setHistoryError(error.response?.data?.detail || 'Error al procesar archivo');
@@ -415,6 +415,9 @@ const Layout = () => {
                                                 <Package className="w-5 h-5" />
                                                 <span className="font-medium">
                                                     {historyData.total_orders} órdenes en {historyData.total_routes} rutas
+                                                    {historyData.ignored_rows > 0 && (
+                                                        <span className="text-slate-400 ml-1">({historyData.ignored_rows} filas ignoradas)</span>
+                                                    )}
                                                 </span>
                                             </div>
                                             <p className="text-sm text-emerald-600">

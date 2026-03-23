@@ -303,7 +303,7 @@ const Dashboard = () => {
             <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-sm" data-testid="kosmo-sync-bar">
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                     <Radio className="w-4 h-4 text-slate-400" />
-                    <span>Sincronización Kosmo:</span>
+                    <span>Sincronización Kosmo (cada 10 min):</span>
                     {kosmoSync.last_sync ? (
                         <span className="font-mono text-xs text-slate-500">
                             {getTimeSince(kosmoSync.last_sync)} — {kosmoSync.total_checked} verificados, {kosmoSync.updated} actualizados
@@ -481,6 +481,7 @@ const Dashboard = () => {
                                         <th>Fecha</th>
                                         <th>Cliente</th>
                                         <th>Proveedor</th>
+                                        <th>Driver</th>
                                         <th>Paquetes</th>
                                         <th>Progreso</th>
                                         <th>Incidencias</th>
@@ -503,6 +504,17 @@ const Dashboard = () => {
                                                 </td>
                                                 <td>{journey.client_name}</td>
                                                 <td>{journey.provider_name}</td>
+                                                <td className="text-sm">
+                                                    {journey.driver_name ? (
+                                                        <span className="text-slate-700">
+                                                            {journey.driver_name.length > 20 
+                                                                ? journey.driver_name.split(' ').slice(0, 1).join(' ') + ' ' + (journey.driver_name.split(' ')[1]?.[0] || '') + '.'
+                                                                : journey.driver_name}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-400 italic">Sin asignar</span>
+                                                    )}
+                                                </td>
                                                 <td className="font-mono">
                                                     {journey.packages_delivered}/{journey.packages_total}
                                                 </td>
