@@ -1,7 +1,7 @@
 # LastMile OS MVP - Product Requirements Document
 
 ## Original Problem Statement
-Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, custom reports with AI, and system observability tools.
+Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, custom reports with AI, system observability tools, and automated Kosmo tracking sync.
 
 ## User Personas
 - **Agent**: Field delivery operator (upload layouts, manage routes)
@@ -11,8 +11,8 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 
 ## Tech Stack
 - **Frontend**: React + TailwindCSS + Shadcn UI + Lucide Icons
-- **Backend**: FastAPI + JWT Auth + Pandas/Openpyxl
-- **Database**: MongoDB (collections: users, journeys, packages, incidents, clients, providers, audit_logs, system_errors, request_metrics, integrity_results)
+- **Backend**: FastAPI + JWT Auth + Pandas/Openpyxl + httpx (Kosmo scraper)
+- **Database**: MongoDB (collections: users, journeys, packages, incidents, clients, providers, audit_logs, system_errors, request_metrics, integrity_results, system_config)
 - **AI**: Claude Sonnet 4.5 via emergentintegrations (Emergent LLM Key)
 
 ## Completed Features
@@ -35,14 +35,28 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] API Documentation page at /api-docs
 
 ### Phase 3 - System Observability (March 21, 2026)
-- [x] **Health Dashboard** (/system/health): API status, MongoDB status/latency, avg latency, 4xx/5xx error counts, upload space, uptime, error timeline. Polling every 30s.
-- [x] **Performance Metrics** (within health): Requests per hour chart, slowest endpoints top 10, most active users, layout file stats
-- [x] **Log Viewer** (/system/logs): Audit log table with filters (date, user, action, errors-only), pagination, CSV export. Actions logged: login, route CRUD, incidents, layout uploads, user management
-- [x] **Error Tracker** (/system/errors): Grouped errors by type (API/parsing/validation), occurrence count, first/last seen, mark-as-reviewed. Badge in sidebar with unreviewed count.
-- [x] **Data Integrity Checker** (/system/integrity): Validates routes without start data, closed routes without close data, inconsistent package counts, open incidents on closed routes, inactive users. Export to CSV.
-- [x] **Environment Config** (Settings > System tab): Backend/Python version, MongoDB host, DB size, JWT expiry, CORS, last deploy timestamp, uptime
-- [x] Non-blocking audit middleware (async, doesn't affect request latency)
-- [x] Developer role with dedicated user (dev@me.mx)
+- [x] Health Dashboard, Performance Metrics, Log Viewer, Error Tracker, Data Integrity Checker
+- [x] Environment Config viewer
+- [x] Non-blocking audit middleware
+- [x] Developer role (dev@me.mx)
+
+### Phase 4 - Kosmo Tracking Sync (March 23, 2026)
+- [x] **Scraper**: Extracts order data from public Kosmo tracking pages (Next.js SSR __NEXT_DATA__)
+- [x] **New Package Fields**: kosmo_order_id, kosmo_status_raw, kosmo_updated_at, kosmo_finished_at, kosmo_driver_note, kosmo_proof_count, kosmo_scraped_at
+- [x] **Status Mapping**: delivered→delivered, cancelled→failed, picked_up/in_transit/assigned→pending
+- [x] **Sync Endpoint**: POST /api/sync/tracking (max 50 pkgs, Semaphore(5) concurrency)
+- [x] **Status Endpoint**: GET /api/sync/status (last_sync, total_checked, updated, errors)
+- [x] **Auto Scheduler**: Background task runs every 30 min
+- [x] **Dashboard Sync Bar**: Shows last sync time, stats, errors (amber), manual sync button
+- [x] **Package Table**: Clickable tracking links, delivery time, camera icon + proof count, driver note tooltip, sync clock
+- [x] **Evidence Panel**: Driver notes, delivery time, photo count, external Kosmo link
+
+## Architecture
+- `/app/backend/server.py`: Core API (~2490 lines)
+- `/app/backend/kosmo_sync.py`: Kosmo scraper, sync logic, scheduler, router
+- `/app/backend/middleware.py`: Audit/error middleware
+- `/app/backend/system_routes.py`: System observability endpoints
+- `/app/frontend/src/pages/`: Dashboard, JourneyDetail, Layout, Reports, Settings, System*, etc.
 
 ## Credentials
 - Agent: agente@me.mx / LastMile2026
@@ -50,10 +64,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - Executive: karina@me.mx / LastMile2026
 - Developer: dev@me.mx / LastMile2026
 
-## Upcoming Tasks (P1)
-- [ ] Add clickable tracking_url view in package details
-- [ ] Add search in main packages table of Journey Detail
-
 ## Future Tasks (P2)
 - [ ] Automatic image compression for large uploads
 - [ ] Mobile-optimized views for field agents
+- [ ] Email/Slack alerts for delivery rate drops
