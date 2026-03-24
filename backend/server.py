@@ -1153,11 +1153,12 @@ async def create_journeys_from_cosmo(
                     
                     if update_fields:
                         pkg_data = existing_order_map[composite_key]
-                        await db.packages.update_one(
-                            {"id": pkg_data["id"]},
-                            {"$set": update_fields}
-                        )
-                        route_updated += 1
+                        if isinstance(pkg_data, dict) and "id" in pkg_data:
+                            await db.packages.update_one(
+                                {"id": pkg_data["id"]},
+                                {"$set": update_fields}
+                            )
+                            route_updated += 1
             
             # Recalculate journey counts
             if route_updated > 0:
@@ -1184,23 +1185,27 @@ async def create_journeys_from_cosmo(
             order_ref = order.get("order_reference_id", "")
             composite_key = f"{route_id}|{order_ref}"
             if composite_key in existing_order_map:
-                # This exact route+order combo already exists → update it
                 pkg_data = existing_order_map[composite_key]
-                update_fields = {}
-                new_cosmo_status = order.get("order_status", "")
-                if new_cosmo_status:
-                    update_fields["cosmo_status"] = new_cosmo_status
-                    if new_cosmo_status == "delivered":
-                        update_fields["status"] = "delivered"
-                    elif new_cosmo_status == "cancelled":
-                        update_fields["status"] = "failed"
-                tracking_url = order.get("tracking_url", "")
-                if tracking_url:
-                    update_fields["tracking_url"] = tracking_url
-                if update_fields:
-                    await db.packages.update_one({"id": pkg_data["id"]}, {"$set": update_fields})
-                    updated_in_other += 1
-                    total_updated_packages += 1
+                # Only update if pkg_data is a real document (not a placeholder)
+                if isinstance(pkg_data, dict) and "id" in pkg_data:
+                    update_fields = {}
+                    new_cosmo_status = order.get("order_status", "")
+                    if new_cosmo_status:
+                        update_fields["cosmo_status"] = new_cosmo_status
+                        if new_cosmo_status == "delivered":
+                            update_fields["status"] = "delivered"
+                        elif new_cosmo_status == "cancelled":
+                            update_fields["status"] = "failed"
+                    tracking_url = order.get("tracking_url", "")
+                    if tracking_url:
+                        update_fields["tracking_url"] = tracking_url
+                    if update_fields:
+                        await db.packages.update_one({"id": pkg_data["id"]}, {"$set": update_fields})
+                        updated_in_other += 1
+                        total_updated_packages += 1
+                else:
+                    # Placeholder from this same batch — skip (already queued as new_order)
+                    pass
             else:
                 # New order in this route (could be a re-attempt of an existing order_ref in another route)
                 new_orders.append(order)
