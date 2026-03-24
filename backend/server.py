@@ -22,6 +22,12 @@ from system_routes import create_system_router, SERVER_START_TIME
 from kosmo_sync import create_kosmo_router, start_periodic_sync, stop_periodic_sync
 from evidence_scoring import evaluate_packages_for_journey, calculate_evidence_score
 
+def _next_day(date_str: str) -> str:
+    """Given a date string 'YYYY-MM-DD', return the next day string."""
+    dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
+    return (dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -512,7 +518,7 @@ async def get_journeys(
     if date_from:
         query["date"] = {"$gte": date_from}
     if date_to:
-        query.setdefault("date", {})["$lte"] = date_to
+        query.setdefault("date", {})["$lt"] = _next_day(date_to)
     if client_id:
         query["client_id"] = client_id
     if provider_id:
@@ -570,19 +576,51 @@ async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
     # Get packages
     packages = await db.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(1000)
     
-    # Enrich with delivery_attempt count if not already set
+    # Enrich with delivery_attempt count based on date ordering
     order_refs = [p.get("order_reference_id") for p in packages if p.get("order_reference_id")]
     if order_refs:
-        pipeline = [
-            {"$match": {"order_reference_id": {"$in": order_refs}}},
-            {"$group": {"_id": "$order_reference_id", "count": {"$sum": 1}}}
+        # Get all packages with matching order_reference_ids and their journey dates
+        sibling_pipeline = [
+            {"$match": {"order_reference_id": {"$in": list(set(order_refs))}}},
+            {"$lookup": {
+                "from": "journeys",
+                "localField": "journey_id",
+                "foreignField": "id",
+                "as": "journey_info"
+            }},
+            {"$unwind": {"path": "$journey_info", "preserveNullAndEmptyArrays": True}},
+            {"$project": {
+                "_id": 0,
+                "order_reference_id": 1,
+                "journey_id": 1,
+                "journey_date": "$journey_info.date"
+            }},
+            {"$sort": {"journey_date": 1}}
         ]
-        attempt_map = {}
-        async for doc in db.packages.aggregate(pipeline):
-            attempt_map[doc["_id"]] = doc["count"]
+        siblings = await db.packages.aggregate(sibling_pipeline).to_list(5000)
+        
+        # Group by order_reference_id, sorted by date ascending
+        from collections import defaultdict
+        ref_groups = defaultdict(list)
+        for s in siblings:
+            ref_groups[s["order_reference_id"]].append(s["journey_id"])
+        
+        # For each package, find its position (newest = 1, oldest = total)
         for p in packages:
             ref = p.get("order_reference_id", "")
-            p["delivery_attempt"] = p.get("delivery_attempt") or attempt_map.get(ref, 1)
+            group = ref_groups.get(ref, [])
+            total = len(set(group))
+            if total <= 1:
+                p["delivery_attempt"] = 1
+            else:
+                # Find position of this package's journey in the sorted list (oldest first)
+                unique_journeys = list(dict.fromkeys(group))  # preserve order, dedup
+                try:
+                    pos = unique_journeys.index(p["journey_id"])
+                    # Reverse: oldest journey gets highest number
+                    p["delivery_attempt"] = total - pos
+                except ValueError:
+                    p["delivery_attempt"] = 1
     
     journey["packages"] = packages
     
@@ -1516,13 +1554,19 @@ async def get_retry_packages(provider_id: str, user: dict = Depends(get_current_
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(
     date: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
-    if not date:
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Support both single date and range
+    if date_from and date_to:
+        base_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}}
+    elif date:
+        base_query = {"date": {"$gte": date, "$lt": _next_day(date)}}
+    else:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        base_query = {"date": {"$gte": today, "$lt": _next_day(today)}}
     
-    # Build base query with assignment filtering
-    base_query = {"date": date}
     base_query = apply_assignment_filter(user, base_query)
     
     # Active journeys today
@@ -1536,13 +1580,14 @@ async def get_dashboard_stats(
     # Total journeys today
     total_journeys = await db.journeys.count_documents(base_query)
     
-    # Packages stats
-    journeys_today = await db.journeys.find(base_query, {"_id": 0}).to_list(100)
-    total_packages = sum(j.get("packages_total", 0) for j in journeys_today)
-    delivered_packages = sum(j.get("packages_delivered", 0) for j in journeys_today)
-    
-    # Open incidents today
+    # Packages stats — count from actual package data
+    journeys_today = await db.journeys.find(base_query, {"_id": 0}).to_list(500)
     journey_ids = [j["id"] for j in journeys_today]
+    
+    total_packages = await db.packages.count_documents({"journey_id": {"$in": journey_ids}})
+    delivered_packages = await db.packages.count_documents({"journey_id": {"$in": journey_ids}, "status": "delivered"})
+    
+    # Open incidents
     open_incidents = await db.incidents.count_documents({
         "journey_id": {"$in": journey_ids},
         "status": "open"
@@ -1598,7 +1643,7 @@ async def get_incidents_breakdown(
         date_to = date_from
     
     # Get journeys in date range with assignment filtering
-    j_query = {"date": {"$gte": date_from, "$lte": date_to}}
+    j_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}}
     j_query = apply_assignment_filter(user, j_query)
     
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(500)
@@ -1641,7 +1686,7 @@ async def get_provider_comparison(
     for provider in providers:
         j_query = {
             "provider_id": provider["id"],
-            "date": {"$gte": date_from, "$lte": date_to}
+            "date": {"$gte": date_from, "$lt": _next_day(date_to)}
         }
         if assigned_clients:
             j_query["client_id"] = {"$in": assigned_clients}
@@ -2589,7 +2634,7 @@ async def report_packages(
     if date_from:
         j_query["date"] = {"$gte": date_from}
     if date_to:
-        j_query.setdefault("date", {})["$lte"] = date_to
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
     
     if journey_id:
         journey_ids = [journey_id]
@@ -2620,6 +2665,7 @@ async def report_packages(
         result.append({
             "package_id": pkg.get("id"),
             "journey_id": pkg.get("journey_id"),
+            "cosmo_route_id": pkg.get("cosmo_route_id", ""),
             "journey_date": journey.get("date"),
             "tracking_number": pkg.get("tracking_number") or pkg.get("order_reference_id"),
             "tracking_url": pkg.get("tracking_url", ""),
@@ -2629,7 +2675,12 @@ async def report_packages(
             "status": pkg.get("status"),
             "cosmo_status": pkg.get("cosmo_status", ""),
             "failure_reason": pkg.get("failure_reason", ""),
-            "is_retry": pkg.get("is_retry", False),
+            "delivery_attempt": pkg.get("delivery_attempt", 1),
+            "evidence_score": pkg.get("evidence_score"),
+            "evidence_type": pkg.get("evidence_type"),
+            "kosmo_proof_count": pkg.get("kosmo_proof_count", 0),
+            "reviewed_by": pkg.get("reviewed_by"),
+            "reviewed_at": pkg.get("reviewed_at"),
             "client_name": clients.get(journey.get("client_id"), ""),
             "provider_name": providers.get(journey.get("provider_id"), ""),
             "driver_name": journey.get("driver_name", "")
@@ -2654,7 +2705,7 @@ async def report_incidents(
     if date_from:
         j_query["date"] = {"$gte": date_from}
     if date_to:
-        j_query.setdefault("date", {})["$lte"] = date_to
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
     
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     journey_ids = [j["id"] for j in journeys]
@@ -2805,12 +2856,14 @@ async def report_schema():
                 "parameters": [
                     {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
                     {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
-                    {"name": "status", "type": "string", "enum": ["pending", "delivered", "failed", "retry"], "required": False},
+                    {"name": "status", "type": "string", "enum": ["pending", "delivered", "failed", "returned"], "required": False},
                     {"name": "journey_id", "type": "string", "required": False}
                 ],
                 "fields": [
-                    "package_id", "journey_id", "journey_date", "tracking_number", "tracking_url",
-                    "recipient_name", "address", "zone", "status", "failure_reason", "is_retry",
+                    "package_id", "journey_id", "cosmo_route_id", "journey_date", "tracking_number", "tracking_url",
+                    "recipient_name", "address", "zone", "status", "failure_reason", "delivery_attempt",
+                    "evidence_score", "evidence_type", "kosmo_proof_count", "kosmo_proof_urls",
+                    "reviewed_by", "reviewed_at",
                     "client_name", "provider_name", "driver_name"
                 ]
             },
@@ -2878,9 +2931,9 @@ async def report_schema():
                 "name": "Kosmo Tracking Sync",
                 "endpoint": "/api/sync/tracking",
                 "method": "POST",
-                "description": "Sincroniza estatus de paquetes scrapeando páginas públicas de Kosmo. Máx 50 por llamada.",
+                "description": "Sincroniza estatus de paquetes scrapeando páginas públicas de Kosmo. Máx 250 por llamada. Responde inmediatamente, ejecuta en segundo plano.",
                 "parameters": [],
-                "fields": ["total_checked", "updated", "no_change", "errors", "details[]"]
+                "fields": ["status", "message"]
             },
             {
                 "name": "Kosmo Sync Status",
@@ -2934,9 +2987,29 @@ async def report_schema():
                 "name": "Cleanup Routes & Packages",
                 "endpoint": "/api/cleanup/routes-packages",
                 "method": "POST",
-                "description": "Elimina todas las rutas, paquetes e incidencias. Solo coordinator/developer.",
+                "description": "Elimina todas las rutas, paquetes e incidencias. Solo coordinator/developer. Requiere confirmación en UI.",
                 "parameters": [],
                 "fields": ["deleted.journeys", "deleted.packages", "deleted.incidents"]
+            },
+            {
+                "name": "Resolve All Incidents",
+                "endpoint": "/api/incidents/journey/{journey_id}/resolve-all",
+                "method": "PUT",
+                "description": "Marca todas las incidencias abiertas de una ruta como resueltas en lote.",
+                "parameters": [
+                    {"name": "journey_id", "type": "string", "required": True}
+                ],
+                "fields": ["resolved_count", "message"]
+            },
+            {
+                "name": "Review Package",
+                "endpoint": "/api/packages/{package_id}/review",
+                "method": "PUT",
+                "description": "Marca un paquete como revisado por el usuario actual.",
+                "parameters": [
+                    {"name": "package_id", "type": "string", "required": True}
+                ],
+                "fields": ["reviewed_by", "reviewed_at", "message"]
             }
         ],
         "authentication": {

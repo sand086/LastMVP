@@ -509,6 +509,12 @@ const JourneyDetail = () => {
             toast.error('Completa todos los items del checklist');
             return;
         }
+        
+        if (!closeForm.odometer_end || parseInt(closeForm.odometer_end) <= 0) {
+            toast.error('Ingresa el odómetro final antes de cerrar la ruta');
+            return;
+        }
+
         setShowCloseConfirm(true);
     };
 
@@ -746,8 +752,16 @@ const JourneyDetail = () => {
                             <span className={`status-badge ${getStatusColor(journey.status)}`}>
                                 {getStatusLabel(journey.status)}
                             </span>
+                            {journey.cosmo_route_id && (
+                                <span className="text-xs text-slate-400 font-mono ml-2" data-testid="cosmo-route-id">
+                                    {journey.cosmo_route_id}
+                                </span>
+                            )}
                         </div>
                         <p className="text-slate-500 text-sm">
+                            {journey.driver_name && (
+                                <span className="font-medium text-slate-700">{journey.driver_name} • </span>
+                            )}
                             {journey.provider_name} • {journey.client_name}
                             {journey.route_type === 'Foránea' && journey.city && (
                                 <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded border border-violet-200">

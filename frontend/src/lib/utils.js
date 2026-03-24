@@ -170,9 +170,18 @@ Score promedio: ${avgScore}%`;
         }
     }
     
+    // Delivery attempts stats
+    const multiAttemptPkgs = packages.filter(p => (p.delivery_attempt || 1) > 1);
+    const attemptRate = packages.length > 0 
+        ? Math.round((multiAttemptPkgs.length / packages.length) * 100) 
+        : 0;
+    
+    const driverName = journey.driver_name || 'Sin asignar';
+    
     return `CIERRE DE RUTA - LastMile OS
 ━━━━━━━━━━━━━━━━━━
 Fecha: ${date}
+Driver: ${driverName}
 Proveedor: ${provider}
 ━━━━━━━━━━━━━━━━━━
 Entregados: ${delivered}
@@ -180,6 +189,7 @@ Fallidos: ${failed}
 Devoluciones: ${toRetry}
 ━━━━━━━━━━━━━━━━━━
 Tasa de entrega: ${rate}%
+Reintentos: ${multiAttemptPkgs.length} paquetes (${attemptRate}%)
 Km recorridos: ${km.toLocaleString()}
 Tiempo total: ${totalTime}
 Incidencias: ${incidents}${qualityBlock}

@@ -78,11 +78,20 @@ def calculate_evidence_score(package: dict, has_incident: bool = False) -> dict 
         evidence_type = "fallida"
         missing_items = []
 
-        if proof_count == 0:
-            missing_items.append("Foto de fachada antes de retirarse")
+        has_photo = proof_count >= 1
+        has_note = has_driver_note
 
-        if proof_count >= 1:
+        if not has_photo:
+            missing_items.append("Foto de fachada antes de retirarse")
+        if not has_note:
+            missing_items.append("Nota del driver explicando fallo")
+
+        if has_photo and has_note:
             score = 100
+        elif has_photo:
+            score = 60
+        elif has_note:
+            score = 40
         else:
             score = 0
 

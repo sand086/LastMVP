@@ -141,7 +141,7 @@ export const downloadTemplate = () => api.get('/template/layout', { responseType
 export const getRetryPackages = (providerId) => api.get(`/retry-packages/${providerId}`);
 
 // Dashboard
-export const getDashboardStats = (date) => api.get('/dashboard/stats', { params: { date } });
+export const getDashboardStats = (dateFrom, dateTo) => api.get('/dashboard/stats', { params: { date_from: dateFrom, date_to: dateTo } });
 export const getIncidentsBreakdown = (dateFrom, dateTo) => api.get('/dashboard/incidents-breakdown', { params: { date_from: dateFrom, date_to: dateTo } });
 export const getProviderComparison = (dateFrom, dateTo) => api.get('/dashboard/provider-comparison', { params: { date_from: dateFrom, date_to: dateTo } });
 

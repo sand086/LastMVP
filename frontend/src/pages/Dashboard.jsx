@@ -107,7 +107,7 @@ const Dashboard = () => {
             const dateToStr = format(dateTo, 'yyyy-MM-dd');
 
             const [statsRes, journeysRes, breakdownRes, comparisonRes, clientsRes, providersRes, kosmoRes] = await Promise.all([
-                getDashboardStats(dateFromStr),
+                getDashboardStats(dateFromStr, dateToStr),
                 getJourneys({
                     date_from: dateFromStr,
                     date_to: dateToStr,
