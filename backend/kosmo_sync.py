@@ -40,7 +40,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
 }
 
-MAX_PACKAGES_PER_SYNC = 250
+MAX_PACKAGES_PER_SYNC = 100
 
 # ── Adaptive Scheduling Config ──────────────────────────────────
 CDMX_UTC_OFFSET = timedelta(hours=-6)
@@ -214,7 +214,7 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list =
         )
         return {"total_checked": 0, "updated": 0, "no_change": 0, "errors": 0, "details": []}
 
-    semaphore = asyncio.Semaphore(5)
+    semaphore = asyncio.Semaphore(3)
     details = []
     updated_count = 0
     no_change_count = 0
@@ -349,7 +349,7 @@ async def _adaptive_periodic_sync(db: AsyncIOMotorDatabase):
     """
     while True:
         try:
-            await asyncio.sleep(60)  # Check every minute
+            await asyncio.sleep(120)  # Check every 2 minutes
 
             if not _is_within_active_window():
                 continue
@@ -367,7 +367,7 @@ async def _adaptive_periodic_sync(db: AsyncIOMotorDatabase):
                     ],
                 },
                 {"_id": 0, "id": 1, "date": 1},
-            ).to_list(100)
+            ).sort("date", -1).to_list(10)  # Max 10 journeys per sync cycle
 
             if not due_journeys:
                 continue

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, status
+import asyncio
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -2642,15 +2643,21 @@ async def evaluate_all_evidence(
     journey_id: str,
     user: dict = Depends(get_current_user),
 ):
-    """AI-powered evidence evaluation for all packages in a journey."""
+    """AI-powered evidence evaluation for all packages in a journey (background task)."""
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
 
-    # Use AI for evaluation
-    await evaluate_packages_for_journey(db, journey_id, use_ai=True)
+    async def _run_ai_eval():
+        try:
+            await evaluate_packages_for_journey(db, journey_id, use_ai=True)
+            logger.info(f"AI evidence evaluation completed for journey {journey_id}")
+        except Exception as e:
+            logger.error(f"AI evidence evaluation failed for journey {journey_id}: {e}")
 
-    # Return updated stats
+    asyncio.create_task(_run_ai_eval())
+
+    # Return current stats immediately
     packages = await db.packages.find(
         {"journey_id": journey_id, "evidence_score": {"$ne": None}},
         {"_id": 0, "evidence_score": 1, "evidence_method": 1},
@@ -2659,13 +2666,17 @@ async def evaluate_all_evidence(
     scores = [p["evidence_score"] for p in packages]
     ai_count = sum(1 for p in packages if p.get("evidence_method") == "ai")
     return {
-        "evaluated": len(scores),
-        "ai_evaluated": ai_count,
-        "rules_evaluated": len(scores) - ai_count,
-        "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
-        "complete": sum(1 for s in scores if s == 100),
-        "partial": sum(1 for s in scores if 60 <= s < 100),
-        "incomplete": sum(1 for s in scores if s < 60),
+        "status": "started",
+        "message": "Evaluación IA iniciada en segundo plano. Recargue la página en unos momentos.",
+        "current_stats": {
+            "evaluated": len(scores),
+            "ai_evaluated": ai_count,
+            "rules_evaluated": len(scores) - ai_count,
+            "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+            "complete": sum(1 for s in scores if s == 100),
+            "partial": sum(1 for s in scores if 60 <= s < 100),
+            "incomplete": sum(1 for s in scores if s < 60),
+        },
     }
 
 

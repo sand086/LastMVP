@@ -1,51 +1,59 @@
 # LastMile OS MVP - Product Requirements Document
 
 ## Original Problem Statement
-Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, custom reports with AI, system observability, automated Kosmo tracking sync, and evidence quality scoring based on Cubbo standards.
+Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias).
 
-## Tech Stack
-- **Frontend**: React + TailwindCSS + Shadcn UI + Lucide Icons
-- **Backend**: FastAPI + JWT Auth + Pandas/Openpyxl + httpx (Kosmo scraper)
-- **Database**: MongoDB (indexed: cosmo_route_id + order_reference_id, order_reference_id)
-- **AI**: Claude Sonnet 4.5 via emergentintegrations (Emergent LLM Key)
+## Core Features
+- JWT Role-based Authentication (Agent, Coordinator, Executive, Developer)
+- Dashboard with real-time KPIs, polling, and date-range filtering
+- 2-step Cosmo data layout upload (CSV orders + XLSX routes)
+- Journey lifecycle management (Start/Incidents/Close)
+- Image upload for evidence (Start, Incidents, Close)
+- Kosmo public tracking scraper with evidence collection
+- Rule-based and AI-powered evidence quality scoring
+- Reports module with AI-generated insights
+- Dynamic user/client/provider assignments
+- Full CRUD for users, clients, providers
 
-## Completed Features
+## Architecture
+- **Backend**: FastAPI, MongoDB (motor), Pandas, emergentintegrations
+- **Frontend**: React, TailwindCSS, Shadcn UI, Lucide Icons
+- **AI**: Claude Sonnet 4.5 (via Emergent LLM Key) for reports and evidence scoring
+- **Database**: MongoDB with collections: users, journeys, packages, incidents, clients, providers, system_config
 
-### Core (Phase 1-3)
-- JWT role-based auth (Agent, Coordinator, Executive, Developer)
-- 2-step Cosmo layout upload with composite key dedup + CSV auto-filter
-- Route management (Start with checklist, Incidents with bulk resolve, Close with auto-calculated metrics)
-- Dashboard with date range stats, driver column, sync bar (10 min)
-- Custom Reports + AI, API docs, System Observability
-
-### Kosmo Tracking + Evidence Quality (Phase 4-5)
-- Async Kosmo scraper (max 250 pkgs) with proof photo URL extraction
-- Evidence quality scoring (Cubbo standard: exitosa=3 photos, fallida=photo+note, terceros=note)
-- Quality tab + Dashboard KPI + reports
-
-### Operational Adjustments (Phase 7-9)
-- Composite unique key (cosmo_route_id + order_reference_id) — same package in multiple routes
-- Delivery attempt counting by date order (newest=1, oldest=highest)
-- "Creation Date" from route-summary used as journey date
-- Auto-calculated close metrics (no manual input), pre-populated return candidates
-- "returned" (Devuelto) status, "VISITAS" header, "DEVOLUCIONES" in close
-- "Resolver todas" incidents button, package review indicator
-- Driver name in dashboard table, journey detail, WhatsApp summaries
-- Odometer validation before close, DB cleanup confirmation dialog
-- Date filter off-by-one fix (_next_day for timestamps)
-- Dashboard stats from actual package counts (not journey summary fields)
-
-## Key DB Schema
-- `packages`: {id, journey_id, cosmo_route_id, order_reference_id, tracking_url, delivery_attempt, kosmo_proof_count, kosmo_proof_urls, evidence_score, evidence_type, reviewed_by, reviewed_at, ...}
-- `journeys`: {id, cosmo_route_id, date, client_id, provider_id, driver_name, status, ...}
+## Key Technical Details
+- Composite key: `cosmo_route_id` + `order_reference_id` for package uniqueness
+- Address normalization during CSV upload (CP, colonia, municipio, estado)
+- Adaptive sync scheduler (frequency based on route age, active window 06:00-23:00 CDMX)
+- Server-side pagination for journeys endpoint
 
 ## Credentials
-- Agent: agente@me.mx / LastMile2026
-- Coordinator: yael@me.mx / LastMile2026
-- Executive: karina@me.mx / LastMile2026
-- Developer: dev@me.mx / LastMile2026
+- dev@me.mx / LastMile2026 (Developer)
+- agente@me.mx / LastMile2026 (Agent)
+- yael@me.mx / LastMile2026 (Coordinator)
+- karina@me.mx / LastMile2026 (Executive)
 
-## Future Tasks (P2)
-- [ ] Automatic image compression for large uploads
-- [ ] Mobile-optimized views for field agents
-- [ ] Email/Slack alerts for delivery rate drops
+## API Endpoints
+### Auth
+- POST /api/auth/login
+### Journeys
+- GET /api/journeys (paginated: page, page_size)
+- GET /api/journeys/{id}
+- POST /api/journeys/from-cosmo (upload)
+- POST /api/journeys/{id}/start
+- POST /api/journeys/{id}/close
+### Evidence
+- POST /api/journeys/{id}/packages/{guide}/evaluate-evidence (AI single)
+- POST /api/journeys/{id}/evaluate-evidence-all (AI batch, async)
+- POST /api/reports/evaluate-journey/{id} (rules-based)
+### Analytics
+- GET /api/analytics/heatmap (group_by: address_cp, address_municipio, address_estado, zone)
+- POST /api/analytics/heatmap-export
+### System
+- GET /api/system/sync-schedule
+- POST /api/sync/tracking
+- GET /api/sync/status
+### Dashboard
+- GET /api/dashboard/stats
+- GET /api/dashboard/incidents-breakdown
+- GET /api/dashboard/provider-comparison

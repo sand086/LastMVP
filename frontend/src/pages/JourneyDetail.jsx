@@ -146,8 +146,12 @@ const QualityTab = ({ journey, packages, onEvaluate, onRefreshJourney }) => {
         setEvaluatingAll(true);
         try {
             const res = await evaluateAllEvidence(journey.id);
-            toast.success(`Evaluación IA completada: ${res.data.ai_evaluated || 0} con IA, ${res.data.rules_evaluated || 0} con reglas`);
-            if (onRefreshJourney) onRefreshJourney();
+            const msg = res.data?.message || 'Evaluación IA iniciada';
+            toast.success(msg);
+            // Refresh after a short delay to show updated results
+            setTimeout(() => {
+                if (onRefreshJourney) onRefreshJourney();
+            }, 3000);
         } catch (err) {
             toast.error(err.response?.data?.detail || 'Error al evaluar con IA');
         } finally {
