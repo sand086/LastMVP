@@ -702,12 +702,28 @@ async def report_journeys(
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
     providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
 
+    # Batch incident counts to avoid N+1
+    journey_ids = [j["id"] for j in journeys]
+    incident_counts_map = {}
+    if journey_ids:
+        incident_pipeline = [
+            {"$match": {"journey_id": {"$in": journey_ids}}},
+            {"$group": {
+                "_id": "$journey_id",
+                "total": {"$sum": 1},
+                "open": {"$sum": {"$cond": [{"$eq": ["$status", "open"]}, 1, 0]}},
+            }},
+        ]
+        async for doc in db.incidents.aggregate(incident_pipeline):
+            incident_counts_map[doc["_id"]] = {"total": doc["total"], "open": doc["open"]}
+
     result = []
     for j in journeys:
         close_data = j.get("close_data") or {}
         start_data = j.get("start_data") or {}
-        incidents_count = await db.incidents.count_documents({"journey_id": j["id"]})
-        open_incidents = await db.incidents.count_documents({"journey_id": j["id"], "status": "open"})
+        counts = incident_counts_map.get(j["id"], {"total": 0, "open": 0})
+        incidents_count = counts["total"]
+        open_incidents = counts["open"]
         result.append({
             "journey_id": j["id"],
             "date": j.get("date"),
@@ -763,11 +779,8 @@ async def report_packages(
 
     packages = await db.packages.find(pkg_query, {"_id": 0}).to_list(50000)
 
-    journeys_map = {}
-    for jid in journey_ids:
-        j = await db.journeys.find_one({"id": jid}, {"_id": 0})
-        if j:
-            journeys_map[jid] = j
+    journeys_list = await db.journeys.find({"id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
+    journeys_map = {j["id"]: j for j in journeys_list}
 
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
     providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
