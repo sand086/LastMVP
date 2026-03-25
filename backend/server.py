@@ -8,6 +8,7 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 import logging
+import os
 
 from dependencies import db, limiter, mongo_client
 from middleware import AuditMiddleware, SecurityHeadersMiddleware
@@ -112,14 +113,11 @@ app.include_router(api_kosmo_router)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
+cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=[
-        "https://lastmile-mvp.preview.emergentagent.com",
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
