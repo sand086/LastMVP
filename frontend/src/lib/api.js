@@ -176,6 +176,10 @@ export const getQualityReport = (params) => api.get('/reports/quality', { params
 export const exportQualityReport = (data) => api.post('/reports/quality-export', data, { responseType: 'blob' });
 export const evaluateJourneyQuality = (journeyId) => api.post(`/reports/evaluate-journey/${journeyId}`);
 
+// AI Evidence Evaluation
+export const evaluatePackageEvidence = (journeyId, guide) => api.post(`/journeys/${journeyId}/packages/${encodeURIComponent(guide)}/evaluate-evidence`);
+export const evaluateAllEvidence = (journeyId) => api.post(`/journeys/${journeyId}/evaluate-evidence-all`);
+
 // Package Search
 export const searchPackages = (q) => api.get('/packages/search', { params: { q } });
 

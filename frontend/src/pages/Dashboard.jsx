@@ -82,6 +82,7 @@ const Dashboard = () => {
     const { canEdit } = useAuth();
     const [stats, setStats] = useState(null);
     const [journeys, setJourneys] = useState([]);
+    const [pagination, setPagination] = useState({ page: 1, page_size: 25, total_count: 0, total_pages: 1 });
     const [incidentsBreakdown, setIncidentsBreakdown] = useState({});
     const [providerComparison, setProviderComparison] = useState([]);
     const [clients, setClients] = useState([]);
@@ -101,6 +102,10 @@ const Dashboard = () => {
     const [selectedProvider, setSelectedProvider] = useState('all');
     const [selectedStatus, setSelectedStatus] = useState('all');
 
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(25);
+
     const fetchData = useCallback(async () => {
         try {
             const dateFromStr = format(dateFrom, 'yyyy-MM-dd');
@@ -114,6 +119,8 @@ const Dashboard = () => {
                     client_id: selectedClient !== 'all' ? selectedClient : undefined,
                     provider_id: selectedProvider !== 'all' ? selectedProvider : undefined,
                     status: selectedStatus !== 'all' ? selectedStatus : undefined,
+                    page: currentPage,
+                    page_size: pageSize,
                 }),
                 getIncidentsBreakdown(dateFromStr, dateToStr),
                 getProviderComparison(dateFromStr, dateToStr),
@@ -123,7 +130,9 @@ const Dashboard = () => {
             ]);
 
             setStats(statsRes.data);
-            setJourneys(journeysRes.data);
+            const jData = journeysRes.data;
+            setJourneys(jData.data || []);
+            setPagination(jData.pagination || { page: 1, page_size: 25, total_count: 0, total_pages: 1 });
             setIncidentsBreakdown(breakdownRes.data);
             setProviderComparison(comparisonRes.data);
             setClients(clientsRes.data);
@@ -135,7 +144,7 @@ const Dashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus]);
+    }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus, currentPage, pageSize]);
 
     useEffect(() => {
         fetchData();
@@ -144,6 +153,11 @@ const Dashboard = () => {
         const interval = setInterval(fetchData, 60000);
         return () => clearInterval(interval);
     }, [fetchData]);
+
+    // Reset page to 1 when filters change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus]);
 
     const handleExport = async () => {
         setExporting(true);
@@ -572,6 +586,70 @@ const Dashboard = () => {
                         </div>
                     )}
                 </CardContent>
+                {/* Pagination Controls */}
+                {pagination.total_pages > 0 && (
+                    <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200" data-testid="pagination-controls">
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                            <span>Filas:</span>
+                            <Select value={String(pageSize)} onValueChange={(val) => { setPageSize(Number(val)); setCurrentPage(1); }}>
+                                <SelectTrigger className="w-[70px] h-8" data-testid="page-size-selector">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="25">25</SelectItem>
+                                    <SelectItem value="50">50</SelectItem>
+                                    <SelectItem value="75">75</SelectItem>
+                                    <SelectItem value="100">100</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <span className="text-slate-400 ml-2" data-testid="pagination-info">
+                                Página {pagination.page} de {pagination.total_pages} ({pagination.total_count} rutas)
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-2"
+                                disabled={currentPage <= 1}
+                                onClick={() => setCurrentPage(1)}
+                                data-testid="pagination-first"
+                            >
+                                {'<<'}
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-3"
+                                disabled={currentPage <= 1}
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                data-testid="pagination-prev"
+                            >
+                                Anterior
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-3"
+                                disabled={currentPage >= pagination.total_pages}
+                                onClick={() => setCurrentPage(p => Math.min(pagination.total_pages, p + 1))}
+                                data-testid="pagination-next"
+                            >
+                                Siguiente
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-2"
+                                disabled={currentPage >= pagination.total_pages}
+                                onClick={() => setCurrentPage(pagination.total_pages)}
+                                data-testid="pagination-last"
+                            >
+                                {'>>'}
+                            </Button>
+                        </div>
+                    </div>
+                )}
             </Card>
 
             {/* Bottom section: Metrics + Provider Comparison */}

@@ -20,7 +20,12 @@ import shutil
 from middleware import AuditMiddleware, log_audit_event, log_system_error
 from system_routes import create_system_router, SERVER_START_TIME
 from kosmo_sync import create_kosmo_router, start_periodic_sync, stop_periodic_sync
-from evidence_scoring import evaluate_packages_for_journey, calculate_evidence_score
+from evidence_scoring import (
+    evaluate_packages_for_journey,
+    calculate_evidence_score,
+    evaluate_single_package_for_journey,
+    evaluate_single_package_ai,
+)
 
 def _next_day(date_str: str) -> str:
     """Given a date string 'YYYY-MM-DD', return the next day string."""
@@ -512,6 +517,8 @@ async def get_journeys(
     client_id: Optional[str] = None,
     provider_id: Optional[str] = None,
     status: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 25,
     user: dict = Depends(get_current_user)
 ):
     query = {}
@@ -528,8 +535,16 @@ async def get_journeys(
     
     # Apply assignment-based filtering
     query = apply_assignment_filter(user, query)
-    
-    journeys = await db.journeys.find(query, {"_id": 0}).sort("date", -1).to_list(500)
+
+    # Pagination
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    skip = (page - 1) * page_size
+
+    total_count = await db.journeys.count_documents(query)
+    total_pages = max(1, -(-total_count // page_size))  # ceil division
+
+    journeys = await db.journeys.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(page_size).to_list(page_size)
     
     # Enrich with client and provider names
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
@@ -559,7 +574,15 @@ async def get_journeys(
         j["incidents_count"] = incident_counts.get(j["id"], 0)
         j["open_incidents_count"] = open_incident_counts.get(j["id"], 0)
     
-    return journeys
+    return {
+        "data": journeys,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "total_pages": total_pages,
+        },
+    }
 
 @api_router.get("/journeys/{journey_id}")
 async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
@@ -2535,6 +2558,56 @@ async def evaluate_journey_quality(
         "partial": sum(1 for s in scores if 60 <= s < 100),
         "incomplete": sum(1 for s in scores if s < 60),
     }
+
+
+@api_router.post("/journeys/{journey_id}/packages/{guide}/evaluate-evidence")
+async def evaluate_package_evidence(
+    journey_id: str,
+    guide: str,
+    user: dict = Depends(get_current_user),
+):
+    """AI-powered evidence evaluation for a single package."""
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    result = await evaluate_single_package_for_journey(db, journey_id, guide, use_ai=True)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@api_router.post("/journeys/{journey_id}/evaluate-evidence-all")
+async def evaluate_all_evidence(
+    journey_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """AI-powered evidence evaluation for all packages in a journey."""
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    # Use AI for evaluation
+    await evaluate_packages_for_journey(db, journey_id, use_ai=True)
+
+    # Return updated stats
+    packages = await db.packages.find(
+        {"journey_id": journey_id, "evidence_score": {"$ne": None}},
+        {"_id": 0, "evidence_score": 1, "evidence_method": 1},
+    ).to_list(5000)
+
+    scores = [p["evidence_score"] for p in packages]
+    ai_count = sum(1 for p in packages if p.get("evidence_method") == "ai")
+    return {
+        "evaluated": len(scores),
+        "ai_evaluated": ai_count,
+        "rules_evaluated": len(scores) - ai_count,
+        "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+        "complete": sum(1 for s in scores if s == 100),
+        "partial": sum(1 for s in scores if 60 <= s < 100),
+        "incomplete": sum(1 for s in scores if s < 60),
+    }
+
 
 # ==================== ROOT ====================
 

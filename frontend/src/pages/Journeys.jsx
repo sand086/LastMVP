@@ -58,7 +58,7 @@ const Journeys = () => {
                 getProviders(),
             ]);
 
-            setJourneys(journeysRes.data);
+            setJourneys(journeysRes.data?.data || journeysRes.data || []);
             setClients(clientsRes.data);
             setProviders(providersRes.data);
         } catch (error) {

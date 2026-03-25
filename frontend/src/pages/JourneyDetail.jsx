@@ -14,7 +14,9 @@ import {
     getJourneyImages,
     deleteJourneyImage,
     evaluateJourneyQuality,
-    reviewPackage
+    reviewPackage,
+    evaluatePackageEvidence,
+    evaluateAllEvidence,
 } from '../lib/api';
 import { 
     formatDate, 
@@ -95,10 +97,18 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
+import EvidenceCarousel from '../components/EvidenceCarousel';
 
 // Quality Tab Component
-const QualityTab = ({ journey, packages, onEvaluate }) => {
+const QualityTab = ({ journey, packages, onEvaluate, onRefreshJourney }) => {
     const [filterIncomplete, setFilterIncomplete] = useState(false);
+    const [evaluatingPkg, setEvaluatingPkg] = useState(null);
+    const [evaluatingAll, setEvaluatingAll] = useState(false);
+    const [expandedPkg, setExpandedPkg] = useState(null);
+    const [carouselOpen, setCarouselOpen] = useState(false);
+    const [carouselImages, setCarouselImages] = useState([]);
+    const [carouselIndex, setCarouselIndex] = useState(0);
+    const [carouselPkgInfo, setCarouselPkgInfo] = useState(null);
 
     const scoredPackages = packages.filter(p => p.evidence_score != null);
     const allScores = scoredPackages.map(p => p.evidence_score);
@@ -107,6 +117,7 @@ const QualityTab = ({ journey, packages, onEvaluate }) => {
     const partial = allScores.filter(s => s >= 60 && s < 100).length;
     const incomplete = allScores.filter(s => s < 60).length;
     const total = scoredPackages.length;
+    const aiEvaluated = scoredPackages.filter(p => p.evidence_method === 'ai').length;
 
     const displayPackages = (filterIncomplete
         ? scoredPackages.filter(p => p.evidence_score < 100)
@@ -117,17 +128,70 @@ const QualityTab = ({ journey, packages, onEvaluate }) => {
     const partialPct = total > 0 ? Math.round(partial / total * 100) : 0;
     const incompletePct = total > 0 ? Math.round(incomplete / total * 100) : 0;
 
+    const handleEvaluatePackage = async (pkg) => {
+        const guide = pkg.order_reference_id || pkg.tracking_number;
+        setEvaluatingPkg(guide);
+        try {
+            await evaluatePackageEvidence(journey.id, guide);
+            toast.success(`Evaluación IA completada para ${guide}`);
+            if (onRefreshJourney) onRefreshJourney();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al evaluar con IA');
+        } finally {
+            setEvaluatingPkg(null);
+        }
+    };
+
+    const handleEvaluateAll = async () => {
+        setEvaluatingAll(true);
+        try {
+            const res = await evaluateAllEvidence(journey.id);
+            toast.success(`Evaluación IA completada: ${res.data.ai_evaluated || 0} con IA, ${res.data.rules_evaluated || 0} con reglas`);
+            if (onRefreshJourney) onRefreshJourney();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al evaluar con IA');
+        } finally {
+            setEvaluatingAll(false);
+        }
+    };
+
+    const openCarousel = (pkg, startIndex = 0) => {
+        const urls = pkg.kosmo_proof_urls || [];
+        const photoAnalyses = pkg.evidence_detail?.photos_analysis || [];
+        const imgs = urls.map((url, i) => ({
+            url,
+            analysis: photoAnalyses[i] || null,
+        }));
+        if (imgs.length === 0) return;
+        setCarouselImages(imgs);
+        setCarouselIndex(startIndex);
+        setCarouselPkgInfo({
+            guide: pkg.tracking_number || pkg.order_reference_id,
+            deliveryType: pkg.evidence_type,
+            score: pkg.evidence_score,
+        });
+        setCarouselOpen(true);
+    };
+
     if (scoredPackages.length === 0) {
         return (
             <Card>
                 <CardContent className="py-12 text-center">
                     <CheckCircle2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                     <p className="text-slate-500 mb-4">No hay evaluaciones de calidad disponibles para esta ruta.</p>
-                    {journey.status === 'closed' && (
-                        <Button variant="outline" onClick={onEvaluate} data-testid="evaluate-quality-btn">
-                            <RefreshCw className="w-4 h-4 mr-2" /> Evaluar calidad ahora
-                        </Button>
-                    )}
+                    <div className="flex items-center justify-center gap-3">
+                        {journey.status === 'closed' && (
+                            <>
+                                <Button variant="outline" onClick={onEvaluate} data-testid="evaluate-quality-btn">
+                                    <RefreshCw className="w-4 h-4 mr-2" /> Evaluar (reglas)
+                                </Button>
+                                <Button onClick={handleEvaluateAll} disabled={evaluatingAll} data-testid="evaluate-ai-btn">
+                                    {evaluatingAll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
+                                    Evaluar con IA
+                                </Button>
+                            </>
+                        )}
+                    </div>
                 </CardContent>
             </Card>
         );
@@ -136,7 +200,7 @@ const QualityTab = ({ journey, packages, onEvaluate }) => {
     return (
         <div className="space-y-4">
             {/* Summary Cards */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card>
                     <CardContent className="p-4 text-center">
                         <p className="text-xs text-slate-500 uppercase">Score promedio</p>
@@ -147,7 +211,7 @@ const QualityTab = ({ journey, packages, onEvaluate }) => {
                 </Card>
                 <Card>
                     <CardContent className="p-4 text-center">
-                        <p className="text-xs text-slate-500 uppercase">Soporte completo</p>
+                        <p className="text-xs text-slate-500 uppercase">Completos</p>
                         <p className="text-3xl font-mono font-bold text-emerald-600" data-testid="quality-complete-count">
                             {complete}<span className="text-lg text-slate-400">/{total}</span>
                         </p>
@@ -155,9 +219,17 @@ const QualityTab = ({ journey, packages, onEvaluate }) => {
                 </Card>
                 <Card>
                     <CardContent className="p-4 text-center">
-                        <p className="text-xs text-slate-500 uppercase">Sin soporte</p>
+                        <p className="text-xs text-slate-500 uppercase">Incompletos</p>
                         <p className="text-3xl font-mono font-bold text-red-600" data-testid="quality-incomplete-count">
                             {incomplete}
+                        </p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-4 text-center">
+                        <p className="text-xs text-slate-500 uppercase">Evaluados IA</p>
+                        <p className="text-3xl font-mono font-bold text-blue-600" data-testid="quality-ai-count">
+                            {aiEvaluated}<span className="text-lg text-slate-400">/{total}</span>
                         </p>
                     </CardContent>
                 </Card>
@@ -212,69 +284,203 @@ const QualityTab = ({ journey, packages, onEvaluate }) => {
                                 Solo incompletos
                             </label>
                             <Button variant="outline" size="sm" onClick={onEvaluate} className="h-7 text-xs" data-testid="re-evaluate-btn">
-                                <RefreshCw className="w-3 h-3 mr-1" /> Re-evaluar
+                                <RefreshCw className="w-3 h-3 mr-1" /> Reglas
+                            </Button>
+                            <Button size="sm" onClick={handleEvaluateAll} disabled={evaluatingAll} className="h-7 text-xs" data-testid="re-evaluate-ai-btn">
+                                {evaluatingAll ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Search className="w-3 h-3 mr-1" />}
+                                Evaluar IA
                             </Button>
                         </div>
                     </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <div className="max-h-96 overflow-y-auto">
+                    <div className="max-h-[500px] overflow-y-auto">
                         <table className="data-table w-full text-sm">
                             <thead>
                                 <tr>
                                     <th>Guía</th>
-                                    <th>Tipo entrega</th>
+                                    <th>Tipo</th>
                                     <th>Score</th>
-                                    <th>Faltante</th>
+                                    <th>Método</th>
+                                    <th>Faltante / Alertas</th>
+                                    <th>Fotos</th>
                                     <th>Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {displayPackages.map((pkg) => (
-                                    <tr key={pkg.id} data-testid={`quality-row-${pkg.id}`}>
-                                        <td className="font-mono text-xs">{pkg.tracking_number || pkg.order_reference_id}</td>
-                                        <td>
-                                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                                                pkg.evidence_type === 'exitosa' ? 'bg-emerald-100 text-emerald-700' :
-                                                pkg.evidence_type === 'terceros' ? 'bg-blue-100 text-blue-700' :
-                                                pkg.evidence_type === 'fallida' ? 'bg-red-100 text-red-700' :
-                                                'bg-slate-100 text-slate-600'
-                                            }`}>
-                                                {pkg.evidence_type === 'exitosa' ? 'Exitosa' :
-                                                 pkg.evidence_type === 'terceros' ? 'Terceros' :
-                                                 pkg.evidence_type === 'fallida' ? 'Fallida' : '-'}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <span className={`font-mono font-bold ${
-                                                pkg.evidence_score === 100 ? 'text-emerald-600' :
-                                                pkg.evidence_score >= 60 ? 'text-amber-600' : 'text-red-600'
-                                            }`}>
-                                                {pkg.evidence_score}
-                                            </span>
-                                        </td>
-                                        <td className="text-xs text-slate-500 max-w-[200px]">
-                                            {pkg.evidence_detail?.missing_items?.length > 0
-                                                ? pkg.evidence_detail.missing_items.join(', ')
-                                                : <span className="text-emerald-500">-</span>
-                                            }
-                                        </td>
-                                        <td>
-                                            {pkg.tracking_url && (
-                                                <a href={pkg.tracking_url} target="_blank" rel="noopener noreferrer"
-                                                    className="text-blue-500 hover:text-blue-700 text-xs flex items-center gap-1"
-                                                    data-testid={`quality-kosmo-link-${pkg.id}`}>
-                                                    <ExternalLink className="w-3.5 h-3.5" /> Kosmo
-                                                </a>
+                                {displayPackages.map((pkg) => {
+                                    const guide = pkg.tracking_number || pkg.order_reference_id;
+                                    const isExpanded = expandedPkg === pkg.id;
+                                    const isEvaluating = evaluatingPkg === (pkg.order_reference_id || pkg.tracking_number);
+                                    const photoCount = (pkg.kosmo_proof_urls || []).length;
+                                    const alerts = pkg.evidence_detail?.alerts || [];
+                                    const missing = pkg.evidence_detail?.missing_items || [];
+                                    const aiObs = pkg.evidence_detail?.ai_observations || '';
+                                    const criteria = pkg.evidence_detail?.criteria_met || {};
+
+                                    return (
+                                        <React.Fragment key={pkg.id}>
+                                            <tr data-testid={`quality-row-${pkg.id}`}
+                                                className={`cursor-pointer hover:bg-slate-50 ${isExpanded ? 'bg-slate-50' : ''}`}
+                                                onClick={() => setExpandedPkg(isExpanded ? null : pkg.id)}>
+                                                <td className="font-mono text-xs">{guide}</td>
+                                                <td>
+                                                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                                        pkg.evidence_type === 'exitosa' ? 'bg-emerald-100 text-emerald-700' :
+                                                        pkg.evidence_type === 'terceros' ? 'bg-blue-100 text-blue-700' :
+                                                        pkg.evidence_type === 'fallida' ? 'bg-red-100 text-red-700' :
+                                                        'bg-slate-100 text-slate-600'
+                                                    }`}>
+                                                        {pkg.evidence_type === 'exitosa' ? 'Exitosa' :
+                                                         pkg.evidence_type === 'terceros' ? 'Terceros' :
+                                                         pkg.evidence_type === 'fallida' ? 'Fallida' : '-'}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span className={`font-mono font-bold ${
+                                                        pkg.evidence_score === 100 ? 'text-emerald-600' :
+                                                        pkg.evidence_score >= 60 ? 'text-amber-600' : 'text-red-600'
+                                                    }`}>
+                                                        {pkg.evidence_score}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                                        pkg.evidence_method === 'ai' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
+                                                    }`}>
+                                                        {pkg.evidence_method === 'ai' ? 'IA' : 'Reglas'}
+                                                    </span>
+                                                </td>
+                                                <td className="text-xs text-slate-500 max-w-[220px]">
+                                                    {missing.length > 0 ? (
+                                                        <span className="text-red-600">{missing.join(', ')}</span>
+                                                    ) : alerts.length > 0 ? (
+                                                        <span className="text-amber-600">{alerts[0]}</span>
+                                                    ) : (
+                                                        <span className="text-emerald-500">Completo</span>
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    {photoCount > 0 ? (
+                                                        <button
+                                                            className="text-blue-500 hover:text-blue-700 text-xs flex items-center gap-1"
+                                                            onClick={(e) => { e.stopPropagation(); openCarousel(pkg); }}
+                                                            data-testid={`quality-photos-${pkg.id}`}
+                                                        >
+                                                            <Camera className="w-3.5 h-3.5" /> {photoCount}
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-slate-400 text-xs">0</span>
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                                        <Button
+                                                            variant="ghost" size="sm" className="h-6 px-1.5 text-xs"
+                                                            disabled={isEvaluating}
+                                                            onClick={() => handleEvaluatePackage(pkg)}
+                                                            data-testid={`evaluate-pkg-${pkg.id}`}
+                                                        >
+                                                            {isEvaluating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                                                        </Button>
+                                                        {pkg.tracking_url && (
+                                                            <a href={pkg.tracking_url} target="_blank" rel="noopener noreferrer"
+                                                                className="text-blue-500 hover:text-blue-700"
+                                                                data-testid={`quality-kosmo-link-${pkg.id}`}>
+                                                                <ExternalLink className="w-3.5 h-3.5" />
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {/* Expanded detail row */}
+                                            {isExpanded && (
+                                                <tr>
+                                                    <td colSpan={7} className="bg-slate-50 p-4">
+                                                        <div className="space-y-3">
+                                                            {/* Criteria checklist */}
+                                                            {Object.keys(criteria).length > 0 && (
+                                                                <div>
+                                                                    <p className="text-xs font-medium text-slate-700 mb-1">Criterios evaluados:</p>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        {Object.entries(criteria).map(([key, met]) => (
+                                                                            <span key={key} className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+                                                                                met ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                                                                            }`}>
+                                                                                {met ? <Check className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                                                                                {key.replace(/_/g, ' ')}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {/* Alerts */}
+                                                            {alerts.length > 0 && (
+                                                                <div>
+                                                                    <p className="text-xs font-medium text-amber-700 mb-1">Alertas:</p>
+                                                                    <ul className="text-xs text-amber-600 list-disc list-inside">
+                                                                        {alerts.map((a, i) => <li key={i}>{a}</li>)}
+                                                                    </ul>
+                                                                </div>
+                                                            )}
+                                                            {/* AI Observations */}
+                                                            {aiObs && (
+                                                                <div>
+                                                                    <p className="text-xs font-medium text-slate-700 mb-1">Observaciones IA:</p>
+                                                                    <p className="text-xs text-slate-600 bg-white p-2 rounded border border-slate-200">{aiObs}</p>
+                                                                </div>
+                                                            )}
+                                                            {/* Photo analysis */}
+                                                            {(pkg.evidence_detail?.photos_analysis || []).length > 0 && (
+                                                                <div>
+                                                                    <p className="text-xs font-medium text-slate-700 mb-1">Análisis de fotos:</p>
+                                                                    <div className="flex gap-2 overflow-x-auto">
+                                                                        {(pkg.evidence_detail.photos_analysis).map((pa, i) => (
+                                                                            <button key={i}
+                                                                                className="shrink-0 bg-white border border-slate-200 rounded p-2 text-left hover:border-blue-300 transition w-36"
+                                                                                onClick={() => openCarousel(pkg, i)}
+                                                                            >
+                                                                                <p className="text-xs font-medium text-slate-700 capitalize">{(pa.photo_type || 'foto').replace('_', ' ')}</p>
+                                                                                <p className={`text-xs ${
+                                                                                    pa.quality === 'buena' ? 'text-emerald-600' :
+                                                                                    pa.quality === 'aceptable' ? 'text-amber-600' : 'text-red-600'
+                                                                                }`}>{pa.quality || '-'}</p>
+                                                                                {pa.description && <p className="text-xs text-slate-400 truncate mt-0.5">{pa.description}</p>}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {/* Missing items */}
+                                                            {missing.length > 0 && (
+                                                                <div>
+                                                                    <p className="text-xs font-medium text-red-700 mb-1">Faltantes:</p>
+                                                                    <ul className="text-xs text-red-600 list-disc list-inside">
+                                                                        {missing.map((m, i) => <li key={i}>{m}</li>)}
+                                                                    </ul>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
                                             )}
-                                        </td>
-                                    </tr>
-                                ))}
+                                        </React.Fragment>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Evidence Carousel */}
+            <EvidenceCarousel
+                open={carouselOpen}
+                onClose={() => setCarouselOpen(false)}
+                images={carouselImages}
+                initialIndex={carouselIndex}
+                packageInfo={carouselPkgInfo}
+            />
         </div>
     );
 };
@@ -287,6 +493,12 @@ const JourneyDetail = () => {
     const [journey, setJourney] = useState(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('inicio');
+
+    // Evidence Carousel state
+    const [mainCarouselOpen, setMainCarouselOpen] = useState(false);
+    const [mainCarouselImages, setMainCarouselImages] = useState([]);
+    const [mainCarouselIndex, setMainCarouselIndex] = useState(0);
+    const [mainCarouselPkgInfo, setMainCarouselPkgInfo] = useState(null);
 
     // Images state
     const [startImages, setStartImages] = useState([]);
@@ -416,6 +628,25 @@ const JourneyDetail = () => {
         } catch (error) {
             toast.error('Error al eliminar imagen');
         }
+    };
+
+    // Open evidence carousel for any package
+    const openMainCarousel = (pkg, startIndex = 0) => {
+        const urls = pkg.kosmo_proof_urls || [];
+        const photoAnalyses = pkg.evidence_detail?.photos_analysis || [];
+        const imgs = urls.map((url, i) => ({
+            url,
+            analysis: photoAnalyses[i] || null,
+        }));
+        if (imgs.length === 0) return;
+        setMainCarouselImages(imgs);
+        setMainCarouselIndex(startIndex);
+        setMainCarouselPkgInfo({
+            guide: pkg.tracking_number || pkg.order_reference_id,
+            deliveryType: pkg.evidence_type,
+            score: pkg.evidence_score,
+        });
+        setMainCarouselOpen(true);
     };
 
     const fetchJourney = async () => {
@@ -912,24 +1143,15 @@ const JourneyDetail = () => {
                                                     <div className="flex items-center gap-1.5">
                                                         {pkg.kosmo_proof_count > 0 && (
                                                             pkg.kosmo_proof_urls?.length > 0 ? (
-                                                                <div className="flex items-center gap-0.5">
-                                                                    {pkg.kosmo_proof_urls.slice(0, 3).map((url, idx) => (
-                                                                        <a
-                                                                            key={idx}
-                                                                            href={url}
-                                                                            target="_blank"
-                                                                            rel="noopener noreferrer"
-                                                                            className="inline-flex items-center justify-center w-6 h-6 bg-blue-50 border border-blue-200 rounded text-blue-600 hover:bg-blue-100 transition-colors"
-                                                                            title={`Foto ${idx + 1}`}
-                                                                            data-testid={`kosmo-proof-img-${pkg.id}-${idx}`}
-                                                                        >
-                                                                            <Camera className="w-3 h-3" />
-                                                                        </a>
-                                                                    ))}
-                                                                    {pkg.kosmo_proof_urls.length > 3 && (
-                                                                        <span className="text-xs text-slate-400">+{pkg.kosmo_proof_urls.length - 3}</span>
-                                                                    )}
-                                                                </div>
+                                                                <button
+                                                                    className="inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700 cursor-pointer"
+                                                                    onClick={() => openMainCarousel(pkg)}
+                                                                    data-testid={`kosmo-proof-carousel-${pkg.id}`}
+                                                                    title="Ver evidencias"
+                                                                >
+                                                                    <Camera className="w-3.5 h-3.5" />
+                                                                    <span className="text-xs font-mono">{pkg.kosmo_proof_urls.length}</span>
+                                                                </button>
                                                             ) : pkg.tracking_url ? (
                                                                 <a
                                                                     href={pkg.tracking_url}
@@ -1922,7 +2144,7 @@ const JourneyDetail = () => {
                         } catch (e) {
                             toast.error('Error al evaluar calidad');
                         }
-                    }} />
+                    }} onRefreshJourney={fetchJourney} />
                 </TabsContent>
             </Tabs>
 
@@ -2124,6 +2346,15 @@ const JourneyDetail = () => {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Main Evidence Carousel */}
+            <EvidenceCarousel
+                open={mainCarouselOpen}
+                onClose={() => setMainCarouselOpen(false)}
+                images={mainCarouselImages}
+                initialIndex={mainCarouselIndex}
+                packageInfo={mainCarouselPkgInfo}
+            />
         </div>
     );
 };
