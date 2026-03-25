@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSortableTable } from '../lib/useSortableTable';
+import { useWebSocket } from '../lib/useWebSocket';
 import { 
     getDashboardStats, 
     getJourneys, 
@@ -225,6 +226,14 @@ const Dashboard = () => {
         return () => clearInterval(interval);
     }, [fetchData]);
 
+    // WebSocket for real-time updates
+    const handleWsEvent = useCallback((event) => {
+        if (['stats_update', 'journey_update', 'incident_update', 'sync_update'].includes(event.type)) {
+            fetchData();
+        }
+    }, [fetchData]);
+    const { isConnected: wsConnected } = useWebSocket(handleWsEvent);
+
     // Reset page to 1 when filters change
     useEffect(() => {
         setCurrentPage(1);
@@ -301,6 +310,14 @@ const Dashboard = () => {
 
     return (
         <div className="space-y-6">
+            {/* WebSocket connection indicator */}
+            <div className="flex items-center justify-end">
+                <span className="flex items-center gap-1.5 text-xs text-slate-400" data-testid="ws-status">
+                    <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                    {wsConnected ? 'En vivo' : 'Reconectando...'}
+                </span>
+            </div>
+
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 <KPICard

@@ -1,26 +1,24 @@
 # LastMile OS - Roadmap
 
-## Completed (P0/P1/P2)
-- [x] AI-Powered Evidence Scoring (Claude Sonnet 4.5)
-- [x] Dynamic Pagination (server-side)
-- [x] Interactive Evidence Carousel
-- [x] Adaptive Sync Scheduler
-- [x] Address Normalization & Heatmap
+## Completed (P0/P1)
+- [x] Backend modular refactoring (server.py → 8 route modules)
+- [x] Sortable tables across all pages
+- [x] Quality criteria configuration UI
+- [x] WebSocket real-time dashboard
+- [x] API documentation updated
 
-## Backlog
+## In Progress
+(none)
 
-### P1 - High Priority
-- [ ] Clickable `tracking_url` view in package details
-- [ ] Search functionality in main packages table of Journey Detail
-
-### P2 - Medium Priority
-- [ ] Automatic compression for large image uploads
+## Upcoming (P2)
 - [ ] Mobile-optimized views for field agents
-- [ ] Email/Slack alerts for delivery rate drops
-- [ ] Refactor server.py (3000+ lines) into modular route files
-
-### P3 - Low Priority / Nice to Have
-- [ ] Real-time WebSocket updates for dashboard
-- [ ] Bulk operations on packages (mark reviewed, re-evaluate)
-- [ ] Export individual journey reports as PDF
+- [ ] Automatic image compression for large uploads
+- [ ] Reports page UI improvements based on user feedback
 - [ ] Historical trend charts for delivery rates
+
+## Future (P3)
+- [ ] Export individual reports as PDF
+- [ ] Email notifications for incidents
+- [ ] Push notifications for mobile agents
+- [ ] Advanced analytics with predictive delivery times
+- [ ] Multi-tenant support

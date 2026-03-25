@@ -5,3 +5,4 @@ from .upload_routes import router as upload_router
 from .dashboard_routes import router as dashboard_router
 from .analytics_routes import router as analytics_router
 from .admin_routes import router as admin_router
+from .quality_criteria_routes import router as quality_criteria_router

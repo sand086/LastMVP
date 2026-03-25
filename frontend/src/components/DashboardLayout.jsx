@@ -17,6 +17,7 @@ import {
     ScrollText,
     Bug,
     ShieldCheck,
+    ClipboardCheck,
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -29,11 +30,12 @@ import { Button } from '../components/ui/button';
 
 const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['agent', 'coordinator', 'executive', 'developer'] },
-    { path: '/journeys', label: 'Rutas', icon: Truck, roles: ['agent', 'coordinator', 'executive'] },
-    { path: '/layout', label: 'Layout', icon: Upload, roles: ['agent', 'coordinator'] },
-    { path: '/reports', label: 'Reportes', icon: FileText, roles: ['coordinator', 'executive'] },
-    { path: '/api-docs', label: 'API & Reportes', icon: Code, roles: ['coordinator', 'executive'] },
-    { path: '/settings', label: 'Configuración', icon: Settings, roles: ['coordinator'] },
+    { path: '/journeys', label: 'Rutas', icon: Truck, roles: ['agent', 'coordinator', 'executive', 'developer'] },
+    { path: '/layout', label: 'Layout', icon: Upload, roles: ['agent', 'coordinator', 'developer'] },
+    { path: '/reports', label: 'Reportes', icon: FileText, roles: ['coordinator', 'executive', 'developer'] },
+    { path: '/api-docs', label: 'API & Reportes', icon: Code, roles: ['coordinator', 'executive', 'developer'] },
+    { path: '/settings', label: 'Configuración', icon: Settings, roles: ['coordinator', 'developer'] },
+    { path: '/quality-criteria', label: 'Criterios Calidad', icon: ClipboardCheck, roles: ['coordinator', 'developer'] },
 ];
 
 const systemNavItems = [

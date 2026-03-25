@@ -15,6 +15,7 @@ import SystemHealth from './pages/SystemHealth';
 import SystemLogs from './pages/SystemLogs';
 import SystemErrors from './pages/SystemErrors';
 import SystemIntegrity from './pages/SystemIntegrity';
+import QualityCriteria from './pages/QualityCriteria';
 import './App.css';
 
 // Protected route wrapper
@@ -168,6 +169,15 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
                         <SystemIntegrity />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/quality-criteria" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
+                        <QualityCriteria />
                     </ProtectedRoute>
                 } 
             />

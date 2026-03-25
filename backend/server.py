@@ -2,7 +2,7 @@
 LastMile OS API - Main Application
 Modular FastAPI application for last-mile delivery management.
 """
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
@@ -14,6 +14,7 @@ from middleware import AuditMiddleware, SecurityHeadersMiddleware
 from system_routes import create_system_router
 from kosmo_sync import create_kosmo_router, start_periodic_sync, stop_periodic_sync
 from dependencies import get_current_user
+from ws_manager import ws_manager
 
 from routes import (
     auth_router,
@@ -23,6 +24,7 @@ from routes import (
     dashboard_router,
     analytics_router,
     admin_router,
+    quality_criteria_router,
 )
 
 # Configure logging
@@ -72,8 +74,26 @@ api_router.include_router(upload_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(analytics_router)
 api_router.include_router(admin_router)
+api_router.include_router(quality_criteria_router)
 
 app.include_router(api_router)
+
+# ==================== WEBSOCKET ENDPOINT ====================
+
+@app.websocket("/ws/dashboard")
+async def websocket_dashboard(websocket: WebSocket):
+    await ws_manager.connect(websocket, "dashboard")
+    try:
+        while True:
+            # Keep connection alive, receive pings
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text('{"type":"pong"}')
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket, "dashboard")
+    except Exception:
+        await ws_manager.disconnect(websocket, "dashboard")
+
 
 # System routes (factory pattern with injected deps)
 system_router = create_system_router(db, get_current_user)

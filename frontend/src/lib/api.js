@@ -210,4 +210,9 @@ export const updateExchangeRate = (rate) => api.put(`/system/exchange-rate?rate=
 export const bulkUpdatePackageStatus = (journeyId, packageIds, newStatus) =>
     api.post(`/journeys/${journeyId}/packages/bulk-status`, { package_ids: packageIds, new_status: newStatus });
 
+// Quality Criteria
+export const getQualityCriteria = () => api.get('/quality/criteria');
+export const updateQualityCriteria = (data) => api.put('/quality/criteria', data);
+export const resetQualityCriteria = () => api.post('/quality/criteria/reset');
+
 export default api;

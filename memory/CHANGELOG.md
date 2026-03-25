@@ -1,58 +1,81 @@
 # LastMile OS - Changelog
 
-## 2026-03-25 - Major Feature Release (5 Features)
+## 2026-03-25 - Major Refactoring & New Features
 
-### P0: AI-Powered Evidence Scoring
-- Rewrote `evidence_scoring.py` to use Claude Sonnet 4.5 (via Emergent LLM Key) for deep photo analysis
-- AI evaluates delivery evidence against Cubbo standards (exitosa, terceros, fallida)
-- Detects photo types (fachada, paquete, receptor, llamadas), OCR guide numbers, checks timestamps
-- Returns structured results: photos_analysis, criteria_met, missing_items, alerts, ai_observations
-- New endpoints: `POST /api/journeys/{id}/packages/{guide}/evaluate-evidence` (single) and `POST /api/journeys/{id}/evaluate-evidence-all` (batch, async background task)
-- Falls back to rule-based scoring when AI unavailable or images expired
-- Revamped QualityTab UI: expandable rows with detailed AI feedback, criteria checklists, new columns (Método, Fotos, Faltante/Alertas)
-- "Evaluados IA" counter card in quality summary
+### Backend Refactoring (P0)
+- Decomposed monolithic `server.py` (3,584 lines) into 8 modular route files in `/app/backend/routes/`
+- Created `dependencies.py` for shared auth, DB, limiter, and utility functions
+- Created `models.py` with all Pydantic models
+- Main `server.py` reduced to 124 lines (app init + router inclusion)
+- Full backward compatibility maintained - all API endpoints work identically
 
-### P1: Dynamic Pagination
-- Server-side pagination for `GET /api/journeys` endpoint
-- Frontend pagination controls: page size selector (25/50/75/100), First/Prev/Next/Last buttons, "Página X de N (Y rutas)" indicator
-- Filters reset to page 1 automatically
-- Response format: `{data: [...], pagination: {page, page_size, total_count, total_pages}}`
+### Sortable Tables (P1)
+- Applied `useSortableTable` hook to all data tables across the application
+- Dashboard: routes table (already done)
+- JourneyDetail: packages table, incidents table
+- Reports: MetricTable (provider/driver), QualityProviderTable, QualityTypeTable, HeatmapTable
+- Settings: users table, clients table, providers table
+- Extracted table components (MetricTable, QualityProviderTable, etc.) as standalone components
 
-### P1: Interactive Evidence Carousel
-- New `EvidenceCarousel.jsx` fullscreen modal component
-- Navigation via arrows, keyboard (Left/Right/Esc), and touch swipe
-- Thumbnail strip, position indicator ("Foto 2 de 5"), zoom controls
-- Displays AI analysis metadata per photo (type, quality, OCR text)
-- Integrated in both Packages tab and Quality tab of JourneyDetail
+### Quality Criteria Configuration (P1)
+- New backend: `routes/quality_criteria_routes.py` with GET/PUT/RESET endpoints
+- New frontend: `QualityCriteria.jsx` page with full CRUD UI
+- Configurable per delivery type (exitosa, terceros, fallida):
+  - Required evidence items (add/remove/edit label, key, weight)
+  - Scoring rules (min photos, score values, note requirements)
+- Third-party detection keywords editor
+- AI evaluation config (enable/disable, provider, custom instructions)
+- Role-restricted: only Coordinator and Developer can access
 
-### P2: Adaptive Sync Scheduler
-- Dynamic scheduling based on route age: 5min (same day) → 15min (1d) → 30min (2d) → 60min (3d) → 180min (4d) → 360min (5d+)
-- Active window: 06:00-23:00 CDMX (UTC-6)
-- Persists `last_sync_at` and `next_sync_at` in journeys collection
-- New monitoring endpoint: `GET /api/system/sync-schedule`
-- Max 10 journeys per sync cycle, 3 concurrent scrapers (prevents server overload)
+### WebSocket Real-time Dashboard (P1)
+- New backend: `ws_manager.py` with ConnectionManager class
+- WebSocket endpoint at `/ws/dashboard` with ping/pong keepalive
+- Broadcasts events: stats_update, journey_update, incident_update, sync_update
+- Frontend: `useWebSocket.js` hook with auto-reconnect (5s interval)
+- Dashboard shows live connection indicator ("En vivo" / "Reconectando...")
+- Graceful fallback to 60s polling when WS unavailable
 
-### P2: Address Normalization & Heatmap
-- `_normalize_address()` parses Mexican addresses during CSV upload → extracts address_cp, address_colonia, address_municipio, address_estado
-- New endpoints: `GET /api/analytics/heatmap` (group_by: address_cp, municipio, estado, zone) and `POST /api/analytics/heatmap-export` (Excel)
-- New "Heatmap Geográfico" section in Reports page with group-by selector, delivery rate bars, and Excel export
+### API Documentation Update
+- Added 3 new endpoints to `/api/reports/schema`: bulk-status, quality/criteria, ws/dashboard
+- Total documented endpoints: 17
 
-### Bug Fixes & Improvements
-- Fixed `_next_day()` function body corruption
-- Added `asyncio` import for background task creation
-- Added `DialogTitle` for accessibility in carousel modal
-- Reduced sync concurrency (5→3) and batch size (250→100) to prevent server overload
-- Added developer role access to Reports page
+### Developer Role Enhancement
+- Added 'developer' role to all sidebar navigation items (Rutas, Layout, Reportes, etc.)
 
-## Previous Sessions
-- FastAPI + React scaffolding with seed data
-- 2-step Cosmo layout upload
-- Image uploads for journey lifecycle
-- JWT role-based auth
-- Kosmo tracking scraper
-- Rule-based evidence scoring
-- Dashboard KPIs and date filtering
-- Reports with AI (Claude) insights
-- Dynamic assignments
-- Composite key for packages
-- Multiple rounds of bug fixes (iterations 1-12)
+## 2026-03-24 - Security & Quality Features
+
+### Security Hardened
+- CORS: strict origin whitelist (no more wildcard)
+- Rate limiting via slowapi on login (5/min), uploads (10/min), reports (30/min)
+- File upload validation (type, extension, 10MB max)
+- Login lockout after 5 failed attempts (15 min block)
+- HTTP security headers middleware
+- JWT expiry reduced to 8h with token revocation on logout
+
+### Quality & Evidence
+- AI-powered evidence scoring using Claude Sonnet 4.5
+- Rule-based scoring with configurable criteria
+- Interactive evidence carousel modal
+- Failed delivery scoring fixed (no driver comment required)
+- Scroll position preserved after individual AI evaluation
+
+### Operations
+- Bulk package status update (Pending/Delivered/Failed/Returned)
+- Provider names displayed instead of IDs in reports
+- Cubbo export button fixed
+- Cost/token consumption counter in System Health
+- Heatmap Excel export with all geo fields
+- Address normalization for Mexican addresses
+
+### Infrastructure
+- Dynamic server-side pagination for routes table
+- Adaptive Kosmo sync scheduler
+- Geographic heatmap analytics
+
+## Earlier Sessions
+- FastAPI + React + MongoDB scaffolding with seed data
+- 2-step Cosmo layout upload (history-orders + route-summary)
+- Image uploads for Start/Incidents/Close journey
+- Failed packages search filter
+- JWT role-based auth (Agent, Coordinator, Executive, Developer)
+- Multiple bug fix iterations (iterations 1-13)

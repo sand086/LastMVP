@@ -21,6 +21,7 @@ from evidence_scoring import (
     evaluate_packages_for_journey,
     evaluate_single_package_for_journey,
 )
+from ws_manager import ws_manager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -245,6 +246,7 @@ async def start_journey(journey_id: str, data: JourneyStartData, user: dict = De
 
     await db.journeys.update_one({"id": journey_id}, {"$set": update_fields})
     await log_audit_event(db, user["id"], user["role"], "route_started", "journey", journey_id)
+    await ws_manager.broadcast_journey_update(journey_id, "started")
     return {"message": "Ruta iniciada exitosamente"}
 
 
@@ -295,6 +297,7 @@ async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = De
 
     await log_audit_event(db, user["id"], user["role"], "route_closed", "journey", journey_id)
     await evaluate_packages_for_journey(db, journey_id)
+    await ws_manager.broadcast_journey_update(journey_id, "closed")
     return {"message": "Ruta cerrada exitosamente", "close_data": close_data}
 
 
@@ -333,6 +336,7 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
     }
     await db.incidents.insert_one(incident)
     await log_audit_event(db, user["id"], user["role"], "incident_created", "incident", incident["id"])
+    await ws_manager.broadcast_incident_update(data.journey_id)
     return {k: v for k, v in incident.items() if k != "_id"}
 
 
@@ -603,6 +607,7 @@ async def create_journeys_from_cosmo(
         db, user["id"], user["role"], "layout_uploaded", "layout", "",
         details=f"{len(created_journeys)} rutas, {total_new_packages} nuevos, {total_updated_packages} actualizados",
     )
+    await ws_manager.broadcast_stats_update()
 
     return {
         "message": f"{len(created_journeys)} rutas creadas, {total_updated_packages} paquetes actualizados",
@@ -665,6 +670,7 @@ async def bulk_update_package_status(
         "bulk_status_update", "packages", journey_id,
         details=f"Updated {result.modified_count} packages to {data.new_status}",
     )
+    await ws_manager.broadcast_journey_update(journey_id, "packages_updated")
     return {
         "updated": result.modified_count,
         "new_status": data.new_status,
