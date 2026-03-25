@@ -594,6 +594,10 @@ const JourneyDetail = () => {
     const { sortedData: sortedPackages, SortHeader: PkgSortHeader } = useSortableTable(journey?.packages || []);
     const { sortedData: sortedIncidents, SortHeader: IncSortHeader } = useSortableTable(journey?.incidents || [], 'occurred_at', 'desc');
 
+    // Batch rescrape state
+    const [batchRescraping, setBatchRescraping] = useState(false);
+    const [batchRescrapeProgress, setBatchRescrapeProgress] = useState({ done: 0, total: 0, recovered: 0 });
+
     useEffect(() => {
         fetchJourney();
         fetchImages();
@@ -1152,6 +1156,40 @@ const JourneyDetail = () => {
                                 >
                                     {showPackagesList ? 'Ocultar' : 'Ver todos'}
                                 </button>
+                                {(() => {
+                                    const needsRescrape = (journey.packages || []).filter(p => p.tracking_url && (p.kosmo_proof_count === 0 || p.kosmo_status_raw === 'unknown'));
+                                    if (needsRescrape.length === 0) return null;
+                                    return (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-xs text-orange-600 border-orange-200 hover:bg-orange-50"
+                                            disabled={batchRescraping}
+                                            onClick={async () => {
+                                                setBatchRescraping(true);
+                                                setBatchRescrapeProgress({ done: 0, total: needsRescrape.length, recovered: 0 });
+                                                let recovered = 0;
+                                                for (let i = 0; i < needsRescrape.length; i++) {
+                                                    try {
+                                                        const res = await rescrapePackage(needsRescrape[i].id);
+                                                        if (res.data.success && res.data.proof_count > 0) recovered++;
+                                                        setBatchRescrapeProgress({ done: i + 1, total: needsRescrape.length, recovered });
+                                                    } catch {}
+                                                }
+                                                setBatchRescraping(false);
+                                                toast.success(`Re-sincronización completa: ${recovered} paquetes recuperados de ${needsRescrape.length}`);
+                                                fetchJourney();
+                                            }}
+                                            data-testid="batch-rescrape-btn"
+                                        >
+                                            <RefreshCw className={`w-3 h-3 mr-1 ${batchRescraping ? 'animate-spin' : ''}`} />
+                                            {batchRescraping
+                                                ? `Sincronizando ${batchRescrapeProgress.done}/${batchRescrapeProgress.total}...`
+                                                : `Re-sincronizar (${needsRescrape.length})`
+                                            }
+                                        </Button>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </CardHeader>
