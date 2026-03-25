@@ -20,6 +20,7 @@ import {
     evaluateAllEvidence,
     bulkUpdatePackageStatus,
     rescrapePackage,
+    batchRescrapeJourney,
 } from '../lib/api';
 import { 
     formatDate, 
@@ -1157,7 +1158,7 @@ const JourneyDetail = () => {
                                     {showPackagesList ? 'Ocultar' : 'Ver todos'}
                                 </button>
                                 {(() => {
-                                    const needsRescrape = (journey.packages || []).filter(p => p.tracking_url && (p.kosmo_proof_count === 0 || p.kosmo_status_raw === 'unknown'));
+                                    const needsRescrape = (journey.packages || []).filter(p => p.tracking_url && (!p.kosmo_proof_count || p.kosmo_status_raw === 'unknown' || !p.kosmo_status_raw));
                                     if (needsRescrape.length === 0) return null;
                                     return (
                                         <Button
@@ -1168,23 +1169,23 @@ const JourneyDetail = () => {
                                             onClick={async () => {
                                                 setBatchRescraping(true);
                                                 setBatchRescrapeProgress({ done: 0, total: needsRescrape.length, recovered: 0 });
-                                                let recovered = 0;
-                                                for (let i = 0; i < needsRescrape.length; i++) {
-                                                    try {
-                                                        const res = await rescrapePackage(needsRescrape[i].id);
-                                                        if (res.data.success && res.data.proof_count > 0) recovered++;
-                                                        setBatchRescrapeProgress({ done: i + 1, total: needsRescrape.length, recovered });
-                                                    } catch {}
+                                                try {
+                                                    const res = await batchRescrapeJourney(journey.id);
+                                                    const data = res.data;
+                                                    setBatchRescrapeProgress({ done: data.total, total: data.total, recovered: data.recovered });
+                                                    toast.success(data.message || `Re-sincronización completa: ${data.recovered} recuperados de ${data.total}`);
+                                                    fetchJourney();
+                                                } catch (err) {
+                                                    toast.error(err.response?.data?.detail || 'Error al re-sincronizar');
+                                                } finally {
+                                                    setBatchRescraping(false);
                                                 }
-                                                setBatchRescraping(false);
-                                                toast.success(`Re-sincronización completa: ${recovered} paquetes recuperados de ${needsRescrape.length}`);
-                                                fetchJourney();
                                             }}
                                             data-testid="batch-rescrape-btn"
                                         >
                                             <RefreshCw className={`w-3 h-3 mr-1 ${batchRescraping ? 'animate-spin' : ''}`} />
                                             {batchRescraping
-                                                ? `Sincronizando ${batchRescrapeProgress.done}/${batchRescrapeProgress.total}...`
+                                                ? `Sincronizando...`
                                                 : `Re-sincronizar (${needsRescrape.length})`
                                             }
                                         </Button>

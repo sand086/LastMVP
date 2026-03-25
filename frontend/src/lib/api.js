@@ -217,5 +217,6 @@ export const resetQualityCriteria = () => api.post('/quality/criteria/reset');
 
 // Package rescrape
 export const rescrapePackage = (packageId) => api.post(`/packages/${packageId}/rescrape`);
+export const batchRescrapeJourney = (journeyId) => api.post(`/journeys/${journeyId}/batch-rescrape`);
 
 export default api;

@@ -819,3 +819,105 @@ async def rescrape_package(package_id: str, user: dict = Depends(get_current_use
         "driver_note": result.get("driver_note"),
         "proof_urls": result.get("proof_urls", []),
     }
+
+
+# ==================== BATCH RE-SCRAPE ====================
+
+@router.post("/journeys/{journey_id}/batch-rescrape")
+async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_current_user)):
+    """Re-scrape all packages in a journey that have a tracking_url but 0 proofs or unknown status."""
+    from kosmo_sync import scrape_kosmo_page
+
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    # Find packages needing rescrape
+    candidates = await db.packages.find(
+        {
+            "journey_id": journey_id,
+            "tracking_url": {"$nin": [None, ""]},
+            "$or": [
+                {"kosmo_proof_count": 0},
+                {"kosmo_proof_count": None},
+                {"kosmo_proof_count": {"$exists": False}},
+                {"kosmo_status_raw": "unknown"},
+                {"kosmo_status_raw": None},
+                {"kosmo_status_raw": {"$exists": False}},
+            ],
+        },
+        {"_id": 0, "id": 1, "tracking_url": 1, "tracking_number": 1, "order_reference_id": 1, "journey_id": 1},
+    ).to_list(500)
+
+    if not candidates:
+        return {"total": 0, "recovered": 0, "errors": 0, "message": "No hay paquetes que necesiten re-sincronización"}
+
+    now = datetime.now(timezone.utc)
+    semaphore = asyncio.Semaphore(3)
+    recovered = 0
+    errors = 0
+    STATUS_MAP = {
+        "delivered": "delivered",
+        "cancelled": "failed",
+        "failed": "failed",
+        "returned": "returned",
+    }
+
+    async def process_one(pkg):
+        nonlocal recovered, errors
+        async with semaphore:
+            try:
+                result = await scrape_kosmo_page(pkg["tracking_url"])
+                if result.get("error"):
+                    errors += 1
+                    return
+
+                kosmo_raw = result.get("order_status") or "unknown"
+                mapped_status = STATUS_MAP.get(kosmo_raw)
+                update_fields = {
+                    "kosmo_scraped_at": now.isoformat(),
+                    "kosmo_status_raw": kosmo_raw,
+                    "kosmo_order_id": result.get("order_id"),
+                    "kosmo_proof_count": result.get("proof_count", 0),
+                }
+                if result.get("updated_at_ms"):
+                    update_fields["kosmo_updated_at"] = result["updated_at_ms"]
+                if result.get("finished_at_ms"):
+                    update_fields["kosmo_finished_at"] = result["finished_at_ms"]
+                if result.get("driver_note"):
+                    update_fields["kosmo_driver_note"] = result["driver_note"]
+                if result.get("proof_urls"):
+                    update_fields["kosmo_proof_urls"] = result["proof_urls"]
+                if mapped_status:
+                    update_fields["status"] = mapped_status
+
+                await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
+
+                if result.get("proof_count", 0) > 0:
+                    recovered += 1
+            except Exception as e:
+                logger.error(f"Batch rescrape error for {pkg['id']}: {e}")
+                errors += 1
+
+    await asyncio.gather(*[process_one(pkg) for pkg in candidates], return_exceptions=True)
+
+    # Recount journey totals
+    delivered = await db.packages.count_documents({"journey_id": journey_id, "status": "delivered"})
+    failed = await db.packages.count_documents({"journey_id": journey_id, "status": "failed"})
+    await db.journeys.update_one(
+        {"id": journey_id},
+        {"$set": {"packages_delivered": delivered, "packages_failed": failed}},
+    )
+
+    # Re-evaluate evidence for scraped packages
+    scraped_ids = [p["id"] for p in candidates]
+    if scraped_ids:
+        from evidence_scoring import evaluate_packages_by_ids
+        await evaluate_packages_by_ids(db, scraped_ids, {journey_id})
+
+    return {
+        "total": len(candidates),
+        "recovered": recovered,
+        "errors": errors,
+        "message": f"Re-sincronización completa: {recovered} paquetes recuperados de {len(candidates)}",
+    }
