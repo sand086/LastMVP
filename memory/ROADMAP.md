@@ -1,25 +1,22 @@
 # LastMile OS - Roadmap
 
-## Completed (P0/P1)
-- [x] Backend modular refactoring (server.py → 8 route modules)
-- [x] Sortable tables across all pages
-- [x] Quality criteria configuration UI
-- [x] WebSocket real-time dashboard
-- [x] API documentation updated
-- [x] Kosmo scraper: fix transient failures + manual re-scrape endpoint
+## P0 - Completed
+- [x] Batch re-scrape feature (Re-sincronizar todos)
+- [x] Full regression testing after backend refactoring
 
-## In Progress
-(none)
+## P1 - Next Up
+- [ ] Update API Documentation page with new batch-rescrape endpoint
+- [ ] Add clickable tracking_url view in package details
+- [ ] Add search functionality in main packages table of Journey Detail
 
-## Upcoming (P2)
+## P2 - Backlog
+- [ ] Automatic compression for large image uploads
 - [ ] Mobile-optimized views for field agents
-- [ ] Automatic image compression for large uploads
-- [ ] Reports page UI improvements based on user feedback
+- [ ] Export journey details to PDF
 - [ ] Historical trend charts for delivery rates
+- [ ] Refactor JourneyDetail.jsx (2500+ lines) into sub-components
 
-## Future (P3)
-- [ ] Export individual reports as PDF
-- [ ] Email notifications for incidents
-- [ ] Push notifications for mobile agents
-- [ ] Advanced analytics with predictive delivery times
-- [ ] Multi-tenant support
+## P3 - Future
+- [ ] Multi-language support
+- [ ] Advanced reporting with exportable dashboards
+- [ ] Route optimization suggestions
