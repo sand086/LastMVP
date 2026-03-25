@@ -195,4 +195,11 @@ export const deleteProvider = (id) => api.delete(`/providers/${id}`);
 // Cleanup
 export const cleanupRoutesPackages = () => api.post('/cleanup/routes-packages');
 
+// Analytics / Heatmap
+export const getHeatmapData = (params) => api.get('/analytics/heatmap', { params });
+export const exportHeatmap = (params) => api.post('/analytics/heatmap-export', null, { params, responseType: 'blob' });
+
+// System Sync Schedule
+export const getSyncSchedule = () => api.get('/system/sync-schedule');
+
 export default api;

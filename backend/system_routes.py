@@ -446,4 +446,40 @@ def create_system_router(db, get_current_user):
             "uptime": f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m",
         }
 
+    # ==================== SYNC SCHEDULE (Adaptive Scheduler) ====================
+
+    @router.get("/sync-schedule")
+    async def get_sync_schedule(user: dict = Depends(get_current_user)):
+        """Show sync status of active journeys with adaptive scheduling info."""
+        _check_system_role(user)
+        from kosmo_sync import _get_sync_interval_minutes, _is_within_active_window, _get_cdmx_now
+
+        active_journeys = await db.journeys.find(
+            {"status": {"$in": ["scheduled", "in_progress"]}},
+            {"_id": 0, "id": 1, "date": 1, "status": 1, "last_sync_at": 1, "next_sync_at": 1,
+             "client_name": 1, "provider_name": 1, "driver_name": 1, "cosmo_route_id": 1},
+        ).sort("date", -1).to_list(200)
+
+        cdmx_now = _get_cdmx_now()
+        schedule = []
+        for j in active_journeys:
+            interval = _get_sync_interval_minutes(j.get("date", ""))
+            schedule.append({
+                "journey_id": j["id"],
+                "cosmo_route_id": j.get("cosmo_route_id"),
+                "date": j.get("date"),
+                "status": j.get("status"),
+                "driver_name": j.get("driver_name"),
+                "sync_interval_min": interval,
+                "last_sync_at": j.get("last_sync_at"),
+                "next_sync_at": j.get("next_sync_at"),
+            })
+
+        return {
+            "active_window": _is_within_active_window(),
+            "cdmx_time": cdmx_now.strftime("%Y-%m-%d %H:%M:%S"),
+            "active_journeys_count": len(schedule),
+            "schedule": schedule,
+        }
+
     return router

@@ -2,6 +2,11 @@
 Kosmo Tracking Scraper & Sync Module
 Scrapes public Kosmo tracking pages (Next.js SSR) to auto-update package statuses.
 No API key required. No authentication needed against Kosmo.
+
+Features:
+- Adaptive sync frequency based on route age
+- Active window: 06:00-23:00 CDMX (UTC-6)
+- Per-journey sync timestamps
 """
 
 import asyncio
@@ -36,6 +41,46 @@ HEADERS = {
 }
 
 MAX_PACKAGES_PER_SYNC = 250
+
+# ── Adaptive Scheduling Config ──────────────────────────────────
+CDMX_UTC_OFFSET = timedelta(hours=-6)
+ACTIVE_WINDOW_START = 6   # 06:00 CDMX
+ACTIVE_WINDOW_END = 23    # 23:00 CDMX
+
+# Sync intervals by route age (days old → minutes)
+SYNC_INTERVALS = [
+    (0, 5),      # Same day: every 5 min
+    (1, 15),     # 1 day old: every 15 min
+    (2, 30),     # 2 days old: every 30 min
+    (3, 60),     # 3 days old: every 60 min
+    (4, 180),    # 4 days old: every 180 min
+    (5, 360),    # 5+ days old: every 360 min
+]
+
+
+def _get_cdmx_now() -> datetime:
+    """Get current time in CDMX (UTC-6)."""
+    return datetime.now(timezone.utc) + CDMX_UTC_OFFSET
+
+
+def _is_within_active_window() -> bool:
+    """Check if current CDMX time is within the active sync window."""
+    cdmx_now = _get_cdmx_now()
+    return ACTIVE_WINDOW_START <= cdmx_now.hour < ACTIVE_WINDOW_END
+
+
+def _get_sync_interval_minutes(route_date_str: str) -> int:
+    """Calculate sync interval based on route age."""
+    try:
+        route_date = datetime.strptime(route_date_str[:10], "%Y-%m-%d")
+        cdmx_now = _get_cdmx_now()
+        age_days = (cdmx_now.replace(tzinfo=None) - route_date).days
+        for max_age, interval in SYNC_INTERVALS:
+            if age_days <= max_age:
+                return interval
+        return SYNC_INTERVALS[-1][1]  # Default: max interval
+    except (ValueError, TypeError):
+        return 30  # Default fallback
 
 
 async def scrape_kosmo_page(tracking_url: str) -> dict:
@@ -102,52 +147,55 @@ async def scrape_kosmo_page(tracking_url: str) -> dict:
 
 
 # ── Core sync logic ─────────────────────────────────────────────
-async def run_tracking_sync(db: AsyncIOMotorDatabase) -> dict:
+async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list = None) -> dict:
     """
     1. Find candidate packages (tracking_url set, not closed, not recently scraped).
-    2. Scrape each (max 50, concurrency 5).
+    2. Scrape each (max 250, concurrency 5).
     3. Map Kosmo status → LastMile status and update MongoDB.
     4. Recalculate journey counts for affected routes.
+    5. Update journey sync timestamps.
     """
     now = datetime.now(timezone.utc)
     ten_min_ago = now - timedelta(minutes=10)
 
-    # Query: packages that need scraping
-    # 1. Pending packages (not recently scraped)
-    # 2. Delivered/failed packages that were NEVER scraped (proof_count is null)
-    # 3. Delivered/failed packages with zero proofs (re-check for late-uploaded photos)
+    # Build base query
+    base_or = [
+        # Pending packages not recently scraped
+        {
+            "status": {"$nin": ["delivered", "failed", "returned"]},
+            "$or": [
+                {"kosmo_scraped_at": None},
+                {"kosmo_scraped_at": {"$exists": False}},
+                {"kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()}},
+            ],
+        },
+        # Delivered/failed packages never scraped
+        {
+            "status": {"$in": ["delivered", "failed"]},
+            "$or": [
+                {"kosmo_scraped_at": None},
+                {"kosmo_scraped_at": {"$exists": False}},
+            ],
+        },
+        # Delivered/failed with 0 proofs
+        {
+            "status": {"$in": ["delivered", "failed"]},
+            "$or": [
+                {"kosmo_proof_count": 0},
+                {"kosmo_proof_count": None},
+                {"kosmo_proof_count": {"$exists": False}},
+            ],
+            "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()},
+        },
+    ]
+
     query = {
         "tracking_url": {"$nin": [None, ""]},
-        "$or": [
-            # Pending packages not recently scraped
-            {
-                "status": {"$nin": ["delivered", "failed", "returned"]},
-                "$or": [
-                    {"kosmo_scraped_at": None},
-                    {"kosmo_scraped_at": {"$exists": False}},
-                    {"kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()}},
-                ],
-            },
-            # Delivered/failed packages never scraped
-            {
-                "status": {"$in": ["delivered", "failed"]},
-                "$or": [
-                    {"kosmo_scraped_at": None},
-                    {"kosmo_scraped_at": {"$exists": False}},
-                ],
-            },
-            # Delivered/failed with 0 proofs (re-check, max once per 10 min)
-            {
-                "status": {"$in": ["delivered", "failed"]},
-                "$or": [
-                    {"kosmo_proof_count": 0},
-                    {"kosmo_proof_count": None},
-                    {"kosmo_proof_count": {"$exists": False}},
-                ],
-                "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()},
-            },
-        ],
+        "$or": base_or,
     }
+
+    if journey_ids_filter:
+        query["journey_id"] = {"$in": journey_ids_filter}
 
     packages = await db.packages.find(
         query, {"_id": 0, "id": 1, "tracking_url": 1, "status": 1, "journey_id": 1}
@@ -245,6 +293,24 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase) -> dict:
             {"$set": {"packages_delivered": delivered, "packages_failed": failed}},
         )
 
+    # Update last_sync_at on all affected journeys
+    affected_journey_ids = list({pkg.get("journey_id") for pkg in packages if pkg.get("journey_id")})
+    if affected_journey_ids:
+        await db.journeys.update_many(
+            {"id": {"$in": affected_journey_ids}},
+            {"$set": {"last_sync_at": now.isoformat()}},
+        )
+        # Calculate next_sync_at for each journey
+        for j_id in affected_journey_ids:
+            j = await db.journeys.find_one({"id": j_id}, {"_id": 0, "date": 1})
+            if j:
+                interval = _get_sync_interval_minutes(j.get("date", ""))
+                next_sync = now + timedelta(minutes=interval)
+                await db.journeys.update_one(
+                    {"id": j_id},
+                    {"$set": {"next_sync_at": next_sync.isoformat()}},
+                )
+
     # Save sync metadata
     await db.system_config.update_one(
         {"key": "kosmo_last_sync"},
@@ -272,31 +338,59 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase) -> dict:
     }
 
 
-# ── Background scheduler ────────────────────────────────────────
+# ── Background scheduler (Adaptive) ─────────────────────────────
 _sync_task: Optional[asyncio.Task] = None
 
 
-async def _periodic_sync(db: AsyncIOMotorDatabase):
-    """Run sync every 10 minutes in the background."""
+async def _adaptive_periodic_sync(db: AsyncIOMotorDatabase):
+    """
+    Adaptive sync scheduler that checks every minute which journeys are due.
+    Only syncs within active window (06:00-23:00 CDMX).
+    """
     while True:
         try:
-            await asyncio.sleep(10 * 60)
-            logger.info("Running scheduled Kosmo tracking sync...")
-            result = await run_tracking_sync(db)
+            await asyncio.sleep(60)  # Check every minute
+
+            if not _is_within_active_window():
+                continue
+
+            now = datetime.now(timezone.utc)
+
+            # Find journeys that are due for sync
+            due_journeys = await db.journeys.find(
+                {
+                    "status": {"$in": ["scheduled", "in_progress"]},
+                    "$or": [
+                        {"next_sync_at": {"$exists": False}},
+                        {"next_sync_at": None},
+                        {"next_sync_at": {"$lte": now.isoformat()}},
+                    ],
+                },
+                {"_id": 0, "id": 1, "date": 1},
+            ).to_list(100)
+
+            if not due_journeys:
+                continue
+
+            journey_ids = [j["id"] for j in due_journeys]
+            logger.info(f"Adaptive sync: {len(journey_ids)} journeys due for sync")
+
+            result = await run_tracking_sync(db, journey_ids_filter=journey_ids)
             logger.info(
-                f"Kosmo sync: {result['total_checked']} checked, "
+                f"Adaptive sync: {result['total_checked']} checked, "
                 f"{result['updated']} updated, {result['errors']} errors"
             )
+
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error(f"Kosmo periodic sync error: {e}")
+            logger.error(f"Adaptive sync error: {e}")
 
 
 def start_periodic_sync(db: AsyncIOMotorDatabase):
     global _sync_task
-    _sync_task = asyncio.create_task(_periodic_sync(db))
-    logger.info("Kosmo periodic sync scheduled (every 10 min)")
+    _sync_task = asyncio.create_task(_adaptive_periodic_sync(db))
+    logger.info("Kosmo adaptive sync scheduler started (checks every 1 min)")
 
 
 def stop_periodic_sync():
@@ -316,11 +410,11 @@ def create_kosmo_router(db: AsyncIOMotorDatabase, get_current_user_dep):
     async def sync_tracking(user: dict = Depends(get_current_user_dep)):
         """Manually trigger Kosmo tracking sync as a background task."""
         nonlocal _manual_sync_task
-        
+
         # Check if a sync is already running
         if _manual_sync_task and not _manual_sync_task.done():
             return {"status": "in_progress", "message": "Sincronización ya en curso"}
-        
+
         async def _run_sync():
             try:
                 result = await run_tracking_sync(db)
@@ -330,7 +424,7 @@ def create_kosmo_router(db: AsyncIOMotorDatabase, get_current_user_dep):
                 )
             except Exception as e:
                 logger.error(f"Manual Kosmo sync error: {e}")
-        
+
         _manual_sync_task = asyncio.create_task(_run_sync())
         return {"status": "started", "message": "Sincronización iniciada en segundo plano"}
 

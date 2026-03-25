@@ -27,10 +27,69 @@ from evidence_scoring import (
     evaluate_single_package_ai,
 )
 
+import re as re_mod
+
 def _next_day(date_str: str) -> str:
     """Given a date string 'YYYY-MM-DD', return the next day string."""
     dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
     return (dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _normalize_address(address: str) -> dict:
+    """
+    Parse a Mexican address string to extract structured components.
+    Returns dict with address_cp, address_colonia, address_municipio, address_estado.
+    """
+    if not address:
+        return {}
+
+    result = {}
+    addr = address.strip()
+
+    # Extract CP (5-digit postal code)
+    cp_match = re_mod.search(r'\b(\d{5})\b', addr)
+    if cp_match:
+        result["address_cp"] = cp_match.group(1)
+
+    # Common Mexican state abbreviations and names
+    states = [
+        "Ciudad de México", "CDMX", "Estado de México", "Edo. Méx", "Edomex",
+        "Jalisco", "Nuevo León", "Puebla", "Querétaro", "Guanajuato",
+        "Aguascalientes", "Baja California", "Chihuahua", "Coahuila",
+        "Colima", "Durango", "Guerrero", "Hidalgo", "Michoacán",
+        "Morelos", "Nayarit", "Oaxaca", "San Luis Potosí", "Sinaloa",
+        "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz",
+        "Yucatán", "Zacatecas", "Campeche", "Chiapas", "Quintana Roo",
+    ]
+    addr_lower = addr.lower()
+    for state in states:
+        if state.lower() in addr_lower:
+            result["address_estado"] = state
+            break
+
+    # Try to extract colonia (usually after "Col." or "Col " or "Colonia")
+    col_match = re_mod.search(r'(?:Col\.?|Colonia)\s+([^,\d]+)', addr, re_mod.IGNORECASE)
+    if col_match:
+        result["address_colonia"] = col_match.group(1).strip().rstrip(',')
+
+    # Try to extract municipio/delegación/alcaldía
+    mun_match = re_mod.search(
+        r'(?:Mun\.?|Municipio|Del\.?|Delegación|Alcaldía)\s+([^,\d]+)',
+        addr, re_mod.IGNORECASE
+    )
+    if mun_match:
+        result["address_municipio"] = mun_match.group(1).strip().rstrip(',')
+
+    # If no colonia/municipio found, try splitting by commas
+    if "address_colonia" not in result or "address_municipio" not in result:
+        parts = [p.strip() for p in addr.split(',') if p.strip()]
+        if len(parts) >= 3:
+            if "address_colonia" not in result:
+                result["address_colonia"] = parts[-3] if len(parts) >= 4 else parts[-2]
+            if "address_municipio" not in result and len(parts) >= 3:
+                result["address_municipio"] = parts[-2]
+
+    return result
 
 
 ROOT_DIR = Path(__file__).parent
@@ -1341,7 +1400,8 @@ async def create_journeys_from_cosmo(
                 "failure_reason_note": order.get("failure_reason_note", ""),
                 "created_date": order.get("created_date", ""),
                 "delivery_attempt": attempt_counts.get(order_ref, 1),
-                "is_retry": attempt_counts.get(order_ref, 1) > 1
+                "is_retry": attempt_counts.get(order_ref, 1) > 1,
+                **_normalize_address(order.get("recipient_address", "")),
             }
             await db.packages.insert_one(package)
             total_new_packages += 1
@@ -2618,6 +2678,103 @@ async def root():
 @api_router.get("/health")
 async def health():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+# ==================== ANALYTICS ====================
+
+@api_router.get("/analytics/heatmap")
+async def get_heatmap_data(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    group_by: str = "address_cp",  # address_cp, address_municipio, address_estado
+    user: dict = Depends(get_current_user),
+):
+    """Geographic heatmap: group packages by CP, municipio, or estado."""
+    # Get journey IDs in date range
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(500)
+    journey_ids = [j["id"] for j in journeys]
+
+    if not journey_ids:
+        return {"group_by": group_by, "total_packages": 0, "areas": []}
+
+    # Validate group_by
+    if group_by not in ("address_cp", "address_municipio", "address_estado", "zone"):
+        group_by = "address_cp"
+
+    pipeline = [
+        {"$match": {"journey_id": {"$in": journey_ids}, group_by: {"$exists": True, "$nin": [None, ""]}}},
+        {"$group": {
+            "_id": f"${group_by}",
+            "total": {"$sum": 1},
+            "delivered": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
+            "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+            "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+        }},
+        {"$sort": {"total": -1}},
+        {"$limit": 100},
+    ]
+
+    results = await db.packages.aggregate(pipeline).to_list(100)
+
+    areas = []
+    for r in results:
+        area_name = r["_id"] or "Sin dato"
+        total = r["total"]
+        delivered = r["delivered"]
+        rate = round(delivered / total * 100, 1) if total > 0 else 0
+        areas.append({
+            "area": area_name,
+            "total": total,
+            "delivered": delivered,
+            "failed": r["failed"],
+            "pending": r["pending"],
+            "delivery_rate": rate,
+        })
+
+    total_pkgs = sum(a["total"] for a in areas)
+    return {"group_by": group_by, "total_packages": total_pkgs, "areas": areas}
+
+
+@api_router.post("/analytics/heatmap-export")
+async def export_heatmap_data(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    group_by: str = "address_cp",
+    user: dict = Depends(get_current_user),
+):
+    """Export heatmap data as Excel."""
+    data = await get_heatmap_data(date_from, date_to, group_by, user)
+
+    rows = []
+    for a in data["areas"]:
+        rows.append({
+            "Área": a["area"],
+            "Total paquetes": a["total"],
+            "Entregados": a["delivered"],
+            "Fallidos": a["failed"],
+            "Pendientes": a["pending"],
+            "Tasa de entrega %": a["delivery_rate"],
+        })
+
+    df = pd.DataFrame(rows)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Heatmap")
+    output.seek(0)
+
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=heatmap_{group_by}.xlsx"},
+    )
+
 
 # ==================== REPORTING API (For Power BI, Tableau, etc.) ====================
 

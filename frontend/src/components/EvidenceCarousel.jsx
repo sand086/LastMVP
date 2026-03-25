@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dialog, DialogContent } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
 import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from 'lucide-react';
 
@@ -57,6 +57,7 @@ const EvidenceCarousel = ({ open, onClose, images, initialIndex = 0, packageInfo
     return (
         <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
             <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 bg-slate-950 border-slate-800 overflow-hidden" data-testid="evidence-carousel-modal">
+                <DialogTitle className="sr-only">Evidencia fotográfica</DialogTitle>
                 {/* Top bar */}
                 <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center gap-3">

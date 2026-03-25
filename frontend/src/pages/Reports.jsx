@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { generateReport, generateReportExcel, getQualityReport, exportQualityReport } from '../lib/api';
+import { generateReport, generateReportExcel, getQualityReport, exportQualityReport, getHeatmapData, exportHeatmap } from '../lib/api';
 import { downloadFile } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -20,6 +20,7 @@ import {
     FileSpreadsheet,
     ShieldCheck,
     ExternalLink,
+    MapPin,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -77,6 +78,12 @@ const Reports = () => {
     const [qualityData, setQualityData] = useState(null);
     const [qualityLoading, setQualityLoading] = useState(false);
     const [cubboExporting, setCubboExporting] = useState(false);
+
+    // Heatmap state
+    const [heatmapData, setHeatmapData] = useState(null);
+    const [heatmapLoading, setHeatmapLoading] = useState(false);
+    const [heatmapGroupBy, setHeatmapGroupBy] = useState('address_cp');
+    const [heatmapExporting, setHeatmapExporting] = useState(false);
 
     const handlePeriodChange = (preset) => {
         setPeriodPreset(preset);
@@ -163,6 +170,32 @@ const Reports = () => {
             toast.error('Error al exportar');
         } finally {
             setCubboExporting(false);
+        }
+    };
+
+    const handleLoadHeatmap = async () => {
+        setHeatmapLoading(true);
+        try {
+            const res = await getHeatmapData({ date_from: dateFrom, date_to: dateTo, group_by: heatmapGroupBy });
+            setHeatmapData(res.data);
+            toast.success('Heatmap cargado');
+        } catch (error) {
+            toast.error('Error al cargar heatmap');
+        } finally {
+            setHeatmapLoading(false);
+        }
+    };
+
+    const handleExportHeatmap = async () => {
+        setHeatmapExporting(true);
+        try {
+            const res = await exportHeatmap({ date_from: dateFrom, date_to: dateTo, group_by: heatmapGroupBy });
+            downloadFile(res.data, `heatmap_${heatmapGroupBy}_${dateFrom}_${dateTo}.xlsx`);
+            toast.success('Excel descargado');
+        } catch (error) {
+            toast.error('Error al exportar heatmap');
+        } finally {
+            setHeatmapExporting(false);
         }
     };
 
@@ -634,6 +667,95 @@ const Reports = () => {
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                        )}
+                    </CardContent>
+                )}
+            </Card>
+
+            {/* Geographic Heatmap Section */}
+            <Card>
+                <CardHeader>
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="font-heading text-lg flex items-center gap-2">
+                            <MapPin className="w-5 h-5" />
+                            Heatmap Geográfico
+                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                            <Select value={heatmapGroupBy} onValueChange={setHeatmapGroupBy}>
+                                <SelectTrigger className="w-[160px]" data-testid="heatmap-group-by">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="address_cp">Código Postal</SelectItem>
+                                    <SelectItem value="address_municipio">Municipio</SelectItem>
+                                    <SelectItem value="address_estado">Estado</SelectItem>
+                                    <SelectItem value="zone">Zona</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <Button variant="outline" onClick={handleLoadHeatmap} disabled={heatmapLoading} data-testid="load-heatmap-btn">
+                                {heatmapLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BarChart3 className="w-4 h-4 mr-2" />}
+                                Cargar
+                            </Button>
+                            {heatmapData && (
+                                <Button variant="outline" onClick={handleExportHeatmap} disabled={heatmapExporting} data-testid="export-heatmap-btn">
+                                    {heatmapExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                                    Excel
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                </CardHeader>
+                {heatmapData && (
+                    <CardContent>
+                        <p className="text-sm text-slate-500 mb-4">
+                            {heatmapData.total_packages} paquetes agrupados por <span className="font-medium">{
+                                heatmapGroupBy === 'address_cp' ? 'Código Postal' :
+                                heatmapGroupBy === 'address_municipio' ? 'Municipio' :
+                                heatmapGroupBy === 'address_estado' ? 'Estado' : 'Zona'
+                            }</span>
+                        </p>
+                        {heatmapData.areas.length === 0 ? (
+                            <p className="text-center text-slate-400 py-6">No hay datos geográficos para el período seleccionado</p>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="data-table w-full text-sm" data-testid="heatmap-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Área</th>
+                                            <th className="text-center">Total</th>
+                                            <th className="text-center">Entregados</th>
+                                            <th className="text-center">Fallidos</th>
+                                            <th className="text-center">Pendientes</th>
+                                            <th className="w-40">Tasa de entrega</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {heatmapData.areas.map((area, i) => (
+                                            <tr key={i} data-testid={`heatmap-row-${i}`}>
+                                                <td className="font-medium">{area.area}</td>
+                                                <td className="text-center font-mono">{area.total}</td>
+                                                <td className="text-center font-mono text-emerald-600">{area.delivered}</td>
+                                                <td className="text-center font-mono text-red-600">{area.failed}</td>
+                                                <td className="text-center font-mono text-slate-500">{area.pending}</td>
+                                                <td>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="h-2 flex-1 rounded-full bg-slate-100 overflow-hidden">
+                                                            <div
+                                                                className={`h-full rounded-full transition-all ${
+                                                                    area.delivery_rate >= 70 ? 'bg-emerald-500' :
+                                                                    area.delivery_rate >= 40 ? 'bg-amber-500' : 'bg-red-500'
+                                                                }`}
+                                                                style={{ width: `${area.delivery_rate}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="text-xs font-mono w-10 text-right">{area.delivery_rate}%</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </CardContent>
