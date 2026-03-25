@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { generateReport, generateReportExcel, getQualityReport, exportQualityReport, getHeatmapData, exportHeatmap } from '../lib/api';
 import { downloadFile } from '../lib/utils';
+import { useSortableTable } from '../lib/useSortableTable';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -65,6 +66,164 @@ const getDateRange = (preset) => {
         default:
             return { from: fmt(now), to: fmt(now) };
     }
+};
+
+// ==================== STANDALONE SORTABLE TABLE COMPONENTS ====================
+
+const MetricTable = ({ data, title }) => {
+    const rows = useMemo(() => {
+        if (!data || Object.keys(data).length === 0) return [];
+        return Object.entries(data).map(([name, m]) => ({ name, ...m }));
+    }, [data]);
+    const { sortedData, SortHeader } = useSortableTable(rows, 'delivery_rate', 'desc');
+    
+    if (!data || Object.keys(data).length === 0) return null;
+    return (
+        <div className="border border-slate-200 rounded-sm overflow-hidden">
+            <div className="p-3 bg-slate-50 border-b border-slate-200">
+                <p className="font-medium text-slate-900 text-sm">{title}</p>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="data-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <SortHeader field="name">Nombre</SortHeader>
+                            <SortHeader field="days_operated" className="text-center">Días</SortHeader>
+                            <SortHeader field="routes" className="text-center">Rutas</SortHeader>
+                            <SortHeader field="packages_loaded" className="text-center">Cargados</SortHeader>
+                            <SortHeader field="delivered" className="text-center">Entregados</SortHeader>
+                            <SortHeader field="failed" className="text-center">Fallidos</SortHeader>
+                            <SortHeader field="retry" className="text-center">Reintentos</SortHeader>
+                            <SortHeader field="delivery_rate" className="text-center">Tasa %</SortHeader>
+                            <SortHeader field="km_total" className="text-center">Km</SortHeader>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {sortedData.map((m) => (
+                            <tr key={m.name}>
+                                <td className="font-medium">{m.name}</td>
+                                <td className="text-center font-mono">{m.days_operated}</td>
+                                <td className="text-center font-mono">{m.routes}</td>
+                                <td className="text-center font-mono">{m.packages_loaded}</td>
+                                <td className="text-center font-mono text-emerald-700">{m.delivered}</td>
+                                <td className="text-center font-mono text-red-700">{m.failed}</td>
+                                <td className="text-center font-mono text-amber-700">{m.retry}</td>
+                                <td className="text-center font-mono font-bold">
+                                    <span className={m.delivery_rate >= 70 ? 'text-emerald-600' : m.delivery_rate >= 40 ? 'text-amber-600' : 'text-red-600'}>
+                                        {m.delivery_rate}%
+                                    </span>
+                                </td>
+                                <td className="text-center font-mono">{m.km_total?.toLocaleString()}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+const QualityProviderTable = ({ data }) => {
+    const { sortedData, SortHeader } = useSortableTable(data, 'avg_score', 'desc');
+    return (
+        <div className="overflow-x-auto">
+            <table className="data-table w-full text-sm">
+                <thead>
+                    <tr>
+                        <SortHeader field="provider_name">Proveedor</SortHeader>
+                        <SortHeader field="routes" className="text-center">Rutas</SortHeader>
+                        <SortHeader field="delivered" className="text-center">Entregados</SortHeader>
+                        <SortHeader field="complete_pct" className="text-center">% Completo</SortHeader>
+                        <SortHeader field="partial_pct" className="text-center">% Parcial</SortHeader>
+                        <SortHeader field="incomplete_pct" className="text-center">% Sin soporte</SortHeader>
+                        <SortHeader field="avg_score" className="text-center">Score</SortHeader>
+                    </tr>
+                </thead>
+                <tbody>
+                    {sortedData.map((p, i) => (
+                        <tr key={i}>
+                            <td className="font-medium">{p.provider_name}</td>
+                            <td className="text-center">{p.routes}</td>
+                            <td className="text-center">{p.delivered}</td>
+                            <td className="text-center text-emerald-600">{p.complete_pct}%</td>
+                            <td className="text-center text-amber-600">{p.partial_pct}%</td>
+                            <td className="text-center text-red-600">{p.incomplete_pct}%</td>
+                            <td className="text-center font-mono font-bold">{p.avg_score}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
+const QualityTypeTable = ({ data }) => {
+    const { sortedData, SortHeader } = useSortableTable(data, 'avg_score', 'desc');
+    return (
+        <div className="overflow-x-auto">
+            <table className="data-table w-full text-sm">
+                <thead>
+                    <tr>
+                        <SortHeader field="type">Tipo</SortHeader>
+                        <SortHeader field="count" className="text-center">Cantidad</SortHeader>
+                        <SortHeader field="perfect_pct" className="text-center">% Score 100</SortHeader>
+                        <SortHeader field="avg_score" className="text-center">Score promedio</SortHeader>
+                    </tr>
+                </thead>
+                <tbody>
+                    {sortedData.map((t, i) => (
+                        <tr key={i}>
+                            <td className="font-medium capitalize">{t.type}</td>
+                            <td className="text-center">{t.count}</td>
+                            <td className="text-center text-emerald-600">{t.perfect_pct}%</td>
+                            <td className="text-center font-mono font-bold">{t.avg_score}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
+const HeatmapTable = ({ data }) => {
+    const { sortedData, SortHeader } = useSortableTable(data, 'total', 'desc');
+    return (
+        <div className="overflow-x-auto">
+            <table className="data-table w-full text-sm" data-testid="heatmap-table">
+                <thead>
+                    <tr>
+                        <SortHeader field="area">Área</SortHeader>
+                        <SortHeader field="total" className="text-center">Total</SortHeader>
+                        <SortHeader field="delivered" className="text-center">Entregados</SortHeader>
+                        <SortHeader field="failed" className="text-center">Fallidos</SortHeader>
+                        <SortHeader field="pending" className="text-center">Pendientes</SortHeader>
+                        <SortHeader field="delivery_rate">Tasa de entrega</SortHeader>
+                    </tr>
+                </thead>
+                <tbody>
+                    {sortedData.map((area, i) => (
+                        <tr key={i} data-testid={`heatmap-row-${i}`}>
+                            <td className="font-medium">{area.area}</td>
+                            <td className="text-center font-mono">{area.total}</td>
+                            <td className="text-center font-mono text-emerald-600">{area.delivered}</td>
+                            <td className="text-center font-mono text-red-600">{area.failed}</td>
+                            <td className="text-center font-mono text-slate-500">{area.pending}</td>
+                            <td>
+                                <div className="flex items-center gap-2">
+                                    <div className="h-2 flex-1 rounded-full bg-slate-100 overflow-hidden">
+                                        <div className={`h-full rounded-full transition-all ${area.delivery_rate >= 70 ? 'bg-emerald-500' : area.delivery_rate >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                            style={{ width: `${area.delivery_rate}%` }}
+                                        />
+                                    </div>
+                                    <span className="text-xs font-mono w-10 text-right">{area.delivery_rate}%</span>
+                                </div>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
 };
 
 const Reports = () => {
@@ -197,57 +356,6 @@ const Reports = () => {
         } finally {
             setHeatmapExporting(false);
         }
-    };
-
-    const MetricTable = ({ data, title }) => {
-        if (!data || Object.keys(data).length === 0) return null;
-        const entries = Object.entries(data);
-        return (
-            <div className="border border-slate-200 rounded-sm overflow-hidden">
-                <div className="p-3 bg-slate-50 border-b border-slate-200">
-                    <p className="font-medium text-slate-900 text-sm">{title}</p>
-                </div>
-                <div className="overflow-x-auto">
-                    <table className="data-table w-full text-sm">
-                        <thead>
-                            <tr>
-                                <th>Nombre</th>
-                                <th className="text-center">Días</th>
-                                <th className="text-center">Rutas</th>
-                                <th className="text-center">Cargados</th>
-                                <th className="text-center">Entregados</th>
-                                <th className="text-center">Fallidos</th>
-                                <th className="text-center">Reintentos</th>
-                                <th className="text-center">Tasa %</th>
-                                <th className="text-center">Km</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {entries.map(([name, m]) => (
-                                <tr key={name}>
-                                    <td className="font-medium">{name}</td>
-                                    <td className="text-center font-mono">{m.days_operated}</td>
-                                    <td className="text-center font-mono">{m.routes}</td>
-                                    <td className="text-center font-mono">{m.packages_loaded}</td>
-                                    <td className="text-center font-mono text-emerald-700">{m.delivered}</td>
-                                    <td className="text-center font-mono text-red-700">{m.failed}</td>
-                                    <td className="text-center font-mono text-amber-700">{m.retry}</td>
-                                    <td className="text-center font-mono font-bold">
-                                        <span className={
-                                            m.delivery_rate >= 70 ? 'text-emerald-600' :
-                                            m.delivery_rate >= 40 ? 'text-amber-600' : 'text-red-600'
-                                        }>
-                                            {m.delivery_rate}%
-                                        </span>
-                                    </td>
-                                    <td className="text-center font-mono">{m.km_total?.toLocaleString()}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        );
     };
 
     return (
@@ -569,34 +677,7 @@ const Reports = () => {
                                 <div className="p-3 bg-slate-50 border-b border-slate-200">
                                     <p className="font-medium text-slate-900 text-sm">Métricas por proveedor</p>
                                 </div>
-                                <div className="overflow-x-auto">
-                                    <table className="data-table w-full text-sm">
-                                        <thead>
-                                            <tr>
-                                                <th>Proveedor</th>
-                                                <th className="text-center">Rutas</th>
-                                                <th className="text-center">Entregados</th>
-                                                <th className="text-center">% Completo</th>
-                                                <th className="text-center">% Parcial</th>
-                                                <th className="text-center">% Sin soporte</th>
-                                                <th className="text-center">Score</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {qualityData.by_provider.map((p, i) => (
-                                                <tr key={i}>
-                                                    <td className="font-medium">{p.provider_name}</td>
-                                                    <td className="text-center">{p.routes}</td>
-                                                    <td className="text-center">{p.delivered}</td>
-                                                    <td className="text-center text-emerald-600">{p.complete_pct}%</td>
-                                                    <td className="text-center text-amber-600">{p.partial_pct}%</td>
-                                                    <td className="text-center text-red-600">{p.incomplete_pct}%</td>
-                                                    <td className="text-center font-mono font-bold">{p.avg_score}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                <QualityProviderTable data={qualityData.by_provider} />
                             </div>
                         )}
 
@@ -606,28 +687,7 @@ const Reports = () => {
                                 <div className="p-3 bg-slate-50 border-b border-slate-200">
                                     <p className="font-medium text-slate-900 text-sm">Métricas por tipo de entrega</p>
                                 </div>
-                                <div className="overflow-x-auto">
-                                    <table className="data-table w-full text-sm">
-                                        <thead>
-                                            <tr>
-                                                <th>Tipo</th>
-                                                <th className="text-center">Cantidad</th>
-                                                <th className="text-center">% Score 100</th>
-                                                <th className="text-center">Score promedio</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {qualityData.by_type.map((t, i) => (
-                                                <tr key={i}>
-                                                    <td className="font-medium capitalize">{t.type}</td>
-                                                    <td className="text-center">{t.count}</td>
-                                                    <td className="text-center text-emerald-600">{t.perfect_pct}%</td>
-                                                    <td className="text-center font-mono font-bold">{t.avg_score}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                <QualityTypeTable data={qualityData.by_type} />
                             </div>
                         )}
 
@@ -718,45 +778,7 @@ const Reports = () => {
                         {heatmapData.areas.length === 0 ? (
                             <p className="text-center text-slate-400 py-6">No hay datos geográficos para el período seleccionado</p>
                         ) : (
-                            <div className="overflow-x-auto">
-                                <table className="data-table w-full text-sm" data-testid="heatmap-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Área</th>
-                                            <th className="text-center">Total</th>
-                                            <th className="text-center">Entregados</th>
-                                            <th className="text-center">Fallidos</th>
-                                            <th className="text-center">Pendientes</th>
-                                            <th className="w-40">Tasa de entrega</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {heatmapData.areas.map((area, i) => (
-                                            <tr key={i} data-testid={`heatmap-row-${i}`}>
-                                                <td className="font-medium">{area.area}</td>
-                                                <td className="text-center font-mono">{area.total}</td>
-                                                <td className="text-center font-mono text-emerald-600">{area.delivered}</td>
-                                                <td className="text-center font-mono text-red-600">{area.failed}</td>
-                                                <td className="text-center font-mono text-slate-500">{area.pending}</td>
-                                                <td>
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="h-2 flex-1 rounded-full bg-slate-100 overflow-hidden">
-                                                            <div
-                                                                className={`h-full rounded-full transition-all ${
-                                                                    area.delivery_rate >= 70 ? 'bg-emerald-500' :
-                                                                    area.delivery_rate >= 40 ? 'bg-amber-500' : 'bg-red-500'
-                                                                }`}
-                                                                style={{ width: `${area.delivery_rate}%` }}
-                                                            />
-                                                        </div>
-                                                        <span className="text-xs font-mono w-10 text-right">{area.delivery_rate}%</span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                            <HeatmapTable data={heatmapData.areas} />
                         )}
                     </CardContent>
                 )}

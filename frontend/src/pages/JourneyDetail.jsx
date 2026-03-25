@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSortableTable } from '../lib/useSortableTable';
 import { 
     getJourney, 
     startJourney, 
@@ -588,6 +589,10 @@ const JourneyDetail = () => {
     const [incidentSubmitting, setIncidentSubmitting] = useState(false);
     const [showPackagesList, setShowPackagesList] = useState(false);
 
+    // Sortable table hooks
+    const { sortedData: sortedPackages, SortHeader: PkgSortHeader } = useSortableTable(journey?.packages || []);
+    const { sortedData: sortedIncidents, SortHeader: IncSortHeader } = useSortableTable(journey?.incidents || [], 'occurred_at', 'desc');
+
     useEffect(() => {
         fetchJourney();
         fetchImages();
@@ -1162,22 +1167,17 @@ const JourneyDetail = () => {
                                                     data-testid="select-all-packages"
                                                 />
                                             </th>
-                                            <th>No. Guía</th>
-                                            <th>Destinatario</th>
-                                            <th>Estado</th>
-                                            <th>Soporte</th>
+                                            <PkgSortHeader field="tracking_number">No. Guía</PkgSortHeader>
+                                            <PkgSortHeader field="recipient_name">Destinatario</PkgSortHeader>
+                                            <PkgSortHeader field="status">Estado</PkgSortHeader>
+                                            <PkgSortHeader field="evidence_score">Soporte</PkgSortHeader>
                                             <th>Evidencias</th>
-                                            <th>Intentos</th>
-                                            <th>Revisado</th>
+                                            <PkgSortHeader field="delivery_attempt">Intentos</PkgSortHeader>
+                                            <PkgSortHeader field="reviewed_by">Revisado</PkgSortHeader>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {[...(journey.packages || [])].sort((a, b) => {
-                                            // "returned" packages go to the end
-                                            if (a.status === 'returned' && b.status !== 'returned') return 1;
-                                            if (a.status !== 'returned' && b.status === 'returned') return -1;
-                                            return 0;
-                                        }).map((pkg) => (
+                                        {sortedPackages.map((pkg) => (
                                             <tr key={pkg.id} data-testid={`pkg-row-${pkg.id}`}>
                                                 <td>
                                                     <Checkbox
@@ -1737,18 +1737,18 @@ const JourneyDetail = () => {
                                 <table className="data-table w-full">
                                     <thead>
                                         <tr>
-                                            <th>Hora</th>
-                                            <th>Tipo</th>
-                                            <th>Severidad</th>
-                                            <th>Imputabilidad</th>
+                                            <IncSortHeader field="occurred_at">Hora</IncSortHeader>
+                                            <IncSortHeader field="incident_type">Tipo</IncSortHeader>
+                                            <IncSortHeader field="severity">Severidad</IncSortHeader>
+                                            <IncSortHeader field="imputability">Imputabilidad</IncSortHeader>
                                             <th>Descripción</th>
                                             <th>Fotos</th>
-                                            <th>Estado</th>
+                                            <IncSortHeader field="status">Estado</IncSortHeader>
                                             <th>Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {journey.incidents.map((incident) => (
+                                        {sortedIncidents.map((incident) => (
                                             <tr key={incident.id} data-testid={`incident-row-${incident.id}`}>
                                                 <td className="font-mono text-sm">
                                                     {formatTime(incident.occurred_at)}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSortableTable } from '../lib/useSortableTable';
 import { 
     getUsers, 
     createUser, 
@@ -131,6 +132,18 @@ const Settings = () => {
     const [searchUsers, setSearchUsers] = useState('');
     const [searchClients, setSearchClients] = useState('');
     const [searchProviders, setSearchProviders] = useState('');
+
+    // Sortable users table
+    const filteredUsers = users.filter(u => !searchUsers || u.name?.toLowerCase().includes(searchUsers.toLowerCase()) || u.email?.toLowerCase().includes(searchUsers.toLowerCase()));
+    const { sortedData: sortedUsers, SortHeader: UserSortHeader } = useSortableTable(filteredUsers, 'name', 'asc');
+
+    // Sortable clients table
+    const filteredClients = clients.filter(c => !searchClients || c.name?.toLowerCase().includes(searchClients.toLowerCase()));
+    const { sortedData: sortedClients, SortHeader: ClientSortHeader } = useSortableTable(filteredClients, 'name', 'asc');
+
+    // Sortable providers table
+    const filteredProviders = providers.filter(p => !searchProviders || p.name?.toLowerCase().includes(searchProviders.toLowerCase()) || p.contact_name?.toLowerCase().includes(searchProviders.toLowerCase()));
+    const { sortedData: sortedProviders, SortHeader: ProvSortHeader } = useSortableTable(filteredProviders, 'name', 'asc');
 
     useEffect(() => {
         fetchData();
@@ -555,7 +568,7 @@ const Settings = () => {
                                 <div className="p-8 flex justify-center">
                                     <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
                                 </div>
-                            ) : users.filter(u => !searchUsers || u.name?.toLowerCase().includes(searchUsers.toLowerCase()) || u.email?.toLowerCase().includes(searchUsers.toLowerCase())).length === 0 ? (
+                            ) : filteredUsers.length === 0 ? (
                                 <div className="text-center py-12">
                                     <Users className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                                     <p className="text-slate-500">{searchUsers ? 'Sin resultados' : 'No hay usuarios registrados'}</p>
@@ -564,15 +577,15 @@ const Settings = () => {
                                 <table className="data-table w-full">
                                     <thead>
                                         <tr>
-                                            <th>Nombre</th>
-                                            <th>Email</th>
-                                            <th>Rol</th>
+                                            <UserSortHeader field="name">Nombre</UserSortHeader>
+                                            <UserSortHeader field="email">Email</UserSortHeader>
+                                            <UserSortHeader field="role">Rol</UserSortHeader>
                                             <th>Asignaciones</th>
                                             <th>Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {users.filter(u => !searchUsers || u.name?.toLowerCase().includes(searchUsers.toLowerCase()) || u.email?.toLowerCase().includes(searchUsers.toLowerCase())).map((user) => (
+                                        {sortedUsers.map((user) => (
                                             <tr key={user.id} data-testid={`user-row-${user.id}`}>
                                                 <td className="font-medium">{user.name}</td>
                                                 <td className="text-slate-600">{user.email}</td>
@@ -674,7 +687,7 @@ const Settings = () => {
                                 <div className="p-8 flex justify-center">
                                     <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
                                 </div>
-                            ) : clients.filter(c => !searchClients || c.name?.toLowerCase().includes(searchClients.toLowerCase())).length === 0 ? (
+                            ) : filteredClients.length === 0 ? (
                                 <div className="text-center py-12">
                                     <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                                     <p className="text-slate-500">{searchClients ? 'Sin resultados' : 'No hay clientes registrados'}</p>
@@ -683,13 +696,13 @@ const Settings = () => {
                                 <table className="data-table w-full">
                                     <thead>
                                         <tr>
-                                            <th>Nombre</th>
+                                            <ClientSortHeader field="name">Nombre</ClientSortHeader>
                                             <th>ID</th>
                                             <th>Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {clients.filter(c => !searchClients || c.name?.toLowerCase().includes(searchClients.toLowerCase())).map((client) => (
+                                        {sortedClients.map((client) => (
                                             <tr key={client.id} data-testid={`client-row-${client.id}`}>
                                                 <td className="font-medium">{client.name}</td>
                                                 <td className="font-mono text-xs text-slate-500">{client.id}</td>
@@ -737,7 +750,7 @@ const Settings = () => {
                                 <div className="p-8 flex justify-center">
                                     <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
                                 </div>
-                            ) : providers.filter(p => !searchProviders || p.name?.toLowerCase().includes(searchProviders.toLowerCase()) || p.contact_name?.toLowerCase().includes(searchProviders.toLowerCase())).length === 0 ? (
+                            ) : filteredProviders.length === 0 ? (
                                 <div className="text-center py-12">
                                     <Truck className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                                     <p className="text-slate-500">{searchProviders ? 'Sin resultados' : 'No hay proveedores registrados'}</p>
@@ -746,14 +759,14 @@ const Settings = () => {
                                 <table className="data-table w-full">
                                     <thead>
                                         <tr>
-                                            <th>Nombre</th>
-                                            <th>Contacto</th>
-                                            <th>Teléfono</th>
+                                            <ProvSortHeader field="name">Nombre</ProvSortHeader>
+                                            <ProvSortHeader field="contact_name">Contacto</ProvSortHeader>
+                                            <ProvSortHeader field="contact_phone">Teléfono</ProvSortHeader>
                                             <th>Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {providers.filter(p => !searchProviders || p.name?.toLowerCase().includes(searchProviders.toLowerCase()) || p.contact_name?.toLowerCase().includes(searchProviders.toLowerCase())).map((provider) => (
+                                        {sortedProviders.map((provider) => (
                                             <tr key={provider.id} data-testid={`provider-row-${provider.id}`}>
                                                 <td className="font-medium">{provider.name}</td>
                                                 <td className="text-slate-600">{provider.contact_name || '-'}</td>

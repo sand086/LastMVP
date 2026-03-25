@@ -1,0 +1,1105 @@
+"""
+Analytics & reporting routes: heatmap, quality reports, Power BI, report generation, token consumption.
+"""
+import io
+import os
+import uuid
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Form
+from fastapi.responses import Response as FastResponse
+from starlette.responses import StreamingResponse
+from starlette.requests import Request as StarletteRequest
+from typing import Optional
+from datetime import datetime, timezone, timedelta
+
+import pandas as pd
+
+from dependencies import (
+    db, limiter, get_current_user, require_role, apply_assignment_filter, _next_day,
+)
+from models import ReportRequest
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Analytics"])
+
+
+# ==================== HEATMAP ====================
+
+@router.get("/analytics/heatmap")
+async def get_heatmap_data(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    group_by: str = "address_cp",
+    user: dict = Depends(get_current_user),
+):
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(500)
+    journey_ids = [j["id"] for j in journeys]
+    if not journey_ids:
+        return {"group_by": group_by, "total_packages": 0, "areas": []}
+
+    if group_by not in ("address_cp", "address_municipio", "address_estado", "zone"):
+        group_by = "address_cp"
+
+    pipeline = [
+        {"$match": {"journey_id": {"$in": journey_ids}, group_by: {"$exists": True, "$nin": [None, ""]}}},
+        {"$group": {
+            "_id": f"${group_by}",
+            "total": {"$sum": 1},
+            "delivered": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
+            "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+            "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+        }},
+        {"$sort": {"total": -1}},
+        {"$limit": 100},
+    ]
+    results = await db.packages.aggregate(pipeline).to_list(100)
+
+    areas = []
+    for r in results:
+        area_name = r["_id"] or "Sin dato"
+        total = r["total"]
+        delivered = r["delivered"]
+        rate = round(delivered / total * 100, 1) if total > 0 else 0
+        areas.append({
+            "area": area_name,
+            "total": total,
+            "delivered": delivered,
+            "failed": r["failed"],
+            "pending": r["pending"],
+            "delivery_rate": rate,
+        })
+
+    total_pkgs = sum(a["total"] for a in areas)
+    return {"group_by": group_by, "total_packages": total_pkgs, "areas": areas}
+
+
+@router.post("/analytics/heatmap-export")
+async def export_heatmap_data(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    group_by: str = "address_cp",
+    user: dict = Depends(get_current_user),
+):
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys_list = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(500)
+    journey_ids = [j["id"] for j in journeys_list]
+
+    if not journey_ids:
+        df = pd.DataFrame(columns=["Código Postal", "Colonia", "Municipio", "Estado", "Zona", "Total", "Entregados", "Fallidos", "Pendientes", "Tasa %"])
+    else:
+        pipeline = [
+            {"$match": {"journey_id": {"$in": journey_ids}}},
+            {"$group": {
+                "_id": {
+                    "cp": {"$ifNull": ["$address_cp", ""]},
+                    "colonia": {"$ifNull": ["$address_colonia", ""]},
+                    "municipio": {"$ifNull": ["$address_municipio", ""]},
+                    "estado": {"$ifNull": ["$address_estado", ""]},
+                    "zone": {"$ifNull": ["$zone", ""]},
+                },
+                "total": {"$sum": 1},
+                "delivered": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
+                "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+                "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+            }},
+            {"$sort": {"total": -1}},
+        ]
+        results = await db.packages.aggregate(pipeline).to_list(5000)
+        rows = []
+        for r in results:
+            gid = r["_id"]
+            total = r["total"]
+            delivered = r["delivered"]
+            rate = round(delivered / total * 100, 1) if total > 0 else 0
+            rows.append({
+                "Código Postal": gid.get("cp", ""),
+                "Colonia": gid.get("colonia", ""),
+                "Municipio": gid.get("municipio", ""),
+                "Estado": gid.get("estado", ""),
+                "Zona": gid.get("zone", ""),
+                "Total paquetes": total,
+                "Entregados": delivered,
+                "Fallidos": r["failed"],
+                "Pendientes": r["pending"],
+                "Tasa de entrega %": rate,
+            })
+        df = pd.DataFrame(rows)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Heatmap")
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=heatmap_{group_by}.xlsx"},
+    )
+
+
+# ==================== QUALITY REPORTS ====================
+
+@router.get("/reports/quality")
+@limiter.limit("30/minute")
+async def get_quality_report(
+    request: StarletteRequest,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    if not date_from:
+        d = datetime.now(timezone.utc)
+        date_from = (d - timedelta(days=6)).strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    journey_query = {"date": {"$gte": date_from, "$lte": date_to}, "status": "closed"}
+    journey_query = apply_assignment_filter(user, journey_query)
+    if provider_id:
+        journey_query["provider_id"] = provider_id
+
+    journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
+    journey_ids = [j["id"] for j in journeys]
+
+    if not journey_ids:
+        return {
+            "by_provider": [],
+            "by_type": [],
+            "worst_packages": [],
+            "summary": {"avg_score": 0, "total_evaluated": 0, "complete": 0, "partial": 0, "incomplete": 0},
+        }
+
+    packages = await db.packages.find(
+        {"journey_id": {"$in": journey_ids}, "evidence_score": {"$ne": None}},
+        {"_id": 0},
+    ).to_list(50000)
+
+    providers_col = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(100)}
+    providers_data = {}
+    for j in journeys:
+        pid = j.get("provider_id", "unknown")
+        pname = providers_col.get(pid, j.get("provider_name", pid))
+        if pid not in providers_data:
+            providers_data[pid] = {"name": pname, "routes": 0, "packages": [], "days": set()}
+        providers_data[pid]["routes"] += 1
+        providers_data[pid]["days"].add(j["date"])
+
+    journey_provider_map = {j["id"]: j.get("provider_id", "unknown") for j in journeys}
+    for pkg in packages:
+        pid = journey_provider_map.get(pkg.get("journey_id"), "unknown")
+        if pid in providers_data:
+            providers_data[pid]["packages"].append(pkg)
+
+    by_provider = []
+    for pid, pd_data in providers_data.items():
+        pkgs = pd_data["packages"]
+        delivered_pkgs = [p for p in pkgs if p.get("evidence_type") in ("exitosa", "terceros")]
+        scores = [p["evidence_score"] for p in pkgs]
+        complete = sum(1 for s in scores if s == 100)
+        partial = sum(1 for s in scores if 60 <= s < 100)
+        incomplete = sum(1 for s in scores if s < 60)
+        avg = round(sum(scores) / len(scores), 1) if scores else 0
+        by_provider.append({
+            "provider_id": pid,
+            "provider_name": pd_data["name"],
+            "routes": pd_data["routes"],
+            "delivered": len(delivered_pkgs),
+            "complete_pct": round(complete / len(scores) * 100, 1) if scores else 0,
+            "partial_pct": round(partial / len(scores) * 100, 1) if scores else 0,
+            "incomplete_pct": round(incomplete / len(scores) * 100, 1) if scores else 0,
+            "avg_score": avg,
+        })
+
+    type_map = {}
+    for pkg in packages:
+        et = pkg.get("evidence_type", "desconocido")
+        if et not in type_map:
+            type_map[et] = {"count": 0, "scores": [], "perfect": 0}
+        type_map[et]["count"] += 1
+        type_map[et]["scores"].append(pkg["evidence_score"])
+        if pkg["evidence_score"] == 100:
+            type_map[et]["perfect"] += 1
+
+    by_type = []
+    for et, data in type_map.items():
+        by_type.append({
+            "type": et,
+            "count": data["count"],
+            "perfect_pct": round(data["perfect"] / data["count"] * 100, 1) if data["count"] else 0,
+            "avg_score": round(sum(data["scores"]) / len(data["scores"]), 1) if data["scores"] else 0,
+        })
+
+    worst = sorted(packages, key=lambda p: p.get("evidence_score", 999))[:5]
+    worst_packages = []
+    for pkg in worst:
+        pid = journey_provider_map.get(pkg.get("journey_id"), "unknown")
+        pname = providers_data.get(pid, {}).get("name", pid)
+        worst_packages.append({
+            "tracking_number": pkg.get("tracking_number") or pkg.get("order_reference_id"),
+            "provider_name": pname,
+            "score": pkg["evidence_score"],
+            "missing": pkg.get("evidence_detail", {}).get("missing_items", []),
+            "tracking_url": pkg.get("tracking_url"),
+        })
+
+    all_scores = [p["evidence_score"] for p in packages]
+    summary = {
+        "avg_score": round(sum(all_scores) / len(all_scores), 1) if all_scores else 0,
+        "total_evaluated": len(all_scores),
+        "complete": sum(1 for s in all_scores if s == 100),
+        "partial": sum(1 for s in all_scores if 60 <= s < 100),
+        "incomplete": sum(1 for s in all_scores if s < 60),
+    }
+
+    return {
+        "by_provider": by_provider,
+        "by_type": by_type,
+        "worst_packages": worst_packages,
+        "summary": summary,
+    }
+
+
+@router.post("/reports/quality-export")
+async def export_quality_report(
+    date_from: str = Form(...),
+    date_to: str = Form(...),
+    provider_id: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
+):
+    journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": "closed"}
+    journey_query = apply_assignment_filter(user, journey_query)
+    if provider_id:
+        journey_query["provider_id"] = provider_id
+
+    journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
+    journey_map = {j["id"]: j for j in journeys}
+    journey_ids = list(journey_map.keys())
+
+    providers_col = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(100)}
+
+    packages = await db.packages.find(
+        {"journey_id": {"$in": journey_ids}, "evidence_score": {"$ne": None, "$lt": 100}},
+        {"_id": 0},
+    ).to_list(50000)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        rows = []
+        for pkg in packages:
+            j = journey_map.get(pkg.get("journey_id"), {})
+            pid = j.get("provider_id", "")
+            rows.append({
+                "Fecha": j.get("date", ""),
+                "Guía": pkg.get("tracking_number") or pkg.get("order_reference_id", ""),
+                "Proveedor": providers_col.get(pid, j.get("provider_name", pid)),
+                "Tipo de entrega": pkg.get("evidence_type", ""),
+                "Score": pkg.get("evidence_score", 0),
+                "Evidencias faltantes": ", ".join(pkg.get("evidence_detail", {}).get("missing_items", [])),
+                "Fotos": pkg.get("kosmo_proof_count", 0),
+                "Nota del mensajero": pkg.get("kosmo_driver_note", ""),
+            })
+        pd.DataFrame(rows).to_excel(writer, sheet_name="Calidad de soporte", index=False)
+
+    output.seek(0)
+    filename = f"calidad_cubbo_{date_from}_{date_to}.xlsx"
+    return FastResponse(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ==================== CUSTOM REPORT GENERATION ====================
+
+@router.post("/reports/generate")
+async def generate_report(data: ReportRequest, user: dict = Depends(get_current_user)):
+    j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    if not journeys:
+        return {"error": "No hay datos para el período seleccionado"}
+
+    journey_ids = [j["id"] for j in journeys]
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    incidents = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
+
+    report_data = {
+        "period": f"{data.date_from} - {data.date_to}",
+        "total_journeys": len(journeys),
+        "total_packages": sum(j.get("packages_total", 0) for j in journeys),
+        "total_delivered": sum(j.get("packages_delivered", 0) for j in journeys),
+        "total_failed": sum(j.get("packages_failed", 0) for j in journeys),
+        "total_km": sum((j.get("close_data") or {}).get("km_traveled", 0) for j in journeys),
+        "total_incidents": len(incidents),
+    }
+    total_pkg = report_data["total_packages"]
+    report_data["delivery_rate"] = round((report_data["total_delivered"] / total_pkg * 100) if total_pkg > 0 else 0, 2)
+    report_data["total_retry"] = total_pkg - report_data["total_delivered"] - report_data["total_failed"]
+
+    provider_metrics = {}
+    for j in journeys:
+        pid = j.get("provider_id", "")
+        pname = providers.get(pid, "Sin proveedor")
+        if pname not in provider_metrics:
+            provider_metrics[pname] = {
+                "days_operated": set(), "routes": 0, "packages_loaded": 0,
+                "delivered": 0, "failed": 0, "km_total": 0,
+            }
+        pm = provider_metrics[pname]
+        pm["days_operated"].add(j.get("date", ""))
+        pm["routes"] += 1
+        pm["packages_loaded"] += j.get("packages_total", 0)
+        pm["delivered"] += j.get("packages_delivered", 0)
+        pm["failed"] += j.get("packages_failed", 0)
+        pm["km_total"] += (j.get("close_data") or {}).get("km_traveled", 0)
+
+    for pname in provider_metrics:
+        pm = provider_metrics[pname]
+        pm["days_operated"] = len(pm["days_operated"])
+        pm["retry"] = pm["packages_loaded"] - pm["delivered"] - pm["failed"]
+        pm["delivery_rate"] = round((pm["delivered"] / pm["packages_loaded"] * 100) if pm["packages_loaded"] > 0 else 0, 2)
+
+    driver_metrics = {}
+    for j in journeys:
+        dname = j.get("driver_name", "Sin driver")
+        if not dname:
+            dname = "Sin driver"
+        if dname not in driver_metrics:
+            driver_metrics[dname] = {
+                "days_operated": set(), "routes": 0, "packages_loaded": 0,
+                "delivered": 0, "failed": 0, "km_total": 0,
+            }
+        dm = driver_metrics[dname]
+        dm["days_operated"].add(j.get("date", ""))
+        dm["routes"] += 1
+        dm["packages_loaded"] += j.get("packages_total", 0)
+        dm["delivered"] += j.get("packages_delivered", 0)
+        dm["failed"] += j.get("packages_failed", 0)
+        dm["km_total"] += (j.get("close_data") or {}).get("km_traveled", 0)
+
+    for dname in driver_metrics:
+        dm = driver_metrics[dname]
+        dm["days_operated"] = len(dm["days_operated"])
+        dm["retry"] = dm["packages_loaded"] - dm["delivered"] - dm["failed"]
+        dm["delivery_rate"] = round((dm["delivered"] / dm["packages_loaded"] * 100) if dm["packages_loaded"] > 0 else 0, 2)
+
+    incidents_by_type = {}
+    incidents_by_imputability = {"ME / Mensajero": 0, "Cliente (destinatario)": 0, "Por definir": 0}
+    for inc in incidents:
+        itype = inc.get("incident_type", "Otro")
+        incidents_by_type[itype] = incidents_by_type.get(itype, 0) + 1
+        imp = inc.get("imputability", "Por definir")
+        incidents_by_imputability[imp] = incidents_by_imputability.get(imp, 0) + 1
+
+    report_data["provider_metrics"] = provider_metrics
+    report_data["driver_metrics"] = driver_metrics
+    report_data["incidents_by_type"] = incidents_by_type
+    report_data["incidents_by_imputability"] = incidents_by_imputability
+
+    ai_insights = ""
+    try:
+        llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
+        if llm_key:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            chat = LlmChat(
+                api_key=llm_key,
+                session_id=f"report-{uuid.uuid4()}",
+                system_message="Eres un analista de operaciones logísticas de última milla. Genera insights concisos y accionables en español. Usa datos duros. Máximo 400 palabras.",
+            ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+            prompt = f"""Analiza estos datos de operación de última milla y genera insights clave:
+
+PERÍODO: {data.date_from} a {data.date_to}
+RESUMEN GENERAL: {report_data['total_journeys']} rutas, {report_data['total_packages']} paquetes, tasa de entrega {report_data['delivery_rate']}%, {report_data['total_km']} km, {report_data['total_incidents']} incidencias
+
+POR PROVEEDOR: {str({k: {kk: vv for kk, vv in v.items()} for k, v in provider_metrics.items()})}
+
+POR DRIVER: {str({k: {kk: vv for kk, vv in v.items()} for k, v in driver_metrics.items()})}
+
+INCIDENCIAS POR TIPO: {str(incidents_by_type)}
+INCIDENCIAS POR IMPUTABILIDAD: {str(incidents_by_imputability)}
+
+Genera un análisis ejecutivo con: 1) Resumen general, 2) Hallazgos clave, 3) Recomendaciones de mejora."""
+            msg = UserMessage(text=prompt)
+            ai_insights = await chat.send_message(msg)
+    except Exception as e:
+        logger.error(f"Error generating AI insights: {e}")
+        ai_insights = "No se pudieron generar insights de IA en este momento."
+
+    report_data["ai_insights"] = ai_insights
+    return report_data
+
+
+@router.post("/reports/generate-excel")
+async def generate_report_excel(data: ReportRequest, user: dict = Depends(get_current_user)):
+    j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    journey_ids = [j["id"] for j in journeys]
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers_map = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    incidents = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        routes_data = []
+        for j in journeys:
+            cd = j.get("close_data") or {}
+            sd = j.get("start_data") or {}
+            routes_data.append({
+                "Fecha": j.get("date", ""),
+                "Cliente": clients.get(j.get("client_id"), ""),
+                "Proveedor": providers_map.get(j.get("provider_id"), ""),
+                "Driver": j.get("driver_name", ""),
+                "Tipo Ruta": j.get("route_type", "CDMX / Zona Metro"),
+                "Ciudad": j.get("city", ""),
+                "Estado": j.get("status", ""),
+                "Paquetes Total": j.get("packages_total", 0),
+                "Entregados": j.get("packages_delivered", 0),
+                "Fallidos": j.get("packages_failed", 0),
+                "Reintento": j.get("packages_total", 0) - j.get("packages_delivered", 0) - j.get("packages_failed", 0),
+                "Tasa Entrega %": cd.get("delivery_rate", 0),
+                "Km": cd.get("km_traveled", 0),
+                "Hora Inicio": sd.get("departure_time", ""),
+                "Hora Cierre": cd.get("closed_at", ""),
+            })
+        pd.DataFrame(routes_data).to_excel(writer, sheet_name="Rutas", index=False)
+
+        inc_data = []
+        j_map = {j["id"]: j for j in journeys}
+        for inc in incidents:
+            j = j_map.get(inc.get("journey_id"), {})
+            inc_data.append({
+                "Fecha Ruta": j.get("date", ""),
+                "Proveedor": providers_map.get(j.get("provider_id"), ""),
+                "Driver": j.get("driver_name", ""),
+                "Tipo": inc.get("incident_type", ""),
+                "Severidad": inc.get("severity", ""),
+                "Imputabilidad": inc.get("imputability", "Por definir"),
+                "Descripción": inc.get("description", ""),
+                "Estado": inc.get("status", ""),
+            })
+        pd.DataFrame(inc_data).to_excel(writer, sheet_name="Incidencias", index=False)
+
+        prov_summary = {}
+        for j in journeys:
+            pname = providers_map.get(j.get("provider_id"), "")
+            if pname not in prov_summary:
+                prov_summary[pname] = {"days": set(), "routes": 0, "loaded": 0, "delivered": 0, "failed": 0, "km": 0}
+            ps = prov_summary[pname]
+            ps["days"].add(j.get("date", ""))
+            ps["routes"] += 1
+            ps["loaded"] += j.get("packages_total", 0)
+            ps["delivered"] += j.get("packages_delivered", 0)
+            ps["failed"] += j.get("packages_failed", 0)
+            ps["km"] += (j.get("close_data") or {}).get("km_traveled", 0)
+
+        prov_rows = []
+        for pname, ps in prov_summary.items():
+            prov_rows.append({
+                "Proveedor": pname,
+                "Días Operados": len(ps["days"]),
+                "Total Rutas": ps["routes"],
+                "Paquetes Cargados": ps["loaded"],
+                "Entregados": ps["delivered"],
+                "Fallidos": ps["failed"],
+                "Reintentos": ps["loaded"] - ps["delivered"] - ps["failed"],
+                "Tasa Entrega %": round((ps["delivered"] / ps["loaded"] * 100) if ps["loaded"] > 0 else 0, 2),
+                "Km Totales": ps["km"],
+            })
+        pd.DataFrame(prov_rows).to_excel(writer, sheet_name="Resumen Proveedores", index=False)
+
+    output.seek(0)
+    filename = f"reporte_{data.date_from}_{data.date_to}.xlsx"
+    return FastResponse(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ==================== EXPORT ====================
+
+@router.get("/export/journeys")
+async def export_journeys(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    query = {}
+    if date_from:
+        query["date"] = {"$gte": date_from}
+    if date_to:
+        query.setdefault("date", {})["$lte"] = date_to
+    if client_id:
+        query["client_id"] = client_id
+    if provider_id:
+        query["provider_id"] = provider_id
+
+    journeys = await db.journeys.find(query, {"_id": 0}).to_list(1000)
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+
+    export_data = []
+    for j in journeys:
+        close_data = j.get("close_data") or {}
+        start_data = j.get("start_data") or {}
+        export_data.append({
+            "Fecha": j.get("date", ""),
+            "Cliente": clients.get(j.get("client_id"), ""),
+            "Proveedor": providers.get(j.get("provider_id"), ""),
+            "Estado": j.get("status", ""),
+            "Paquetes Total": j.get("packages_total", 0),
+            "Entregados": j.get("packages_delivered", 0),
+            "Fallidos": j.get("packages_failed", 0),
+            "Km Recorridos": close_data.get("km_traveled", 0),
+            "Tasa Entrega (%)": close_data.get("delivery_rate", 0),
+            "Hora Inicio": start_data.get("departure_time", ""),
+            "Hora Cierre": close_data.get("closed_at", ""),
+        })
+
+    df = pd.DataFrame(export_data)
+    output = io.BytesIO()
+    df.to_excel(output, index=False)
+    output.seek(0)
+    return FastResponse(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=rutas_export_{datetime.now().strftime('%Y%m%d')}.xlsx"},
+    )
+
+
+@router.get("/export/incidents")
+async def export_incidents(
+    journey_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    query = {}
+    if journey_id:
+        query["journey_id"] = journey_id
+    if date_from or date_to:
+        j_query = {}
+        if date_from:
+            j_query["date"] = {"$gte": date_from}
+        if date_to:
+            j_query.setdefault("date", {})["$lte"] = date_to
+        journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(500)
+        query["journey_id"] = {"$in": [j["id"] for j in journeys]}
+
+    incidents = await db.incidents.find(query, {"_id": 0}).to_list(1000)
+    export_data = []
+    for inc in incidents:
+        export_data.append({
+            "Fecha/Hora": inc.get("occurred_at", ""),
+            "Tipo": inc.get("incident_type", ""),
+            "Descripción": inc.get("description", ""),
+            "Severidad": inc.get("severity", ""),
+            "Imputabilidad": inc.get("imputability", "Por definir"),
+            "No. Guía": inc.get("tracking_number", ""),
+            "Estado": inc.get("status", ""),
+            "Acción Tomada": inc.get("action_taken", ""),
+        })
+
+    df = pd.DataFrame(export_data)
+    output = io.StringIO()
+    df.to_csv(output, index=False)
+    return FastResponse(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=incidencias_export_{datetime.now().strftime('%Y%m%d')}.csv"},
+    )
+
+
+# ==================== TOKEN CONSUMPTION ====================
+
+@router.get("/system/token-consumption")
+async def get_token_consumption(user: dict = Depends(require_role(["coordinator", "developer"]))):
+    config = await db.system_config.find_one({"key": "token_consumption"}, {"_id": 0})
+    exchange_config = await db.system_config.find_one({"key": "exchange_rate"}, {"_id": 0})
+    exchange_rate = float((exchange_config or {}).get("value", 20.50))
+
+    if not config:
+        pass
+
+    ai_count = await db.packages.count_documents({"evidence_method": "ai"})
+    est_tokens = ai_count * 2000
+    cost_usd = round(est_tokens / 1000 * 0.01, 2)
+    cost_mxn = round(cost_usd * exchange_rate, 2)
+    fixed_costs_usd = 25.0
+
+    return {
+        "ai_evaluations": ai_count,
+        "estimated_tokens": est_tokens,
+        "variable_cost_usd": cost_usd,
+        "variable_cost_mxn": cost_mxn,
+        "fixed_cost_usd": fixed_costs_usd,
+        "fixed_cost_mxn": round(fixed_costs_usd * exchange_rate, 2),
+        "total_cost_usd": round(cost_usd + fixed_costs_usd, 2),
+        "total_cost_mxn": round((cost_usd + fixed_costs_usd) * exchange_rate, 2),
+        "exchange_rate": exchange_rate,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.put("/system/exchange-rate")
+async def update_exchange_rate(
+    rate: float,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    if rate <= 0:
+        raise HTTPException(status_code=400, detail="Tipo de cambio debe ser positivo")
+    await db.system_config.update_one(
+        {"key": "exchange_rate"},
+        {"$set": {"value": rate, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": user["id"]}},
+        upsert=True,
+    )
+    return {"exchange_rate": rate, "message": "Tipo de cambio actualizado"}
+
+
+# ==================== REPORTING API (Power BI / Tableau) ====================
+
+@router.get("/reports/journeys")
+async def report_journeys(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    query = {}
+    if date_from:
+        query["date"] = {"$gte": date_from}
+    if date_to:
+        query.setdefault("date", {})["$lte"] = date_to
+    if client_id:
+        query["client_id"] = client_id
+    if provider_id:
+        query["provider_id"] = provider_id
+    if status:
+        query["status"] = status
+
+    journeys = await db.journeys.find(query, {"_id": 0}).to_list(10000)
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+
+    result = []
+    for j in journeys:
+        close_data = j.get("close_data") or {}
+        start_data = j.get("start_data") or {}
+        incidents_count = await db.incidents.count_documents({"journey_id": j["id"]})
+        open_incidents = await db.incidents.count_documents({"journey_id": j["id"], "status": "open"})
+        result.append({
+            "journey_id": j["id"],
+            "date": j.get("date"),
+            "client_id": j.get("client_id"),
+            "client_name": clients.get(j.get("client_id"), ""),
+            "provider_id": j.get("provider_id"),
+            "provider_name": providers.get(j.get("provider_id"), ""),
+            "driver_name": j.get("driver_name", ""),
+            "status": j.get("status"),
+            "route_type": j.get("route_type", "CDMX / Zona Metro"),
+            "city": j.get("city", ""),
+            "packages_total": j.get("packages_total", 0),
+            "packages_delivered": j.get("packages_delivered", 0),
+            "packages_failed": j.get("packages_failed", 0),
+            "packages_retry": j.get("packages_retry", 0),
+            "delivery_rate": close_data.get("delivery_rate", 0),
+            "km_traveled": close_data.get("km_traveled", 0),
+            "odometer_start": start_data.get("odometer_start", 0),
+            "odometer_end": close_data.get("odometer_end", 0),
+            "departure_time": start_data.get("departure_time"),
+            "closed_at": close_data.get("closed_at"),
+            "fuel_level": start_data.get("fuel_level", ""),
+            "incidents_total": incidents_count,
+            "incidents_open": open_incidents,
+            "created_at": j.get("created_at"),
+        })
+    return {"data": result, "total": len(result)}
+
+
+@router.get("/reports/packages")
+async def report_packages(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    status: Optional[str] = None,
+    journey_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+
+    if journey_id:
+        journey_ids = [journey_id]
+    else:
+        journeys = await db.journeys.find(j_query, {"id": 1, "_id": 0}).to_list(10000)
+        journey_ids = [j["id"] for j in journeys]
+
+    pkg_query = {"journey_id": {"$in": journey_ids}}
+    if status:
+        pkg_query["status"] = status
+
+    packages = await db.packages.find(pkg_query, {"_id": 0}).to_list(50000)
+
+    journeys_map = {}
+    for jid in journey_ids:
+        j = await db.journeys.find_one({"id": jid}, {"_id": 0})
+        if j:
+            journeys_map[jid] = j
+
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+
+    result = []
+    for pkg in packages:
+        journey = journeys_map.get(pkg.get("journey_id"), {})
+        result.append({
+            "package_id": pkg.get("id"),
+            "journey_id": pkg.get("journey_id"),
+            "cosmo_route_id": pkg.get("cosmo_route_id", ""),
+            "journey_date": journey.get("date"),
+            "tracking_number": pkg.get("tracking_number") or pkg.get("order_reference_id"),
+            "tracking_url": pkg.get("tracking_url", ""),
+            "recipient_name": pkg.get("recipient_name"),
+            "address": pkg.get("address"),
+            "zone": pkg.get("zone"),
+            "status": pkg.get("status"),
+            "cosmo_status": pkg.get("cosmo_status", ""),
+            "failure_reason": pkg.get("failure_reason", ""),
+            "delivery_attempt": pkg.get("delivery_attempt", 1),
+            "evidence_score": pkg.get("evidence_score"),
+            "evidence_type": pkg.get("evidence_type"),
+            "kosmo_proof_count": pkg.get("kosmo_proof_count", 0),
+            "reviewed_by": pkg.get("reviewed_by"),
+            "reviewed_at": pkg.get("reviewed_at"),
+            "client_name": clients.get(journey.get("client_id"), ""),
+            "provider_name": providers.get(journey.get("provider_id"), ""),
+            "driver_name": journey.get("driver_name", ""),
+        })
+    return {"data": result, "total": len(result)}
+
+
+@router.get("/reports/incidents")
+async def report_incidents(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
+    incident_type: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    journey_ids = [j["id"] for j in journeys]
+    journeys_map = {j["id"]: j for j in journeys}
+
+    inc_query = {"journey_id": {"$in": journey_ids}}
+    if severity:
+        inc_query["severity"] = severity
+    if status:
+        inc_query["status"] = status
+    if incident_type:
+        inc_query["incident_type"] = incident_type
+
+    incidents = await db.incidents.find(inc_query, {"_id": 0}).to_list(10000)
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+
+    result = []
+    for inc in incidents:
+        journey = journeys_map.get(inc.get("journey_id"), {})
+        result.append({
+            "incident_id": inc.get("id"),
+            "journey_id": inc.get("journey_id"),
+            "journey_date": journey.get("date"),
+            "occurred_at": inc.get("occurred_at"),
+            "incident_type": inc.get("incident_type"),
+            "description": inc.get("description"),
+            "severity": inc.get("severity"),
+            "imputability": inc.get("imputability", "Por definir"),
+            "status": inc.get("status"),
+            "tracking_number": inc.get("tracking_number", ""),
+            "action_taken": inc.get("action_taken", ""),
+            "resolved_at": inc.get("resolved_at"),
+            "client_name": clients.get(journey.get("client_id"), ""),
+            "provider_name": providers.get(journey.get("provider_id"), ""),
+            "driver_name": journey.get("driver_name", ""),
+            "created_at": inc.get("created_at"),
+        })
+    return {"data": result, "total": len(result)}
+
+
+@router.get("/reports/kpis")
+async def report_kpis(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    group_by: str = "day",
+    user: dict = Depends(get_current_user),
+):
+    if not date_from:
+        date_from = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    journeys = await db.journeys.find(
+        {"date": {"$gte": date_from, "$lte": date_to}}, {"_id": 0}
+    ).to_list(10000)
+
+    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+
+    groups = {}
+    for j in journeys:
+        if group_by == "provider":
+            key = providers.get(j.get("provider_id"), "Sin proveedor")
+        elif group_by == "client":
+            key = clients.get(j.get("client_id"), "Sin cliente")
+        elif group_by == "week":
+            d = datetime.strptime(j.get("date", date_from), "%Y-%m-%d")
+            key = f"{d.year}-W{d.isocalendar()[1]:02d}"
+        elif group_by == "month":
+            key = j.get("date", "")[:7]
+        else:
+            key = j.get("date", "")
+
+        if key not in groups:
+            groups[key] = {
+                "group": key,
+                "journeys_count": 0,
+                "journeys_completed": 0,
+                "packages_total": 0,
+                "packages_delivered": 0,
+                "packages_failed": 0,
+                "km_total": 0,
+                "incidents_count": 0,
+            }
+
+        close_data = j.get("close_data") or {}
+        groups[key]["journeys_count"] += 1
+        if j.get("status") == "closed":
+            groups[key]["journeys_completed"] += 1
+        groups[key]["packages_total"] += j.get("packages_total", 0)
+        groups[key]["packages_delivered"] += j.get("packages_delivered", 0)
+        groups[key]["packages_failed"] += j.get("packages_failed", 0)
+        groups[key]["km_total"] += close_data.get("km_traveled", 0)
+
+    result = []
+    for key, data in groups.items():
+        data["delivery_rate"] = round(
+            (data["packages_delivered"] / data["packages_total"] * 100)
+            if data["packages_total"] > 0 else 0, 2,
+        )
+        result.append(data)
+
+    result.sort(key=lambda x: x["group"])
+    return {"data": result, "total": len(result), "date_from": date_from, "date_to": date_to}
+
+
+@router.get("/reports/schema")
+async def report_schema():
+    return {
+        "api_version": "1.0",
+        "endpoints": [
+            {
+                "name": "Journeys Report",
+                "endpoint": "/api/reports/journeys",
+                "method": "GET",
+                "description": "Datos de rutas con métricas de entrega",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "client_id", "type": "string", "required": False},
+                    {"name": "provider_id", "type": "string", "required": False},
+                    {"name": "status", "type": "string", "enum": ["scheduled", "in_progress", "closed"], "required": False},
+                ],
+                "fields": [
+                    "journey_id", "date", "client_id", "client_name", "provider_id", "provider_name",
+                    "driver_name", "status", "packages_total", "packages_delivered", "packages_failed",
+                    "delivery_rate", "km_traveled", "incidents_total", "incidents_open",
+                ],
+            },
+            {
+                "name": "Packages Report",
+                "endpoint": "/api/reports/packages",
+                "method": "GET",
+                "description": "Datos detallados de paquetes",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "status", "type": "string", "enum": ["pending", "delivered", "failed", "returned"], "required": False},
+                    {"name": "journey_id", "type": "string", "required": False},
+                ],
+                "fields": [
+                    "package_id", "journey_id", "cosmo_route_id", "journey_date", "tracking_number", "tracking_url",
+                    "recipient_name", "address", "zone", "status", "failure_reason", "delivery_attempt",
+                    "evidence_score", "evidence_type", "kosmo_proof_count", "kosmo_proof_urls",
+                    "reviewed_by", "reviewed_at", "client_name", "provider_name", "driver_name",
+                ],
+            },
+            {
+                "name": "Incidents Report",
+                "endpoint": "/api/reports/incidents",
+                "method": "GET",
+                "description": "Datos de incidencias",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "severity", "type": "string", "enum": ["Alto", "Medio", "Bajo"], "required": False},
+                    {"name": "status", "type": "string", "enum": ["open", "resolved"], "required": False},
+                    {"name": "incident_type", "type": "string", "required": False},
+                ],
+                "fields": [
+                    "incident_id", "journey_id", "journey_date", "occurred_at", "incident_type",
+                    "description", "severity", "status", "action_taken", "resolved_at",
+                    "client_name", "provider_name", "driver_name",
+                ],
+            },
+            {
+                "name": "KPIs Report",
+                "endpoint": "/api/reports/kpis",
+                "method": "GET",
+                "description": "KPIs agregados por período o dimensión",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "group_by", "type": "string", "enum": ["day", "week", "month", "provider", "client"], "default": "day"},
+                ],
+                "fields": [
+                    "group", "journeys_count", "journeys_completed", "packages_total",
+                    "packages_delivered", "packages_failed", "km_total", "delivery_rate",
+                ],
+            },
+            {
+                "name": "Custom Report (AI)",
+                "endpoint": "/api/reports/generate",
+                "method": "POST",
+                "description": "Genera reporte personalizable con insights de IA (Claude)",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "sections", "type": "array", "enum": ["provider_metrics", "driver_metrics", "incidents_breakdown"], "required": False},
+                ],
+                "fields": [
+                    "total_journeys", "total_packages", "total_delivered", "total_failed",
+                    "delivery_rate", "provider_metrics", "driver_metrics", "incidents_by_type",
+                    "incidents_by_imputability", "ai_insights",
+                ],
+            },
+            {
+                "name": "Report Excel Export",
+                "endpoint": "/api/reports/generate-excel",
+                "method": "POST",
+                "description": "Descarga reporte en formato Excel con hojas de rutas, incidencias y resumen por proveedor",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                ],
+                "fields": ["Archivo .xlsx con 3 hojas: Rutas, Incidencias, Resumen Proveedores"],
+            },
+            {
+                "name": "Kosmo Tracking Sync",
+                "endpoint": "/api/sync/tracking",
+                "method": "POST",
+                "description": "Sincroniza estatus de paquetes scrapeando páginas públicas de Kosmo.",
+                "parameters": [],
+                "fields": ["status", "message"],
+            },
+            {
+                "name": "Kosmo Sync Status",
+                "endpoint": "/api/sync/status",
+                "method": "GET",
+                "description": "Timestamp y stats de la última sincronización de Kosmo.",
+                "parameters": [],
+                "fields": ["last_sync", "total_checked", "updated", "errors"],
+            },
+            {
+                "name": "Quality Report",
+                "endpoint": "/api/reports/quality",
+                "method": "GET",
+                "description": "Reporte de calidad de soporte basado en estándar Cubbo.",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "provider_id", "type": "string", "required": False},
+                ],
+                "fields": ["by_provider[]", "by_type[]", "worst_packages[]", "summary.avg_score", "summary.complete", "summary.partial", "summary.incomplete"],
+            },
+            {
+                "name": "Quality Excel Export (Cubbo)",
+                "endpoint": "/api/reports/quality-export",
+                "method": "POST",
+                "description": "Exporta Excel para Cubbo con paquetes que tienen score < 100.",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": True},
+                    {"name": "provider_id", "type": "string", "required": False},
+                ],
+                "fields": ["Archivo .xlsx: fecha, guía, proveedor, tipo entrega, score, evidencias faltantes"],
+            },
+            {
+                "name": "Package Search",
+                "endpoint": "/api/packages/search",
+                "method": "GET",
+                "description": "Busca paquetes por guía o referencia.",
+                "parameters": [{"name": "q", "type": "string", "required": True}],
+                "fields": ["id", "tracking_number", "order_reference_id", "recipient_name", "status", "journey_id", "journey_date", "provider_name"],
+            },
+            {
+                "name": "Cleanup Routes & Packages",
+                "endpoint": "/api/cleanup/routes-packages",
+                "method": "POST",
+                "description": "Elimina todas las rutas, paquetes e incidencias. Solo coordinator/developer.",
+                "parameters": [],
+                "fields": ["deleted.journeys", "deleted.packages", "deleted.incidents"],
+            },
+            {
+                "name": "Resolve All Incidents",
+                "endpoint": "/api/incidents/journey/{journey_id}/resolve-all",
+                "method": "PUT",
+                "description": "Marca todas las incidencias abiertas de una ruta como resueltas en lote.",
+                "parameters": [{"name": "journey_id", "type": "string", "required": True}],
+                "fields": ["resolved_count", "message"],
+            },
+            {
+                "name": "Review Package",
+                "endpoint": "/api/packages/{package_id}/review",
+                "method": "PUT",
+                "description": "Marca un paquete como revisado por el usuario actual.",
+                "parameters": [{"name": "package_id", "type": "string", "required": True}],
+                "fields": ["reviewed_by", "reviewed_at", "message"],
+            },
+        ],
+        "authentication": {
+            "type": "Bearer Token",
+            "header": "Authorization",
+            "format": "Bearer <token>",
+            "obtain_token": "POST /api/auth/login with {email, password}",
+        },
+    }
