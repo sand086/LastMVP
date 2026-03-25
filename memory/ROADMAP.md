@@ -6,6 +6,7 @@
 - [x] Quality criteria configuration UI
 - [x] WebSocket real-time dashboard
 - [x] API documentation updated
+- [x] Kosmo scraper: fix transient failures + manual re-scrape endpoint
 
 ## In Progress
 (none)

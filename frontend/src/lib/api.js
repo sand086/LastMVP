@@ -215,4 +215,7 @@ export const getQualityCriteria = () => api.get('/quality/criteria');
 export const updateQualityCriteria = (data) => api.put('/quality/criteria', data);
 export const resetQualityCriteria = () => api.post('/quality/criteria/reset');
 
+// Package rescrape
+export const rescrapePackage = (packageId) => api.post(`/packages/${packageId}/rescrape`);
+
 export default api;

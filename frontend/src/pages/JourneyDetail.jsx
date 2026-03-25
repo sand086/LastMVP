@@ -19,6 +19,7 @@ import {
     evaluatePackageEvidence,
     evaluateAllEvidence,
     bulkUpdatePackageStatus,
+    rescrapePackage,
 } from '../lib/api';
 import { 
     formatDate, 
@@ -1282,6 +1283,28 @@ const JourneyDetail = () => {
                                                             >
                                                                 <Clock className="w-3 h-3" />
                                                             </span>
+                                                        )}
+                                                        {pkg.tracking_url && (pkg.kosmo_proof_count === 0 || pkg.kosmo_status_raw === 'unknown') && (
+                                                            <button
+                                                                onClick={async () => {
+                                                                    try {
+                                                                        const res = await rescrapePackage(pkg.id);
+                                                                        if (res.data.success) {
+                                                                            toast.success(`Rescrapeado: ${res.data.proof_count} evidencias encontradas`);
+                                                                            fetchJourney();
+                                                                        } else {
+                                                                            toast.error(`Error: ${res.data.error}`);
+                                                                        }
+                                                                    } catch (err) {
+                                                                        toast.error('Error al re-scrapear');
+                                                                    }
+                                                                }}
+                                                                className="text-orange-400 hover:text-orange-600 transition-colors"
+                                                                title="Re-sincronizar tracking de Kosmo"
+                                                                data-testid={`rescrape-${pkg.id}`}
+                                                            >
+                                                                <RefreshCw className="w-3.5 h-3.5" />
+                                                            </button>
                                                         )}
                                                     </div>
                                                 </td>

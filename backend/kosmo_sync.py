@@ -177,7 +177,7 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list =
                 {"kosmo_scraped_at": {"$exists": False}},
             ],
         },
-        # Delivered/failed with 0 proofs
+        # Delivered/failed with 0 proofs (retry)
         {
             "status": {"$in": ["delivered", "failed"]},
             "$or": [
@@ -185,6 +185,11 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list =
                 {"kosmo_proof_count": None},
                 {"kosmo_proof_count": {"$exists": False}},
             ],
+            "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()},
+        },
+        # Packages with "unknown" status (failed scrape, needs retry)
+        {
+            "kosmo_status_raw": {"$in": ["unknown", None]},
             "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()},
         },
     ]

@@ -749,3 +749,73 @@ async def evaluate_all_evidence(journey_id: str, user: dict = Depends(get_curren
             "incomplete": sum(1 for s in scores if s < 60),
         },
     }
+
+
+# ==================== PACKAGE RE-SCRAPE ====================
+
+@router.post("/packages/{package_id}/rescrape")
+async def rescrape_package(package_id: str, user: dict = Depends(get_current_user)):
+    """Force re-scrape a single package's Kosmo tracking data."""
+    from kosmo_sync import scrape_kosmo_page
+
+    pkg = await db.packages.find_one({"id": package_id}, {"_id": 0})
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Paquete no encontrado")
+
+    tracking_url = pkg.get("tracking_url", "")
+    if not tracking_url:
+        raise HTTPException(status_code=400, detail="Paquete sin URL de tracking")
+
+    result = await scrape_kosmo_page(tracking_url)
+
+    if result.get("error"):
+        return {
+            "success": False,
+            "error": result["error"],
+            "tracking_url": tracking_url,
+        }
+
+    now = datetime.now(timezone.utc)
+    kosmo_raw = result.get("order_status") or "unknown"
+    STATUS_MAP = {
+        "delivered": "delivered",
+        "cancelled": "failed",
+        "failed": "failed",
+        "returned": "returned",
+    }
+    mapped_status = STATUS_MAP.get(kosmo_raw)
+
+    update_fields = {
+        "kosmo_scraped_at": now.isoformat(),
+        "kosmo_status_raw": kosmo_raw,
+        "kosmo_order_id": result.get("order_id"),
+        "kosmo_proof_count": result.get("proof_count", 0),
+    }
+    if result.get("updated_at_ms"):
+        update_fields["kosmo_updated_at"] = result["updated_at_ms"]
+    if result.get("finished_at_ms"):
+        update_fields["kosmo_finished_at"] = result["finished_at_ms"]
+    if result.get("driver_note"):
+        update_fields["kosmo_driver_note"] = result["driver_note"]
+    if result.get("proof_urls"):
+        update_fields["kosmo_proof_urls"] = result["proof_urls"]
+
+    if mapped_status:
+        update_fields["status"] = mapped_status
+
+    await db.packages.update_one({"id": package_id}, {"$set": update_fields})
+
+    # Re-evaluate evidence score
+    journey_id = pkg.get("journey_id")
+    if journey_id:
+        tracking = pkg.get("tracking_number") or pkg.get("order_reference_id", "")
+        if tracking:
+            await evaluate_single_package_for_journey(db, journey_id, tracking, use_ai=False)
+
+    return {
+        "success": True,
+        "kosmo_status": kosmo_raw,
+        "proof_count": result.get("proof_count", 0),
+        "driver_note": result.get("driver_note"),
+        "proof_urls": result.get("proof_urls", []),
+    }
