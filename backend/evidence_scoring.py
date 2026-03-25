@@ -43,7 +43,7 @@ CRITERIOS POR TIPO DE ENTREGA:
 **Entrega Fallida:**
 1. Foto de la fachada antes de retirarse
 2. Captura de pantalla mostrando al menos 2 llamadas al destinatario
-3. Nota del driver explicando el motivo del fallo
+(Nota: Kosmo no permite agregar notas del driver en entregas fallidas, NO evalúes la ausencia de nota como criterio faltante)
 
 INSTRUCCIONES:
 - Analiza TODAS las imágenes proporcionadas
@@ -143,19 +143,14 @@ def calculate_evidence_score_rules(package: dict, has_incident: bool = False) ->
         evidence_type = "fallida"
         missing_items = []
         has_photo = proof_count >= 1
-        has_note = has_driver_note
 
         if not has_photo:
             missing_items.append("Foto de fachada antes de retirarse")
-        if not has_note:
-            missing_items.append("Nota del driver explicando fallo")
 
-        if has_photo and has_note:
+        # Kosmo does not allow driver notes on failed deliveries
+        # Only photo evidence is evaluated
+        if has_photo:
             score = 100
-        elif has_photo:
-            score = 60
-        elif has_note:
-            score = 40
         else:
             score = 0
 

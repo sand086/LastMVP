@@ -202,4 +202,12 @@ export const exportHeatmap = (params) => api.post('/analytics/heatmap-export', n
 // System Sync Schedule
 export const getSyncSchedule = () => api.get('/system/sync-schedule');
 
+// Token Consumption
+export const getTokenConsumption = () => api.get('/system/token-consumption');
+export const updateExchangeRate = (rate) => api.put(`/system/exchange-rate?rate=${rate}`);
+
+// Bulk package status update
+export const bulkUpdatePackageStatus = (journeyId, packageIds, newStatus) =>
+    api.post(`/journeys/${journeyId}/packages/bulk-status`, { package_ids: packageIds, new_status: newStatus });
+
 export default api;

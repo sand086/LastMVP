@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import api from '../lib/api';
+import api, { getTokenConsumption, updateExchangeRate } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import { Progress } from '../components/ui/progress';
 import { 
     Activity, 
@@ -13,23 +14,32 @@ import {
     Zap, 
     BarChart3,
     Users,
-    TrendingUp
+    TrendingUp,
+    DollarSign,
+    Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 const SystemHealth = () => {
     const [health, setHealth] = useState(null);
     const [perf, setPerf] = useState(null);
+    const [tokenData, setTokenData] = useState(null);
+    const [editingRate, setEditingRate] = useState(false);
+    const [newRate, setNewRate] = useState('');
+    const [savingRate, setSavingRate] = useState(false);
     const [loading, setLoading] = useState(true);
     const [lastRefresh, setLastRefresh] = useState(null);
 
     const fetchData = useCallback(async () => {
         try {
-            const [healthRes, perfRes] = await Promise.all([
+            const [healthRes, perfRes, tokenRes] = await Promise.all([
                 api.get('/system/health'),
                 api.get('/system/performance'),
+                getTokenConsumption().catch(() => ({ data: null })),
             ]);
             setHealth(healthRes.data);
             setPerf(perfRes.data);
+            if (tokenRes.data) setTokenData(tokenRes.data);
             setLastRefresh(new Date());
         } catch (error) {
             console.error('Error fetching health data:', error);
@@ -287,6 +297,92 @@ const SystemHealth = () => {
                             <p className="font-mono font-bold text-lg">{perf.avg_layout_file_size_kb} KB</p>
                         </Card>
                     </div>
+                </>
+            )}
+
+            {/* Token Consumption & Cost Tracking */}
+            {tokenData && (
+                <>
+                    <div className="flex items-center justify-between mt-6">
+                        <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+                            <DollarSign className="w-5 h-5" /> Consumo y Costos
+                        </h2>
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span>TC USD/MXN:</span>
+                            {editingRate ? (
+                                <div className="flex items-center gap-1">
+                                    <Input
+                                        type="number"
+                                        step="0.01"
+                                        value={newRate}
+                                        onChange={(e) => setNewRate(e.target.value)}
+                                        className="w-20 h-6 text-xs"
+                                        data-testid="exchange-rate-input"
+                                    />
+                                    <Button size="sm" className="h-6 text-xs px-2" disabled={savingRate}
+                                        data-testid="save-exchange-rate"
+                                        onClick={async () => {
+                                            setSavingRate(true);
+                                            try {
+                                                await updateExchangeRate(parseFloat(newRate));
+                                                toast.success('Tipo de cambio actualizado');
+                                                setEditingRate(false);
+                                                fetchData();
+                                            } catch { toast.error('Error'); }
+                                            finally { setSavingRate(false); }
+                                        }}>
+                                        {savingRate ? <Loader2 className="w-3 h-3 animate-spin" /> : 'OK'}
+                                    </Button>
+                                    <Button size="sm" variant="ghost" className="h-6 text-xs px-2"
+                                        onClick={() => setEditingRate(false)}>X</Button>
+                                </div>
+                            ) : (
+                                <button
+                                    className="font-mono text-blue-600 hover:underline cursor-pointer"
+                                    onClick={() => { setNewRate(String(tokenData.exchange_rate)); setEditingRate(true); }}
+                                    data-testid="edit-exchange-rate"
+                                >
+                                    ${tokenData.exchange_rate}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="token-consumption-section">
+                        <Card className="p-4">
+                            <p className="text-xs text-slate-500 uppercase mb-1">Evaluaciones IA</p>
+                            <p className="font-mono font-bold text-lg text-blue-600" data-testid="ai-eval-count">{tokenData.ai_evaluations}</p>
+                        </Card>
+                        <Card className="p-4">
+                            <p className="text-xs text-slate-500 uppercase mb-1">Costo variable (USD)</p>
+                            <p className="font-mono font-bold text-lg text-amber-600">${tokenData.variable_cost_usd}</p>
+                        </Card>
+                        <Card className="p-4">
+                            <p className="text-xs text-slate-500 uppercase mb-1">Costo fijo (USD)</p>
+                            <p className="font-mono font-bold text-lg text-slate-600">${tokenData.fixed_cost_usd}</p>
+                        </Card>
+                        <Card className="p-4">
+                            <p className="text-xs text-slate-500 uppercase mb-1">Costo total (MXN)</p>
+                            <p className="font-mono font-bold text-lg text-emerald-600" data-testid="total-cost-mxn">${tokenData.total_cost_mxn}</p>
+                        </Card>
+                    </div>
+                    <Card className="mt-2">
+                        <CardContent className="p-4">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                                <div>
+                                    <p className="text-xs text-slate-500">Tokens estimados</p>
+                                    <p className="font-mono">{tokenData.estimated_tokens?.toLocaleString()}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500">Variable MXN</p>
+                                    <p className="font-mono">${tokenData.variable_cost_mxn}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500">Fijo MXN (deploy)</p>
+                                    <p className="font-mono">${tokenData.fixed_cost_mxn}</p>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
                 </>
             )}
         </div>

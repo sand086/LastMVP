@@ -17,6 +17,7 @@ import {
     reviewPackage,
     evaluatePackageEvidence,
     evaluateAllEvidence,
+    bulkUpdatePackageStatus,
 } from '../lib/api';
 import { 
     formatDate, 
@@ -93,7 +94,8 @@ import {
     ExternalLink,
     CheckCheck,
     Circle,
-    Users
+    Users,
+    Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
@@ -497,12 +499,18 @@ const JourneyDetail = () => {
     const [journey, setJourney] = useState(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('inicio');
+    const initialTabSet = React.useRef(false);
 
     // Evidence Carousel state
     const [mainCarouselOpen, setMainCarouselOpen] = useState(false);
     const [mainCarouselImages, setMainCarouselImages] = useState([]);
     const [mainCarouselIndex, setMainCarouselIndex] = useState(0);
     const [mainCarouselPkgInfo, setMainCarouselPkgInfo] = useState(null);
+
+    // Bulk status update state
+    const [selectedPackages, setSelectedPackages] = useState({});
+    const [bulkStatus, setBulkStatus] = useState('');
+    const [bulkSaving, setBulkSaving] = useState(false);
 
     // Images state
     const [startImages, setStartImages] = useState([]);
@@ -653,6 +661,34 @@ const JourneyDetail = () => {
         setMainCarouselOpen(true);
     };
 
+    // Bulk status update
+    const selectedPkgIds = Object.entries(selectedPackages).filter(([, v]) => v).map(([k]) => k);
+    const handleBulkSave = async () => {
+        if (!bulkStatus || selectedPkgIds.length === 0) return;
+        setBulkSaving(true);
+        try {
+            const res = await bulkUpdatePackageStatus(id, selectedPkgIds, bulkStatus);
+            toast.success(`${res.data.updated} paquetes actualizados a "${bulkStatus}"`);
+            setSelectedPackages({});
+            setBulkStatus('');
+            fetchJourney();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al actualizar');
+        } finally {
+            setBulkSaving(false);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        const pkgs = journey?.packages || [];
+        const allSelected = pkgs.every(p => selectedPackages[p.id]);
+        const newSelection = {};
+        if (!allSelected) {
+            pkgs.forEach(p => { newSelection[p.id] = true; });
+        }
+        setSelectedPackages(newSelection);
+    };
+
     const fetchJourney = async () => {
         try {
             const res = await getJourney(id);
@@ -683,13 +719,16 @@ const JourneyDetail = () => {
                 setFailedPackages(autoFailed);
             }
 
-            // Set active tab based on status
-            if (res.data.status === 'scheduled') {
-                setActiveTab('inicio');
-            } else if (res.data.status === 'in_progress') {
-                setActiveTab('incidencias');
-            } else {
-                setActiveTab('fin');
+            // Set active tab based on status (only on initial load)
+            if (!initialTabSet.current) {
+                initialTabSet.current = true;
+                if (res.data.status === 'scheduled') {
+                    setActiveTab('inicio');
+                } else if (res.data.status === 'in_progress') {
+                    setActiveTab('incidencias');
+                } else {
+                    setActiveTab('fin');
+                }
             }
         } catch (error) {
             toast.error('Error al cargar ruta');
@@ -1073,13 +1112,41 @@ const JourneyDetail = () => {
                                 <Package className="w-4 h-4" />
                                 Paquetes ({journey.packages.length})
                             </CardTitle>
-                            <button
-                                onClick={() => setShowPackagesList(!showPackagesList)}
-                                className="text-xs text-slate-500 hover:text-slate-700 underline"
-                                data-testid="toggle-packages-list"
-                            >
-                                {showPackagesList ? 'Ocultar' : 'Ver todos'}
-                            </button>
+                            <div className="flex items-center gap-2">
+                                {selectedPkgIds.length > 0 && (
+                                    <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded px-3 py-1" data-testid="bulk-status-bar">
+                                        <span className="text-xs text-blue-700 font-medium">{selectedPkgIds.length} seleccionados</span>
+                                        <Select value={bulkStatus} onValueChange={setBulkStatus}>
+                                            <SelectTrigger className="w-[130px] h-7 text-xs" data-testid="bulk-status-select">
+                                                <SelectValue placeholder="Nuevo estado" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="pending">Pendiente</SelectItem>
+                                                <SelectItem value="delivered">Entregado</SelectItem>
+                                                <SelectItem value="failed">Fallido</SelectItem>
+                                                <SelectItem value="returned">Devuelto</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <Button
+                                            size="sm"
+                                            className="h-7 text-xs"
+                                            disabled={!bulkStatus || bulkSaving}
+                                            onClick={handleBulkSave}
+                                            data-testid="bulk-save-btn"
+                                        >
+                                            {bulkSaving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}
+                                            Guardar
+                                        </Button>
+                                    </div>
+                                )}
+                                <button
+                                    onClick={() => setShowPackagesList(!showPackagesList)}
+                                    className="text-xs text-slate-500 hover:text-slate-700 underline"
+                                    data-testid="toggle-packages-list"
+                                >
+                                    {showPackagesList ? 'Ocultar' : 'Ver todos'}
+                                </button>
+                            </div>
                         </div>
                     </CardHeader>
                     {showPackagesList && (
@@ -1088,6 +1155,13 @@ const JourneyDetail = () => {
                                 <table className="data-table w-full text-sm">
                                     <thead>
                                         <tr>
+                                            <th className="w-8">
+                                                <Checkbox
+                                                    checked={journey.packages?.length > 0 && journey.packages.every(p => selectedPackages[p.id])}
+                                                    onCheckedChange={toggleSelectAll}
+                                                    data-testid="select-all-packages"
+                                                />
+                                            </th>
                                             <th>No. Guía</th>
                                             <th>Destinatario</th>
                                             <th>Estado</th>
@@ -1105,6 +1179,13 @@ const JourneyDetail = () => {
                                             return 0;
                                         }).map((pkg) => (
                                             <tr key={pkg.id} data-testid={`pkg-row-${pkg.id}`}>
+                                                <td>
+                                                    <Checkbox
+                                                        checked={!!selectedPackages[pkg.id]}
+                                                        onCheckedChange={(v) => setSelectedPackages(prev => ({ ...prev, [pkg.id]: v }))}
+                                                        data-testid={`select-pkg-${pkg.id}`}
+                                                    />
+                                                </td>
                                                 <td className="font-mono text-xs">
                                                     {pkg.tracking_url ? (
                                                         <a href={pkg.tracking_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">

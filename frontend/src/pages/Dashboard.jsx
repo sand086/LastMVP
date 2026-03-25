@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSortableTable } from '../lib/useSortableTable';
 import { 
     getDashboardStats, 
     getJourneys, 
@@ -77,6 +78,76 @@ const KPICard = ({ title, value, subValue, icon: Icon, color, loading }) => (
         </CardContent>
     </Card>
 );
+
+// Sortable Routes Table component
+const RoutesTable = ({ journeys }) => {
+    const { sortedData, SortHeader } = useSortableTable(journeys);
+    return (
+        <div className="overflow-x-auto">
+            <table className="data-table w-full">
+                <thead>
+                    <tr>
+                        <SortHeader field="date">Fecha</SortHeader>
+                        <SortHeader field="client_name">Cliente</SortHeader>
+                        <SortHeader field="provider_name">Proveedor</SortHeader>
+                        <SortHeader field="driver_name">Driver</SortHeader>
+                        <SortHeader field="packages_total">Paquetes</SortHeader>
+                        <SortHeader field="packages_delivered">Progreso</SortHeader>
+                        <SortHeader field="open_incidents_count">Incidencias</SortHeader>
+                        <SortHeader field="status">Estado</SortHeader>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {sortedData.map((journey) => {
+                        const deliveryRate = calculateDeliveryRate(journey.packages_delivered, journey.packages_total);
+                        const progressColor = getProgressColor(deliveryRate);
+                        return (
+                            <tr key={journey.id} data-testid={`journey-row-${journey.id}`}>
+                                <td className="font-mono text-sm">{formatDate(journey.date)}</td>
+                                <td>{journey.client_name}</td>
+                                <td>{journey.provider_name}</td>
+                                <td className="text-sm">
+                                    {journey.driver_name ? (
+                                        <span className="text-slate-700">
+                                            {journey.driver_name.length > 20
+                                                ? journey.driver_name.split(' ').slice(0, 1).join(' ') + ' ' + (journey.driver_name.split(' ')[1]?.[0] || '') + '.'
+                                                : journey.driver_name}
+                                        </span>
+                                    ) : <span className="text-slate-400 italic">Sin asignar</span>}
+                                </td>
+                                <td className="font-mono">{journey.packages_delivered}/{journey.packages_total}</td>
+                                <td className="w-32">
+                                    <div className="flex items-center gap-2">
+                                        <Progress value={deliveryRate} className="h-2 flex-1" indicatorClassName={progressColor} />
+                                        <span className="text-xs font-mono w-10 text-right">{deliveryRate}%</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    {journey.open_incidents_count > 0 ? (
+                                        <span className="inline-flex items-center gap-1 text-amber-600">
+                                            <AlertTriangle className="w-4 h-4" />{journey.open_incidents_count}
+                                        </span>
+                                    ) : <span className="text-slate-400">0</span>}
+                                </td>
+                                <td>
+                                    <span className={`status-badge ${getStatusColor(journey.status)}`}>{getStatusLabel(journey.status)}</span>
+                                </td>
+                                <td>
+                                    <Link to={`/journeys/${journey.id}`}>
+                                        <Button variant="ghost" size="sm" data-testid={`view-journey-${journey.id}`}>
+                                            <Eye className="w-4 h-4 mr-1" />Ver detalle
+                                        </Button>
+                                    </Link>
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+};
 
 const Dashboard = () => {
     const { canEdit } = useAuth();
@@ -495,95 +566,7 @@ const Dashboard = () => {
                             )}
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="data-table w-full">
-                                <thead>
-                                    <tr>
-                                        <th>Fecha</th>
-                                        <th>Cliente</th>
-                                        <th>Proveedor</th>
-                                        <th>Driver</th>
-                                        <th>Paquetes</th>
-                                        <th>Progreso</th>
-                                        <th>Incidencias</th>
-                                        <th>Estado</th>
-                                        <th>Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {journeys.map((journey) => {
-                                        const deliveryRate = calculateDeliveryRate(
-                                            journey.packages_delivered,
-                                            journey.packages_total
-                                        );
-                                        const progressColor = getProgressColor(deliveryRate);
-                                        
-                                        return (
-                                            <tr key={journey.id} data-testid={`journey-row-${journey.id}`}>
-                                                <td className="font-mono text-sm">
-                                                    {formatDate(journey.date)}
-                                                </td>
-                                                <td>{journey.client_name}</td>
-                                                <td>{journey.provider_name}</td>
-                                                <td className="text-sm">
-                                                    {journey.driver_name ? (
-                                                        <span className="text-slate-700">
-                                                            {journey.driver_name.length > 20 
-                                                                ? journey.driver_name.split(' ').slice(0, 1).join(' ') + ' ' + (journey.driver_name.split(' ')[1]?.[0] || '') + '.'
-                                                                : journey.driver_name}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-slate-400 italic">Sin asignar</span>
-                                                    )}
-                                                </td>
-                                                <td className="font-mono">
-                                                    {journey.packages_delivered}/{journey.packages_total}
-                                                </td>
-                                                <td className="w-32">
-                                                    <div className="flex items-center gap-2">
-                                                        <Progress 
-                                                            value={deliveryRate} 
-                                                            className="h-2 flex-1"
-                                                            indicatorClassName={progressColor}
-                                                        />
-                                                        <span className="text-xs font-mono w-10 text-right">
-                                                            {deliveryRate}%
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    {journey.open_incidents_count > 0 ? (
-                                                        <span className="inline-flex items-center gap-1 text-amber-600">
-                                                            <AlertTriangle className="w-4 h-4" />
-                                                            {journey.open_incidents_count}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-slate-400">0</span>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    <span className={`status-badge ${getStatusColor(journey.status)}`}>
-                                                        {getStatusLabel(journey.status)}
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <Link to={`/journeys/${journey.id}`}>
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="sm"
-                                                            data-testid={`view-journey-${journey.id}`}
-                                                        >
-                                                            <Eye className="w-4 h-4 mr-1" />
-                                                            Ver detalle
-                                                        </Button>
-                                                    </Link>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+                        <RoutesTable journeys={journeys} />
                     )}
                 </CardContent>
                 {/* Pagination Controls */}

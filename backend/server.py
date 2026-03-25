@@ -17,8 +17,13 @@ import bcrypt
 import pandas as pd
 import io
 import shutil
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import JSONResponse
 
-from middleware import AuditMiddleware, log_audit_event, log_system_error
+from middleware import AuditMiddleware, SecurityHeadersMiddleware, log_audit_event, log_system_error
 from system_routes import create_system_router, SERVER_START_TIME
 from kosmo_sync import create_kosmo_router, start_periodic_sync, stop_periodic_sync
 from evidence_scoring import (
@@ -112,6 +117,18 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Create the main app
 app = FastAPI(title="LastMile OS API")
+
+# Rate limiting
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: StarletteRequest, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Demasiados intentos. Espera 1 minuto."},
+    )
 
 # Store db on app state for middleware access
 app.state.db = db
@@ -274,6 +291,7 @@ def create_token(user_id: str, email: str, role: str) -> str:
         "sub": user_id,
         "email": email,
         "role": role,
+        "jti": str(uuid.uuid4()),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -281,6 +299,12 @@ def create_token(user_id: str, email: str, role: str) -> str:
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        # Check if token is revoked
+        jti = payload.get("jti")
+        if jti:
+            revoked = await db.revoked_tokens.find_one({"jti": jti})
+            if revoked:
+                raise HTTPException(status_code=401, detail="Token revocado")
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
@@ -321,12 +345,56 @@ def apply_assignment_filter(user: dict, query: dict) -> dict:
 # ==================== AUTH ROUTES ====================
 
 @api_router.post("/auth/login", response_model=TokenResponse)
-async def login(data: UserLogin):
+@limiter.limit("5/minute")
+async def login(data: UserLogin, request: StarletteRequest):
+    now = datetime.now(timezone.utc)
+    client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown").split(",")[0].strip()
+
+    # Check account lockout
+    lock_record = await db.login_attempts.find_one(
+        {"email": data.email, "ip": client_ip},
+        {"_id": 0},
+    )
+    if lock_record and lock_record.get("blocked_until"):
+        blocked_until = datetime.fromisoformat(lock_record["blocked_until"])
+        if blocked_until > now:
+            raise HTTPException(
+                status_code=429,
+                detail="Cuenta bloqueada temporalmente. Intenta en 15 minutos.",
+            )
+
     user = await db.users.find_one({"email": data.email}, {"_id": 0})
     if not user or not verify_password(data.password, user["password"]):
+        # Increment failed attempts
+        ten_min_ago = (now - timedelta(minutes=10)).isoformat()
+        if lock_record:
+            last_attempt = lock_record.get("last_attempt", "")
+            attempts = lock_record.get("attempts", 0)
+            if last_attempt < ten_min_ago:
+                attempts = 1  # Reset if old
+            else:
+                attempts += 1
+            update_fields = {"attempts": attempts, "last_attempt": now.isoformat()}
+            if attempts >= 5:
+                update_fields["blocked_until"] = (now + timedelta(minutes=15)).isoformat()
+            await db.login_attempts.update_one(
+                {"email": data.email, "ip": client_ip},
+                {"$set": update_fields},
+            )
+        else:
+            await db.login_attempts.insert_one({
+                "email": data.email,
+                "ip": client_ip,
+                "attempts": 1,
+                "last_attempt": now.isoformat(),
+                "blocked_until": None,
+            })
         await log_audit_event(db, data.email, "", "login_failed", "user", "", details=f"Failed login for {data.email}", status="error")
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
-    
+
+    # Successful login - reset attempts
+    await db.login_attempts.delete_many({"email": data.email, "ip": client_ip})
+
     token = create_token(user["id"], user["email"], user["role"])
     user_response = {k: v for k, v in user.items() if k != "password"}
     await log_audit_event(db, user["id"], user["role"], "login_success", "user", user["id"])
@@ -337,8 +405,19 @@ async def get_me(user: dict = Depends(get_current_user)):
     return user
 
 @api_router.post("/auth/logout")
-async def logout(user: dict = Depends(get_current_user)):
-    return {"message": "Sesión cerrada exitosamente"}
+async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        jti = payload.get("jti")
+        if jti:
+            await db.revoked_tokens.insert_one({
+                "jti": jti,
+                "revoked_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": datetime.fromtimestamp(payload["exp"], tz=timezone.utc).isoformat(),
+            })
+    except Exception:
+        pass
+    return {"message": "Sesión cerrada correctamente."}
 
 # ==================== USER MANAGEMENT (COORDINATOR ONLY) ====================
 
@@ -954,17 +1033,43 @@ async def review_package(package_id: str, user: dict = Depends(get_current_user)
 # ==================== FILE UPLOAD ====================
 
 # Upload history-orders CSV file (Step 1)
+ALLOWED_UPLOAD_TYPES = [
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/octet-stream",  # Some browsers send this
+]
+ALLOWED_UPLOAD_EXTENSIONS = [".csv", ".xlsx", ".xls"]
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+def _validate_upload_file(file: UploadFile):
+    """Validate uploaded file type, extension, and size."""
+    # Validate extension
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Formato no permitido. Solo CSV y XLSX.",
+        )
+    # Validate content type
+    ct = (file.content_type or "").lower()
+    if ct and ct not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(status_code=415, detail=f"Tipo de archivo no permitido: {ct}")
+
+
 @api_router.post("/upload/history-orders")
+@limiter.limit("10/minute")
 async def upload_history_orders(
+    request: StarletteRequest,
     file: UploadFile = File(...),
     user: dict = Depends(require_role(["coordinator", "agent"]))
 ):
-    if not file.filename.endswith(('.csv', '.xlsx')):
-        raise HTTPException(status_code=400, detail="Solo se permiten archivos CSV o XLSX")
-    
+    _validate_upload_file(file)
+
     contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="El archivo excede 10MB")
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Archivo demasiado grande. Máximo 10 MB.")
     
     try:
         if file.filename.endswith('.csv'):
@@ -1054,16 +1159,17 @@ async def upload_history_orders(
 
 # Upload route-summary XLSX file (Step 2)
 @api_router.post("/upload/route-summary")
+@limiter.limit("10/minute")
 async def upload_route_summary(
+    request: StarletteRequest,
     file: UploadFile = File(...),
     user: dict = Depends(require_role(["coordinator", "agent"]))
 ):
-    if not file.filename.endswith(('.csv', '.xlsx')):
-        raise HTTPException(status_code=400, detail="Solo se permiten archivos CSV o XLSX")
-    
+    _validate_upload_file(file)
+
     contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="El archivo excede 10MB")
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Archivo demasiado grande. Máximo 10 MB.")
     
     try:
         if file.filename.endswith('.csv'):
@@ -2417,7 +2523,9 @@ async def generate_report_excel(
 # ==================== QUALITY REPORTS ====================
 
 @api_router.get("/reports/quality")
+@limiter.limit("30/minute")
 async def get_quality_report(
+    request: StarletteRequest,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     provider_id: Optional[str] = None,
@@ -2452,11 +2560,12 @@ async def get_quality_report(
         {"_id": 0}
     ).to_list(50000)
 
-    # Build provider lookup
+    # Build provider lookup using actual providers collection
+    providers_col = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(100)}
     providers_data = {}
     for j in journeys:
         pid = j.get("provider_id", "unknown")
-        pname = j.get("provider_name", pid)
+        pname = providers_col.get(pid, j.get("provider_name", pid))
         if pid not in providers_data:
             providers_data[pid] = {"name": pname, "routes": 0, "packages": [], "days": set()}
         providers_data[pid]["routes"] += 1
@@ -2553,7 +2662,7 @@ async def export_quality_report(
     import io
     from fastapi.responses import Response as FastResponse
     
-    journey_query = {"date": {"$gte": date_from, "$lte": date_to}, "status": "closed"}
+    journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": "closed"}
     journey_query = apply_assignment_filter(user, journey_query)
     if provider_id:
         journey_query["provider_id"] = provider_id
@@ -2561,6 +2670,9 @@ async def export_quality_report(
     journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
     journey_map = {j["id"]: j for j in journeys}
     journey_ids = list(journey_map.keys())
+
+    # Lookup provider names
+    providers_col = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(100)}
 
     packages = await db.packages.find(
         {"journey_id": {"$in": journey_ids}, "evidence_score": {"$ne": None, "$lt": 100}},
@@ -2572,10 +2684,11 @@ async def export_quality_report(
         rows = []
         for pkg in packages:
             j = journey_map.get(pkg.get("journey_id"), {})
+            pid = j.get("provider_id", "")
             rows.append({
                 "Fecha": j.get("date", ""),
                 "Guía": pkg.get("tracking_number") or pkg.get("order_reference_id", ""),
-                "Proveedor": j.get("provider_name", ""),
+                "Proveedor": providers_col.get(pid, j.get("provider_name", pid)),
                 "Tipo de entrega": pkg.get("evidence_type", ""),
                 "Score": pkg.get("evidence_score", 0),
                 "Evidencias faltantes": ", ".join(pkg.get("evidence_detail", {}).get("missing_items", [])),
@@ -2680,6 +2793,126 @@ async def evaluate_all_evidence(
     }
 
 
+# ==================== BULK PACKAGE STATUS UPDATE ====================
+
+class BulkStatusUpdate(BaseModel):
+    package_ids: list[str]
+    new_status: str  # pending, delivered, failed, returned
+
+
+@api_router.post("/journeys/{journey_id}/packages/bulk-status")
+async def bulk_update_package_status(
+    journey_id: str,
+    data: BulkStatusUpdate,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Bulk update status for multiple packages in a journey."""
+    valid_statuses = ["pending", "delivered", "failed", "returned"]
+    if data.new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Estado inválido. Opciones: {', '.join(valid_statuses)}")
+
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    result = await db.packages.update_many(
+        {"id": {"$in": data.package_ids}, "journey_id": journey_id},
+        {"$set": {"status": data.new_status}},
+    )
+
+    # Recalculate journey counts
+    delivered = await db.packages.count_documents({"journey_id": journey_id, "status": "delivered"})
+    failed = await db.packages.count_documents({"journey_id": journey_id, "status": "failed"})
+    returned = await db.packages.count_documents({"journey_id": journey_id, "status": "returned"})
+    total = await db.packages.count_documents({"journey_id": journey_id})
+    await db.journeys.update_one(
+        {"id": journey_id},
+        {"$set": {
+            "packages_delivered": delivered,
+            "packages_failed": failed,
+            "packages_returned": returned,
+            "packages_total": total,
+        }},
+    )
+
+    await log_audit_event(
+        db, user["id"], user["role"],
+        "bulk_status_update", "packages", journey_id,
+        details=f"Updated {result.modified_count} packages to {data.new_status}",
+    )
+
+    return {
+        "updated": result.modified_count,
+        "new_status": data.new_status,
+        "journey_totals": {
+            "delivered": delivered,
+            "failed": failed,
+            "returned": returned,
+            "total": total,
+        },
+    }
+
+
+# ==================== TOKEN CONSUMPTION TRACKING ====================
+
+@api_router.get("/system/token-consumption")
+async def get_token_consumption(user: dict = Depends(require_role(["coordinator", "developer"]))):
+    """Get AI token consumption data and cost estimates."""
+    # Read from system_config
+    config = await db.system_config.find_one({"key": "token_consumption"}, {"_id": 0})
+    exchange_config = await db.system_config.find_one({"key": "exchange_rate"}, {"_id": 0})
+    exchange_rate = float((exchange_config or {}).get("value", 20.50))
+
+    if not config:
+        consumption = {
+            "total_ai_evaluations": 0,
+            "total_tokens_estimated": 0,
+            "cost_usd_estimated": 0.0,
+        }
+    else:
+        consumption = config.get("value", {})
+
+    # Count actual AI evaluations from DB
+    ai_count = await db.packages.count_documents({"evidence_method": "ai"})
+
+    # Estimate: ~2000 tokens per image evaluation at ~$0.01 per 1K tokens for gpt-4o equivalent
+    est_tokens = ai_count * 2000
+    cost_usd = round(est_tokens / 1000 * 0.01, 2)
+    cost_mxn = round(cost_usd * exchange_rate, 2)
+
+    # Fixed costs estimate
+    fixed_costs_usd = 25.0  # Estimated monthly deployment cost
+
+    return {
+        "ai_evaluations": ai_count,
+        "estimated_tokens": est_tokens,
+        "variable_cost_usd": cost_usd,
+        "variable_cost_mxn": cost_mxn,
+        "fixed_cost_usd": fixed_costs_usd,
+        "fixed_cost_mxn": round(fixed_costs_usd * exchange_rate, 2),
+        "total_cost_usd": round(cost_usd + fixed_costs_usd, 2),
+        "total_cost_mxn": round((cost_usd + fixed_costs_usd) * exchange_rate, 2),
+        "exchange_rate": exchange_rate,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@api_router.put("/system/exchange-rate")
+async def update_exchange_rate(
+    rate: float,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Update the USD/MXN exchange rate."""
+    if rate <= 0:
+        raise HTTPException(status_code=400, detail="Tipo de cambio debe ser positivo")
+    await db.system_config.update_one(
+        {"key": "exchange_rate"},
+        {"$set": {"value": rate, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": user["id"]}},
+        upsert=True,
+    )
+    return {"exchange_rate": rate, "message": "Tipo de cambio actualizado"}
+
+
 # ==================== ROOT ====================
 
 @api_router.get("/")
@@ -2759,21 +2992,62 @@ async def export_heatmap_data(
     group_by: str = "address_cp",
     user: dict = Depends(get_current_user),
 ):
-    """Export heatmap data as Excel."""
-    data = await get_heatmap_data(date_from, date_to, group_by, user)
+    """Export heatmap data as Excel - includes ALL geographic fields regardless of grouping."""
+    # Get journey IDs in date range
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+    j_query = apply_assignment_filter(user, j_query)
 
-    rows = []
-    for a in data["areas"]:
-        rows.append({
-            "Área": a["area"],
-            "Total paquetes": a["total"],
-            "Entregados": a["delivered"],
-            "Fallidos": a["failed"],
-            "Pendientes": a["pending"],
-            "Tasa de entrega %": a["delivery_rate"],
-        })
+    journeys_list = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(500)
+    journey_ids = [j["id"] for j in journeys_list]
 
-    df = pd.DataFrame(rows)
+    if not journey_ids:
+        df = pd.DataFrame(columns=["Código Postal", "Colonia", "Municipio", "Estado", "Zona", "Total", "Entregados", "Fallidos", "Pendientes", "Tasa %"])
+    else:
+        # Full aggregation including all geographic fields
+        pipeline = [
+            {"$match": {"journey_id": {"$in": journey_ids}}},
+            {"$group": {
+                "_id": {
+                    "cp": {"$ifNull": ["$address_cp", ""]},
+                    "colonia": {"$ifNull": ["$address_colonia", ""]},
+                    "municipio": {"$ifNull": ["$address_municipio", ""]},
+                    "estado": {"$ifNull": ["$address_estado", ""]},
+                    "zone": {"$ifNull": ["$zone", ""]},
+                },
+                "total": {"$sum": 1},
+                "delivered": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
+                "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+                "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+            }},
+            {"$sort": {"total": -1}},
+        ]
+
+        results = await db.packages.aggregate(pipeline).to_list(5000)
+
+        rows = []
+        for r in results:
+            gid = r["_id"]
+            total = r["total"]
+            delivered = r["delivered"]
+            rate = round(delivered / total * 100, 1) if total > 0 else 0
+            rows.append({
+                "Código Postal": gid.get("cp", ""),
+                "Colonia": gid.get("colonia", ""),
+                "Municipio": gid.get("municipio", ""),
+                "Estado": gid.get("estado", ""),
+                "Zona": gid.get("zone", ""),
+                "Total paquetes": total,
+                "Entregados": delivered,
+                "Fallidos": r["failed"],
+                "Pendientes": r["pending"],
+                "Tasa de entrega %": rate,
+            })
+        df = pd.DataFrame(rows)
+
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Heatmap")
@@ -3278,12 +3552,17 @@ app.include_router(api_kosmo_router)
 
 # Add audit middleware (must be after CORS)
 app.add_middleware(AuditMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=[
+        "https://lastmile-mvp.preview.emergentagent.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
