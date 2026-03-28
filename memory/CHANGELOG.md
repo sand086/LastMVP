@@ -7,7 +7,13 @@
   - Distribution bar (completos/parciales/incompletos en %)
   - Error summary banner con chips de errores detectados por IA y acción sugerida
   - Package table: Guía, Tipo, Score IA (círculos), Confianza (barra), Errores (chips), Fotos, Intento, Revisión, Acciones
-  - Expandable row con detalle IA, fotos con indicadores de calidad, supervised training
+  - Expandable row con detalle IA, fotos con indicadores de calidad
+  - **Entrenamiento supervisado** siempre visible para coordinadores/developers:
+    - Botones "Sí, es correcta" / "No, corregir"
+    - Campo de texto libre en lenguaje natural para explicar la corrección
+    - Slider + input numérico para modificar score a N%
+    - Checkboxes de errores reales del catálogo
+    - Backend guarda `human_note`, `corrected_score`, `evidence_score_override`, `evidence_score_original`
   - Pagination, filtro "solo alertas"
 - **New backend routes** (`quality_tab_routes.py`):
   - `GET /api/journeys/{id}/quality-summary` — KPIs y resumen de errores

@@ -82,8 +82,11 @@ const OkChip = () => (
 );
 
 /* ═══════ EXPANDED DETAIL PANEL ═══════ */
-const ExpandedPanel = ({ pkg, catalogMap, supervisedEnabled, journeyId, onTrainingDone, canEdit }) => {
-    const [trainingState, setTrainingState] = useState(null); // null | 'correct' | 'incorrect' | 'selecting'
+const ExpandedPanel = ({ pkg, catalogMap, journeyId, onTrainingDone, canEdit }) => {
+    const [trainingState, setTrainingState] = useState(pkg.review_status === 'approved' ? 'correct' : pkg.review_status === 'rejected' ? 'incorrect' : null);
+    const [feedbackMode, setFeedbackMode] = useState(null); // null | 'correct' | 'incorrect'
+    const [humanNote, setHumanNote] = useState('');
+    const [correctedScore, setCorrectedScore] = useState(pkg.ia_score ?? 0);
     const [correctedErrors, setCorrectedErrors] = useState([]);
     const [saving, setSaving] = useState(false);
 
@@ -93,11 +96,7 @@ const ExpandedPanel = ({ pkg, catalogMap, supervisedEnabled, journeyId, onTraini
     const detail = pkg.evidence_detail || {};
     const photosAnalysis = detail.photos_analysis || [];
 
-    const handleTraining = async (label) => {
-        if (label === 'incorrect' && trainingState !== 'selecting') {
-            setTrainingState('selecting');
-            return;
-        }
+    const submitTraining = async (label) => {
         setSaving(true);
         try {
             await saveTrainingSample({
@@ -105,10 +104,13 @@ const ExpandedPanel = ({ pkg, catalogMap, supervisedEnabled, journeyId, onTraini
                 guide: pkg.guide,
                 delivery_type: pkg.delivery_type,
                 human_label: label,
+                human_note: humanNote,
+                corrected_score: label === 'incorrect' ? correctedScore : undefined,
                 corrected_errors: label === 'incorrect' ? correctedErrors : [],
             });
             setTrainingState(label);
-            toast.success(label === 'correct' ? 'Marcada como correcta' : 'Marcada para corrección');
+            setFeedbackMode(null);
+            toast.success(label === 'correct' ? 'Evaluación marcada como correcta' : 'Corrección registrada para entrenamiento IA');
             if (onTrainingDone) onTrainingDone(pkg.guide, label === 'correct' ? 'approved' : 'rejected');
         } catch (e) {
             toast.error(e.response?.data?.detail || 'Error al guardar muestra');
@@ -141,12 +143,12 @@ const ExpandedPanel = ({ pkg, catalogMap, supervisedEnabled, journeyId, onTraini
             {/* Left: Evaluation details */}
             <div>
                 <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: T.textPri }}>Evaluación IA detallada</p>
-                {errors.length > 0 ? errors.map((errKey, i) => {
+                {errors.length > 0 ? errors.map((errKey) => {
                     const cat = catalogMap[errKey] || {};
                     const sev = (pkg.ia_severity || {})[errKey] || 'warning';
                     return (
                         <div key={errKey} style={{ padding: '10px 12px', borderRadius: T.radiusSm, border: `1px solid ${sev === 'critical' ? T.coral + '30' : T.amber + '30'}`, background: sev === 'critical' ? T.coralLt : T.amberLt, marginBottom: 8 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                 {sev === 'critical' ? <AlertTriangle size={13} color={T.coral} /> : <Info size={13} color={T.amber} />}
                                 <span style={{ fontSize: 13, fontWeight: 600, color: sev === 'critical' ? T.coral : T.amber }}>{cat.label || errKey.replace(/_/g, ' ')}</span>
                             </div>
@@ -167,23 +169,80 @@ const ExpandedPanel = ({ pkg, catalogMap, supervisedEnabled, journeyId, onTraini
                     <p style={{ fontSize: 12, color: T.textTer, marginTop: 6 }}>Nota Kosmo: "{pkg.kosmo_note}"</p>
                 )}
 
-                {/* Supervised training block */}
-                {supervisedEnabled && canEdit && (
-                    <div style={{ marginTop: 16, padding: 12, border: `1px dashed ${T.border}`, borderRadius: T.radiusSm, background: T.surface }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                            <span style={{ fontSize: 13, fontWeight: 500 }}>¿La evaluación de IA es correcta?</span>
-                            <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, background: T.purpleLt, color: T.purple, fontWeight: 600 }}>Entrenamiento</span>
+                {/* ══ TRAINING SECTION — always visible for coordinators/developers ══ */}
+                {canEdit && (
+                    <div style={{ marginTop: 16, padding: 14, border: `1px solid ${T.purple}30`, borderRadius: T.radius, background: T.surface }} data-testid={`training-section-${pkg.guide}`}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                            <BookOpen size={14} color={T.purple} />
+                            <span style={{ fontSize: 13, fontWeight: 600, color: T.textPri }}>Entrenamiento supervisado</span>
+                            <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, background: T.purpleLt, color: T.purple, fontWeight: 600 }}>IA Learning</span>
                         </div>
-                        {trainingState === 'correct' ? (
-                            <p style={{ fontSize: 12, color: T.green }}>✓ Marcada como correcta — contribuye al entrenamiento del modelo</p>
-                        ) : trainingState === 'incorrect' ? (
-                            <p style={{ fontSize: 12, color: T.coral }}>✗ Marcada para corrección — registrada en banco de entrenamiento</p>
-                        ) : trainingState === 'selecting' ? (
+
+                        {/* Already submitted state */}
+                        {trainingState === 'correct' && !feedbackMode ? (
+                            <div style={{ padding: '10px 14px', borderRadius: T.radiusSm, background: T.greenLt, border: `1px solid ${T.green}30` }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                                    <CheckCircle2 size={14} color={T.green} />
+                                    <span style={{ fontSize: 13, fontWeight: 600, color: T.green }}>Evaluación aprobada</span>
+                                </div>
+                                <p style={{ fontSize: 11, color: T.textSec }}>Contribuye al entrenamiento del modelo IA</p>
+                                <button onClick={() => { setTrainingState(null); setFeedbackMode(null); }} style={{ marginTop: 8, fontSize: 11, color: T.textTer, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Cambiar decisión</button>
+                            </div>
+                        ) : trainingState === 'incorrect' && !feedbackMode ? (
+                            <div style={{ padding: '10px 14px', borderRadius: T.radiusSm, background: T.coralLt, border: `1px solid ${T.coral}30` }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                                    <XCircle size={14} color={T.coral} />
+                                    <span style={{ fontSize: 13, fontWeight: 600, color: T.coral }}>Evaluación corregida</span>
+                                </div>
+                                <p style={{ fontSize: 11, color: T.textSec }}>Registrada en banco de entrenamiento para mejorar el modelo</p>
+                                <button onClick={() => { setTrainingState(null); setFeedbackMode(null); }} style={{ marginTop: 8, fontSize: 11, color: T.textTer, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Cambiar decisión</button>
+                            </div>
+
+                        /* ── FEEDBACK FORM: Incorrect ── */
+                        ) : feedbackMode === 'incorrect' ? (
                             <div>
-                                <p style={{ fontSize: 12, color: T.textSec, marginBottom: 8 }}>Selecciona los errores correctos:</p>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                                <p style={{ fontSize: 12, fontWeight: 500, color: T.textPri, marginBottom: 10 }}>¿Por qué la evaluación es incorrecta?</p>
+
+                                {/* Natural language explanation */}
+                                <textarea
+                                    value={humanNote}
+                                    onChange={e => setHumanNote(e.target.value)}
+                                    placeholder="Explica en lenguaje natural qué observas diferente a lo que evaluó la IA. Ej: 'Sí hay foto del receptor, es la segunda imagen donde se ve a una persona recibiendo el paquete...'"
+                                    style={{ width: '100%', minHeight: 70, padding: 10, borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12, fontFamily: "'DM Sans',sans-serif", resize: 'vertical', lineHeight: 1.5, color: T.textPri, background: T.surface }}
+                                    data-testid={`training-note-${pkg.guide}`}
+                                />
+
+                                {/* Score override */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '10px 14px', borderRadius: T.radiusSm, background: T.surface2 }}>
+                                    <span style={{ fontSize: 12, fontWeight: 500, color: T.textSec, whiteSpace: 'nowrap' }}>Modificar Score a:</span>
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={100}
+                                        value={correctedScore}
+                                        onChange={e => setCorrectedScore(Number(e.target.value))}
+                                        style={{ flex: 1, accentColor: scoreColor(correctedScore) }}
+                                        data-testid={`training-score-slider-${pkg.guide}`}
+                                    />
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            max={100}
+                                            value={correctedScore}
+                                            onChange={e => setCorrectedScore(Math.max(0, Math.min(100, Number(e.target.value))))}
+                                            style={{ width: 52, padding: '4px 6px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 14, fontWeight: 700, fontFamily: "'DM Mono',monospace", textAlign: 'center', color: scoreColor(correctedScore) }}
+                                            data-testid={`training-score-input-${pkg.guide}`}
+                                        />
+                                        <span style={{ fontSize: 14, fontWeight: 600, color: T.textTer }}>%</span>
+                                    </div>
+                                </div>
+
+                                {/* Error checkboxes */}
+                                <p style={{ fontSize: 12, color: T.textSec, marginTop: 12, marginBottom: 6 }}>Errores reales (selecciona los que aplican):</p>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
                                     {Object.values(catalogMap).filter(e => e.active !== false).map(e => (
-                                        <label key={e.key} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: correctedErrors.includes(e.key) ? T.coralLt : T.surface2, border: `1px solid ${correctedErrors.includes(e.key) ? T.coral + '50' : T.border}` }}>
+                                        <label key={e.key} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: correctedErrors.includes(e.key) ? T.coralLt : T.surface2, border: `1px solid ${correctedErrors.includes(e.key) ? T.coral + '50' : T.border}`, transition: 'all 0.15s' }}>
                                             <input type="checkbox" checked={correctedErrors.includes(e.key)} onChange={(ev) => {
                                                 setCorrectedErrors(prev => ev.target.checked ? [...prev, e.key] : prev.filter(k => k !== e.key));
                                             }} style={{ width: 12, height: 12 }} />
@@ -191,18 +250,77 @@ const ExpandedPanel = ({ pkg, catalogMap, supervisedEnabled, journeyId, onTraini
                                         </label>
                                     ))}
                                 </div>
-                                <button onClick={() => handleTraining('incorrect')} disabled={saving} style={{ padding: '6px 14px', borderRadius: T.radiusSm, background: T.coral, color: '#fff', border: 'none', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans'" }} data-testid={`training-confirm-${pkg.guide}`}>
-                                    {saving ? 'Guardando...' : 'Confirmar corrección'}
-                                </button>
+
+                                {/* Actions */}
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button
+                                        onClick={() => submitTraining('incorrect')}
+                                        disabled={saving}
+                                        style={{ flex: 1, padding: '8px 14px', borderRadius: T.radiusSm, background: T.coral, color: '#fff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", opacity: saving ? 0.6 : 1 }}
+                                        data-testid={`training-submit-incorrect-${pkg.guide}`}
+                                    >
+                                        {saving ? 'Guardando...' : 'Confirmar corrección'}
+                                    </button>
+                                    <button
+                                        onClick={() => { setFeedbackMode(null); setHumanNote(''); setCorrectedScore(pkg.ia_score ?? 0); setCorrectedErrors([]); }}
+                                        style={{ padding: '8px 14px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, background: T.surface, color: T.textSec, fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans'" }}
+                                    >
+                                        Cancelar
+                                    </button>
+                                </div>
                             </div>
+
+                        /* ── FEEDBACK FORM: Correct ── */
+                        ) : feedbackMode === 'correct' ? (
+                            <div>
+                                <p style={{ fontSize: 12, fontWeight: 500, color: T.textPri, marginBottom: 10 }}>¿Algún comentario adicional? <span style={{ color: T.textTer }}>(opcional)</span></p>
+                                <textarea
+                                    value={humanNote}
+                                    onChange={e => setHumanNote(e.target.value)}
+                                    placeholder="Ej: 'La IA evaluó correctamente, la foto del receptor se ve claramente en la imagen 3...'"
+                                    style={{ width: '100%', minHeight: 50, padding: 10, borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12, fontFamily: "'DM Sans',sans-serif", resize: 'vertical', lineHeight: 1.5, color: T.textPri, background: T.surface }}
+                                    data-testid={`training-note-correct-${pkg.guide}`}
+                                />
+                                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                                    <button
+                                        onClick={() => submitTraining('correct')}
+                                        disabled={saving}
+                                        style={{ flex: 1, padding: '8px 14px', borderRadius: T.radiusSm, background: T.green, color: '#fff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", opacity: saving ? 0.6 : 1 }}
+                                        data-testid={`training-submit-correct-${pkg.guide}`}
+                                    >
+                                        {saving ? 'Guardando...' : 'Confirmar aprobación'}
+                                    </button>
+                                    <button
+                                        onClick={() => { setFeedbackMode(null); setHumanNote(''); }}
+                                        style={{ padding: '8px 14px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, background: T.surface, color: T.textSec, fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans'" }}
+                                    >
+                                        Cancelar
+                                    </button>
+                                </div>
+                            </div>
+
+                        /* ── INITIAL BUTTONS ── */
                         ) : (
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <button onClick={() => handleTraining('correct')} disabled={saving} style={{ flex: 1, padding: '8px', borderRadius: T.radiusSm, border: `1px solid ${T.green}40`, background: T.greenLt, color: T.green, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }} data-testid={`training-correct-${pkg.guide}`}>
-                                    <Check size={13} style={{ display: 'inline', marginRight: 4 }} /> Sí, es correcta
-                                </button>
-                                <button onClick={() => handleTraining('incorrect')} disabled={saving} style={{ flex: 1, padding: '8px', borderRadius: T.radiusSm, border: `1px solid ${T.coral}40`, background: T.coralLt, color: T.coral, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'" }} data-testid={`training-incorrect-${pkg.guide}`}>
-                                    <X size={13} style={{ display: 'inline', marginRight: 4 }} /> No, corregir
-                                </button>
+                            <div>
+                                <p style={{ fontSize: 12, color: T.textSec, marginBottom: 10 }}>¿La evaluación de IA (Score: <strong style={{ fontFamily: "'DM Mono'", color: scoreColor(pkg.ia_score || 0) }}>{pkg.ia_score ?? '—'}%</strong>) es correcta?</p>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button
+                                        onClick={() => { setFeedbackMode('correct'); setHumanNote(''); }}
+                                        style={{ flex: 1, padding: '10px', borderRadius: T.radiusSm, border: `1.5px solid ${T.green}50`, background: T.greenLt, color: T.green, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", transition: 'all 0.15s' }}
+                                        data-testid={`training-correct-${pkg.guide}`}
+                                    >
+                                        <CheckCircle2 size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'text-bottom' }} />
+                                        Sí, es correcta
+                                    </button>
+                                    <button
+                                        onClick={() => { setFeedbackMode('incorrect'); setHumanNote(''); setCorrectedScore(pkg.ia_score ?? 0); setCorrectedErrors(errors); }}
+                                        style={{ flex: 1, padding: '10px', borderRadius: T.radiusSm, border: `1.5px solid ${T.coral}50`, background: T.coralLt, color: T.coral, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans'", transition: 'all 0.15s' }}
+                                        data-testid={`training-incorrect-${pkg.guide}`}
+                                    >
+                                        <XCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'text-bottom' }} />
+                                        No, corregir
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -541,7 +659,6 @@ const QualityTabV2 = ({ journeyId, journeyData, onRefreshJourney }) => {
                                                     <ExpandedPanel
                                                         pkg={pkg}
                                                         catalogMap={catalogMap}
-                                                        supervisedEnabled={iaConfig?.supervised_training_enabled}
                                                         journeyId={journeyId}
                                                         onTrainingDone={handleTrainingDone}
                                                         canEdit={canEdit}

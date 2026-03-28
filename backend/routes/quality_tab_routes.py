@@ -203,15 +203,11 @@ async def save_training_sample(
     user: dict = Depends(require_role(["coordinator", "developer"])),
 ):
     """Save a training sample for supervised learning."""
-    # Verify supervised training is enabled
-    ia_doc = await db.config.find_one({"key": "ia_config"}, {"_id": 0})
-    ia_config = ia_doc.get("value", {}) if ia_doc else {}
-    if not ia_config.get("supervised_training_enabled", False):
-        raise HTTPException(status_code=400, detail="Entrenamiento supervisado no está habilitado")
-
     journey_id = payload.get("journey_id")
     guide = payload.get("guide")
     human_label = payload.get("human_label")  # "correct" or "incorrect"
+    human_note = payload.get("human_note", "")
+    corrected_score = payload.get("corrected_score")
     corrected_errors = payload.get("corrected_errors", [])
 
     if not journey_id or not guide or human_label not in ("correct", "incorrect"):
@@ -241,6 +237,8 @@ async def save_training_sample(
         "ia_feedback": pkg.get("ia_feedback", ""),
         "ia_confidence": pkg.get("ia_confidence", 0),
         "human_label": human_label,
+        "human_note": human_note,
+        "corrected_score": corrected_score,
         "corrected_errors": corrected_errors,
         "labeled_by": user.get("name", user["email"]),
         "labeled_at": now,
@@ -248,15 +246,28 @@ async def save_training_sample(
 
     await db.training_samples.insert_one(sample)
 
-    # Update package review status based on training label
+    # Update package review status and optionally override score
     review_status = "approved" if human_label == "correct" else "rejected"
+    update_fields = {
+        "review_status": review_status,
+        "reviewed_by": user.get("name", user["email"]),
+        "reviewed_at": now,
+        "review_note": human_note,
+    }
+
+    # If corrected score provided and label is incorrect, override the score
+    if human_label == "incorrect" and corrected_score is not None:
+        update_fields["evidence_score"] = corrected_score
+        update_fields["evidence_score_override"] = True
+        update_fields["evidence_score_original"] = pkg.get("evidence_score")
+
+    # If corrected errors provided, store them
+    if human_label == "incorrect" and corrected_errors:
+        update_fields["ia_errors_corrected"] = corrected_errors
+
     await db.packages.update_one(
         {"id": pkg["id"]},
-        {"$set": {
-            "review_status": review_status,
-            "reviewed_by": user.get("name", user["email"]),
-            "reviewed_at": now,
-        }}
+        {"$set": update_fields}
     )
 
     total = await db.training_samples.count_documents({})
