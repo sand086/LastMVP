@@ -1,6 +1,24 @@
 # LastMile OS - Changelog
 
-## 2026-03-28 (Session 5)
+## 2026-03-28 (Session 5 continued)
+### Admin IA Module — Complete New Module
+- **New page** `/admin` with 3 tabs accessible only for Developer/Executive roles
+- **Tab 1: Consumo de tokens** — KPI cards (total tokens, costo USD/MXN, evaluaciones, lumi, reportes), 3 cards por entregable con Input/Output/Prompt + promedios por unidad, tabla de eventos paginada con filtros (período, entregable, modelo)
+- **Tab 2: Reporte de rutas (Cubbo ADM)** — Tabla con 25+ columnas del layout Cubbo, filtros (fecha, driver, team, status), totals strip (rutas, días, pkgs, completados, evidencia, costo, km extra), selector de columnas con persistencia en localStorage, **Exportar Excel** funcional (LAYOUT_ADM_Cubbo_{fechas}.xlsx con headers estilizados)
+- **Tab 3: Configuración de costos** — TC USD→MXN editable con historial, tabla de costos por modelo IA (input/output per million tokens), vista previa de costo por entrega, alertas de presupuesto (umbral, reporte semanal)
+- **Token logging** integrado en `evidence_scoring.py` y `lumi.py` — estimación de tokens basada en longitud de texto, log en `token_usage_log` con costo calculado
+- **Backend**: `admin.py` (5 endpoints), `token_logger.py` (helper), seeded config documents
+- **Role-based access**: Solo Developer y Executive pueden acceder al módulo admin
+
+### Supervised Training Enhancement
+- Training section now always visible for coordinators/developers (removed `supervised_training_enabled` dependency)
+- Added natural language text area for human feedback
+- Added score override slider + numeric input
+- Backend accepts `human_note`, `corrected_score`, stores `evidence_score_override` and `evidence_score_original`
+
+### Testing
+- Iteration 18: Quality Tab V2 — 18/18 backend tests (100%)
+- Iteration 19: Admin IA Module — 23/23 backend tests (100%), all frontend verified
 ### Quality Tab V2 — Journey Detail Redesign
 - **New QualityTabV2 component** (`/app/frontend/src/components/QualityTabV2.jsx`):
   - KPI strip: score promedio, completos, incompletos, evaluados IA con confianza
