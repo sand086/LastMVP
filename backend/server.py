@@ -26,6 +26,7 @@ from routes import (
     analytics_router,
     admin_router,
     quality_criteria_router,
+    quality_tab_router,
 )
 from lumi import router as lumi_router
 
@@ -77,6 +78,7 @@ api_router.include_router(dashboard_router)
 api_router.include_router(analytics_router)
 api_router.include_router(admin_router)
 api_router.include_router(quality_criteria_router)
+api_router.include_router(quality_tab_router)
 api_router.include_router(lumi_router)
 
 app.include_router(api_router)
@@ -129,12 +131,38 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
+    # Package indexes
     await db.packages.create_index(
         [("cosmo_route_id", 1), ("order_reference_id", 1)],
         unique=False,
         background=True,
     )
     await db.packages.create_index("order_reference_id", background=True)
+    await db.packages.create_index("journey_id", background=True)
+    await db.packages.create_index("tracking_number", background=True)
+    await db.packages.create_index([("journey_id", 1), ("status", 1)], background=True)
+    await db.packages.create_index("status", background=True)
+    await db.packages.create_index("address_cp", background=True)
+    await db.packages.create_index("evidence_score", background=True)
+
+    # Journey indexes
+    await db.journeys.create_index("date", background=True)
+    await db.journeys.create_index("status", background=True)
+    await db.journeys.create_index("client_id", background=True)
+    await db.journeys.create_index("provider_id", background=True)
+    await db.journeys.create_index([("date", -1), ("status", 1)], background=True)
+
+    # Incident indexes
+    await db.incidents.create_index("journey_id", background=True)
+    await db.incidents.create_index("status", background=True)
+
+    # Config indexes
+    await db.config.create_index("key", unique=True, background=True)
+
+    # Training samples indexes
+    await db.training_samples.create_index("journey_id", background=True)
+    await db.training_samples.create_index("guide", background=True)
+
     start_periodic_sync(db)
 
 

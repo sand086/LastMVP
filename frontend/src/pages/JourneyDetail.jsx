@@ -103,6 +103,7 @@ import {
 import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
 import EvidenceCarousel from '../components/EvidenceCarousel';
+import QualityTabV2 from '../components/QualityTabV2';
 
 // Quality Tab Component
 const QualityTab = ({ journey, packages, onEvaluate, onRefreshJourney }) => {
@@ -2283,15 +2284,7 @@ const JourneyDetail = () => {
 
                 {/* Tab: Calidad */}
                 <TabsContent value="calidad" className="space-y-6" data-testid="tab-calidad-content">
-                    <QualityTab journey={journey} packages={journey.packages || []} onEvaluate={async () => {
-                        try {
-                            await evaluateJourneyQuality(journey.id);
-                            toast.success('Evaluación de calidad actualizada');
-                            fetchJourney();
-                        } catch (e) {
-                            toast.error('Error al evaluar calidad');
-                        }
-                    }} onRefreshJourney={fetchJourney} />
+                    <QualityTabV2 journeyId={journey.id} journeyData={journey} onRefreshJourney={fetchJourney} />
                 </TabsContent>
             </Tabs>
 

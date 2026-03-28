@@ -42,15 +42,15 @@ CRITERIOS POR TIPO DE ENTREGA:
 
 **Entrega Fallida:**
 1. Foto de la fachada antes de retirarse
-2. Captura de pantalla mostrando al menos 2 llamadas al destinatario
-(Nota: Kosmo no permite agregar notas del driver en entregas fallidas, NO evalúes la ausencia de nota como criterio faltante)
+(Nota: Kosmo no permite agregar notas del driver en entregas fallidas)
 
-INSTRUCCIONES:
-- Analiza TODAS las imágenes proporcionadas
-- Identifica qué tipo de foto es cada una (fachada, paquete, receptor, llamadas, firma)
-- Verifica si los números de guía son legibles
-- Verifica si hay timestamps visibles
-- Evalúa la calidad general de cada foto (iluminación, enfoque, ángulo)
+CLAVES DE ERROR DISPONIBLES:
+- falta_fachada: Falta foto de fachada del domicilio
+- guia_no_visible: Guía de envío no visible o ilegible
+- foto_borrosa: Foto borrosa o sin foco
+- sin_foto_receptor: Falta foto del receptor o tercero
+- paquete_fuera_frame: Paquete fuera de encuadre o cortado
+- falta_whatsapp: Falta captura de WhatsApp o SMS
 
 RESPONDE SIEMPRE en formato JSON con esta estructura exacta:
 {
@@ -77,9 +77,12 @@ RESPONDE SIEMPRE en formato JSON con esta estructura exacta:
     "min_2_llamadas": true/false
   },
   "overall_score": 0-100,
+  "confidence": 0.0-1.0,
+  "errors": ["clave_error_1", "clave_error_2"],
+  "severity": {"clave_error_1": "critical", "clave_error_2": "warning"},
   "missing_items": ["lista de items faltantes según criterios Cubbo"],
-  "alerts": ["alertas importantes como guía ilegible, foto borrosa, etc"],
-  "ai_observations": "Observaciones generales del evaluador sobre la calidad de evidencia"
+  "alerts": ["alertas importantes"],
+  "feedback": "Explicación concisa en español de los hallazgos principales"
 }"""
 
 
@@ -267,10 +270,18 @@ async def evaluate_single_package_ai(
             score = ai_result.get("overall_score", 0)
             missing = ai_result.get("missing_items", [])
             alerts = ai_result.get("alerts", [])
+            confidence = ai_result.get("confidence", 0.5)
+            ia_errors = ai_result.get("errors", [])
+            ia_severity = ai_result.get("severity", {})
+            feedback = ai_result.get("feedback", ai_result.get("ai_observations", ""))
 
             return {
                 "evidence_type": evidence_type,
                 "evidence_score": score,
+                "ia_confidence": confidence,
+                "ia_errors": ia_errors,
+                "ia_severity": ia_severity,
+                "ia_feedback": feedback,
                 "evidence_detail": {
                     "proof_count": len(proof_urls),
                     "has_driver_note": bool(driver_note.strip()),
@@ -279,7 +290,7 @@ async def evaluate_single_package_ai(
                     "alerts": alerts,
                     "photos_analysis": ai_result.get("photos_analysis", []),
                     "criteria_met": ai_result.get("criteria_met", {}),
-                    "ai_observations": ai_result.get("ai_observations", ""),
+                    "ai_observations": feedback,
                 },
                 "evidence_evaluated_at": now_iso,
                 "evidence_method": "ai",

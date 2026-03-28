@@ -1,6 +1,7 @@
 """
 Dashboard routes: stats, incidents breakdown, provider comparison, search.
 """
+import asyncio
 from fastapi import APIRouter, Depends
 from typing import Optional
 from datetime import datetime, timezone
@@ -8,6 +9,10 @@ from datetime import datetime, timezone
 from dependencies import db, get_current_user, apply_assignment_filter, _next_day
 
 router = APIRouter(tags=["Dashboard"])
+
+
+async def _zero():
+    return 0
 
 
 @router.get("/packages/search")
@@ -52,21 +57,24 @@ async def get_dashboard_stats(
 
     base_query = apply_assignment_filter(user, base_query)
 
+    # Parallel: count journeys by status + fetch all journeys
     active_q = {**base_query, "status": "in_progress"}
-    active_journeys = await db.journeys.count_documents(active_q)
     closed_q = {**base_query, "status": "closed"}
-    closed_journeys = await db.journeys.count_documents(closed_q)
-    total_journeys = await db.journeys.count_documents(base_query)
 
-    journeys_today = await db.journeys.find(base_query, {"_id": 0}).to_list(500)
+    active_journeys, closed_journeys, total_journeys, journeys_today = await asyncio.gather(
+        db.journeys.count_documents(active_q),
+        db.journeys.count_documents(closed_q),
+        db.journeys.count_documents(base_query),
+        db.journeys.find(base_query, {"_id": 0, "id": 1, "status": 1, "close_data": 1}).to_list(500),
+    )
     journey_ids = [j["id"] for j in journeys_today]
 
-    total_packages = await db.packages.count_documents({"journey_id": {"$in": journey_ids}})
-    delivered_packages = await db.packages.count_documents({"journey_id": {"$in": journey_ids}, "status": "delivered"})
-
-    open_incidents = await db.incidents.count_documents({
-        "journey_id": {"$in": journey_ids}, "status": "open"
-    })
+    # Parallel: count packages + delivered + incidents
+    total_packages, delivered_packages, open_incidents = await asyncio.gather(
+        db.packages.count_documents({"journey_id": {"$in": journey_ids}}) if journey_ids else _zero(),
+        db.packages.count_documents({"journey_id": {"$in": journey_ids}, "status": "delivered"}) if journey_ids else _zero(),
+        db.incidents.count_documents({"journey_id": {"$in": journey_ids}, "status": "open"}) if journey_ids else _zero(),
+    )
 
     delivery_rate = (delivered_packages / total_packages * 100) if total_packages > 0 else 0
 

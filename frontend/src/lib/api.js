@@ -233,4 +233,10 @@ export const sendLumiMessage = (data) => api.post('/chat/lumi', data);
 export const getQualitySettings = () => api.get('/config/quality-settings');
 export const patchQualitySettings = (section, value) => api.patch('/config/quality-settings', { section, value });
 
+// Quality Tab v2
+export const getQualitySummary = (journeyId) => api.get(`/journeys/${journeyId}/quality-summary`);
+export const getPackagesQuality = (journeyId, params) => api.get(`/journeys/${journeyId}/packages-quality`, { params });
+export const saveTrainingSample = (data) => api.post('/training/samples', data);
+export const updatePackageReview = (journeyId, guide, data) => api.patch(`/journeys/${journeyId}/packages/${encodeURIComponent(guide)}/review`, data);
+
 export default api;
