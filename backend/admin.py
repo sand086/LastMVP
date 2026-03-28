@@ -17,7 +17,7 @@ from dependencies import db, get_current_user, require_role
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin Module"])
 
-ADMIN_ROLES = ["developer", "ejecutivo", "executive"]
+ADMIN_ROLES = ["developer", "ejecutivo", "executive", "coordinator"]
 EDIT_ROLES = ["developer"]
 
 

@@ -502,7 +502,10 @@ const JourneyDetail = () => {
 
     const [journey, setJourney] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('inicio');
+    const [activeTab, setActiveTab] = useState(() => {
+        // Smart default: show Calidad for routes with packages, Inicio for new routes
+        return 'inicio';
+    });
     const initialTabSet = React.useRef(false);
 
     // Evidence Carousel state
@@ -734,12 +737,15 @@ const JourneyDetail = () => {
             // Set active tab based on status (only on initial load)
             if (!initialTabSet.current) {
                 initialTabSet.current = true;
-                if (res.data.status === 'scheduled') {
+                const hasPackages = (res.data.packages_total || 0) > 0;
+                if (res.data.status === 'scheduled' && hasPackages) {
+                    setActiveTab('calidad');
+                } else if (res.data.status === 'scheduled') {
                     setActiveTab('inicio');
                 } else if (res.data.status === 'in_progress') {
                     setActiveTab('incidencias');
                 } else {
-                    setActiveTab('fin');
+                    setActiveTab('calidad');
                 }
             }
         } catch (error) {

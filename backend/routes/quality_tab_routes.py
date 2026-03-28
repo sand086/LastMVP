@@ -200,7 +200,7 @@ async def get_packages_quality(
 @router.post("/training/samples")
 async def save_training_sample(
     payload: dict,
-    user: dict = Depends(require_role(["coordinator", "developer"])),
+    user: dict = Depends(require_role(["coordinator", "developer", "agent"])),
 ):
     """Save a training sample for supervised learning."""
     journey_id = payload.get("journey_id")

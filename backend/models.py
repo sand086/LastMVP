@@ -81,6 +81,9 @@ class JourneyStartData(BaseModel):
     city: Optional[str] = None
     max_packages: Optional[int] = None
 
+    class Config:
+        extra = "allow"
+
 class JourneyCloseData(BaseModel):
     closed_at: str
     odometer_end: int

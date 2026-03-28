@@ -5,7 +5,7 @@ Modular FastAPI application for last-mile delivery management.
 from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request as StarletteRequest
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 import logging
 import os
@@ -84,6 +84,12 @@ api_router.include_router(admin_module_router)
 api_router.include_router(lumi_router)
 
 app.include_router(api_router)
+
+
+# Backward compat redirect for /api-docs
+@app.get("/api-docs")
+async def redirect_api_docs():
+    return RedirectResponse(url="/documentation", status_code=301)
 
 # ==================== WEBSOCKET ENDPOINT ====================
 

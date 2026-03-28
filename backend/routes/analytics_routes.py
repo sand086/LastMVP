@@ -167,7 +167,7 @@ async def get_quality_report(
     if not date_to:
         date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    journey_query = {"date": {"$gte": date_from, "$lte": date_to}, "status": "closed"}
+    journey_query = {"date": {"$gte": date_from, "$lte": date_to}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
     journey_query = apply_assignment_filter(user, journey_query)
     if provider_id:
         journey_query["provider_id"] = provider_id
@@ -280,7 +280,7 @@ async def export_quality_report(
     provider_id: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
 ):
-    journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": "closed"}
+    journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
     journey_query = apply_assignment_filter(user, journey_query)
     if provider_id:
         journey_query["provider_id"] = provider_id

@@ -21,7 +21,7 @@ router = APIRouter(tags=["Auth"])
 
 
 @router.post("/auth/login", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@limiter.limit("20/minute")
 async def login(data: UserLogin, request: StarletteRequest):
     now = datetime.now(timezone.utc)
     client_ip = request.headers.get(

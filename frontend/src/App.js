@@ -124,16 +124,17 @@ function AppRoutes() {
             <Route 
                 path="/documentation" 
                 element={
-                    <ProtectedRoute allowedRoles={['coordinator', 'executive']}>
+                    <ProtectedRoute allowedRoles={['coordinator', 'executive', 'developer']}>
                         <ApiDocumentation />
                     </ProtectedRoute>
                 } 
             />
+            <Route path="/api-docs" element={<Navigate to="/documentation" replace />} />
 
             <Route 
                 path="/admin" 
                 element={
-                    <ProtectedRoute allowedRoles={['developer', 'executive', 'ejecutivo']}>
+                    <ProtectedRoute allowedRoles={['developer', 'executive', 'ejecutivo', 'coordinator']}>
                         <AdminPage />
                     </ProtectedRoute>
                 } 

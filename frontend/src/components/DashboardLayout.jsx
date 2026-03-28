@@ -37,7 +37,7 @@ const navItems = [
     { path: '/documentation', label: 'API & Reportes', icon: Code, roles: ['coordinator', 'executive', 'developer'] },
     { path: '/settings', label: 'Configuración', icon: Settings, roles: ['coordinator', 'developer'] },
     { path: '/quality-criteria', label: 'Criterios Calidad', icon: ClipboardCheck, roles: ['coordinator', 'developer'] },
-    { path: '/admin', label: 'Admin IA', icon: Cpu, roles: ['developer', 'executive', 'ejecutivo'] },
+    { path: '/admin', label: 'Admin IA', icon: Cpu, roles: ['developer', 'executive', 'ejecutivo', 'coordinator'] },
 ];
 
 const systemNavItems = [

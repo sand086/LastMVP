@@ -38,7 +38,7 @@ export default function AdminPage() {
     const [clientId, setClientId] = useState('');
 
     useEffect(() => {
-        if (user && !['developer', 'ejecutivo', 'executive'].includes(user.role)) {
+        if (user && !['developer', 'ejecutivo', 'executive', 'coordinator'].includes(user.role)) {
             toast.error('Sin permisos para acceder al módulo admin');
             navigate('/dashboard');
         }
