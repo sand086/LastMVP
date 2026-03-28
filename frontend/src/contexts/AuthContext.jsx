@@ -75,7 +75,7 @@ export const AuthProvider = ({ children }) => {
         return roles.includes(user.role);
     };
 
-    const canEdit = () => hasRole(['agent', 'coordinator']);
+    const canEdit = () => hasRole(['agent', 'coordinator', 'developer']);
     const isCoordinator = () => hasRole(['coordinator', 'developer']);
     const isExecutive = () => hasRole('executive');
 

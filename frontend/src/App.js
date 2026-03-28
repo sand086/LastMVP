@@ -106,7 +106,7 @@ function AppRoutes() {
             <Route 
                 path="/layout" 
                 element={
-                    <ProtectedRoute allowedRoles={['agent', 'coordinator']}>
+                    <ProtectedRoute allowedRoles={['agent', 'coordinator', 'developer']}>
                         <Layout />
                     </ProtectedRoute>
                 } 

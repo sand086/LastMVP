@@ -737,15 +737,14 @@ const JourneyDetail = () => {
             // Set active tab based on status (only on initial load)
             if (!initialTabSet.current) {
                 initialTabSet.current = true;
-                const hasPackages = (res.data.packages_total || 0) > 0;
-                if (res.data.status === 'scheduled' && hasPackages) {
-                    setActiveTab('calidad');
-                } else if (res.data.status === 'scheduled') {
+                if (res.data.status === 'scheduled' && !res.data.start_data) {
                     setActiveTab('inicio');
                 } else if (res.data.status === 'in_progress') {
                     setActiveTab('incidencias');
-                } else {
+                } else if (res.data.status === 'closed') {
                     setActiveTab('calidad');
+                } else {
+                    setActiveTab('inicio');
                 }
             }
         } catch (error) {
