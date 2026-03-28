@@ -1009,6 +1009,305 @@ async def get_reports_heatmap(
 
 
 
+# ==================== ATTEMPTS (NEW) ====================
+
+@router.get("/reports/attempts")
+async def report_attempts(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Delivery attempts distribution and retry causes."""
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lte"] = date_to
+    if client_id:
+        j_query["client_id"] = client_id
+    if provider_id:
+        j_query["provider_id"] = provider_id
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(5000)
+    journey_ids = [j["id"] for j in journeys]
+    if not journey_ids:
+        return {
+            "first_attempt": {"count": 0, "pct": 0},
+            "second_attempt": {"count": 0, "pct": 0},
+            "third_attempt": {"count": 0, "pct": 0},
+            "retry_causes": {},
+        }
+
+    # Count packages by attempt_number if exists, else infer
+    pkgs = await db.packages.find(
+        {"journey_id": {"$in": journey_ids}},
+        {"_id": 0, "status": 1, "attempt_number": 1, "retry_cause": 1},
+    ).to_list(50000)
+
+    total = len(pkgs)
+    first = sum(1 for p in pkgs if p.get("attempt_number", 1) == 1)
+    second = sum(1 for p in pkgs if p.get("attempt_number") == 2)
+    third = sum(1 for p in pkgs if p.get("attempt_number", 0) >= 3)
+
+    # If no attempt_number data, estimate from delivery/fail ratios
+    if second == 0 and third == 0 and total > 0:
+        delivered = sum(1 for p in pkgs if p.get("status") == "delivered")
+        failed = sum(1 for p in pkgs if p.get("status") == "failed")
+        pending = total - delivered - failed
+        first = delivered
+        second = failed
+        third = pending
+
+    pct = lambda n: round(n / total * 100) if total > 0 else 0
+
+    # Retry causes from incidents or package data
+    incidents = await db.incidents.find(
+        {"journey_id": {"$in": journey_ids}},
+        {"_id": 0, "incident_type": 1},
+    ).to_list(10000)
+
+    cause_map = {
+        "driver_management": 0,
+        "client_absent": 0,
+        "wrong_address": 0,
+        "zone_no_access": 0,
+    }
+    for inc in incidents:
+        itype = (inc.get("incident_type") or "").lower()
+        if "driver" in itype or "mensajero" in itype or "tardanza" in itype:
+            cause_map["driver_management"] += 1
+        elif "ausente" in itype or "destinatario" in itype or "cliente" in itype:
+            cause_map["client_absent"] += 1
+        elif "dirección" in itype or "address" in itype or "direccion" in itype:
+            cause_map["wrong_address"] += 1
+        elif "zona" in itype or "acceso" in itype:
+            cause_map["zone_no_access"] += 1
+        else:
+            cause_map["driver_management"] += 1
+
+    cause_total = sum(cause_map.values()) or 1
+    retry_causes = {}
+    for k, v in cause_map.items():
+        retry_causes[k] = {"count": v, "pct": round(v / cause_total * 100)}
+
+    return {
+        "first_attempt": {"count": first, "pct": pct(first)},
+        "second_attempt": {"count": second, "pct": pct(second)},
+        "third_attempt": {"count": third, "pct": pct(third)},
+        "retry_causes": retry_causes,
+        "total_packages": total,
+    }
+
+
+# ==================== SLA (NEW) ====================
+
+@router.get("/reports/sla")
+async def report_sla(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """SLA vs Target reporting."""
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lte"] = date_to
+    if client_id:
+        j_query["client_id"] = client_id
+    if provider_id:
+        j_query["provider_id"] = provider_id
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    providers_map = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+
+    total_pkg = sum(j.get("packages_total", 0) for j in journeys)
+    total_delivered = sum(j.get("packages_delivered", 0) for j in journeys)
+    actual_sla = round(total_delivered / total_pkg * 100, 1) if total_pkg > 0 else 0
+
+    # Load brackets from config
+    sla_config = await db.config.find_one({"key": "sla_targets"}, {"_id": 0})
+    brackets = [
+        {"label": "Mes 1-2", "target": 65, "status": "exceeded"},
+        {"label": "Mes 3-4", "target": 75, "status": "active"},
+        {"label": "Mes 5+", "target": 90, "status": "pending"},
+    ]
+    if sla_config and sla_config.get("brackets"):
+        brackets = sla_config["brackets"]
+
+    active_target = 75
+    for b in brackets:
+        if b.get("status") == "active":
+            active_target = b["target"]
+            break
+
+    # By provider
+    prov_groups = {}
+    for j in journeys:
+        pid = j.get("provider_id", "")
+        pname = providers_map.get(pid, "Sin proveedor")
+        if pname not in prov_groups:
+            prov_groups[pname] = {"delivered": 0, "total": 0, "provider_id": pid}
+        prov_groups[pname]["delivered"] += j.get("packages_delivered", 0)
+        prov_groups[pname]["total"] += j.get("packages_total", 0)
+
+    by_provider = []
+    for pname, pg in prov_groups.items():
+        sla = round(pg["delivered"] / pg["total"] * 100, 1) if pg["total"] > 0 else 0
+        gap = round(sla - active_target, 1)
+        by_provider.append({
+            "provider_name": pname,
+            "provider_id": pg["provider_id"],
+            "sla_actual": sla,
+            "target": active_target,
+            "gap_pp": gap,
+            "status": "above" if sla >= active_target else "below",
+        })
+
+    # By driver
+    driver_groups = {}
+    for j in journeys:
+        dname = j.get("driver_name") or "Sin driver"
+        if dname not in driver_groups:
+            driver_groups[dname] = {"delivered": 0, "total": 0}
+        driver_groups[dname]["delivered"] += j.get("packages_delivered", 0)
+        driver_groups[dname]["total"] += j.get("packages_total", 0)
+
+    by_driver = []
+    for dname, dg in sorted(driver_groups.items(), key=lambda x: x[1]["delivered"] / max(x[1]["total"], 1), reverse=True):
+        sla = round(dg["delivered"] / dg["total"] * 100, 1) if dg["total"] > 0 else 0
+        by_driver.append({
+            "driver_name": dname,
+            "sla_actual": sla,
+            "target": active_target,
+            "gap_pp": round(sla - active_target, 1),
+            "status": "above" if sla >= active_target else "below",
+        })
+
+    return {
+        "consolidated": {"actual": actual_sla, "target": active_target},
+        "by_provider": by_provider,
+        "by_driver": by_driver[:10],
+        "brackets": brackets,
+    }
+
+
+@router.patch("/config/sla-targets")
+async def update_sla_targets(
+    payload: dict,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Persist SLA brackets configuration."""
+    brackets = payload.get("brackets", [])
+    if not brackets:
+        raise HTTPException(status_code=400, detail="brackets requeridos")
+
+    await db.config.update_one(
+        {"key": "sla_targets"},
+        {"$set": {"brackets": brackets, "updated_by": user.get("email"), "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"success": True, "message": "SLA targets actualizados"}
+
+
+# ==================== GENERATE AI REPORT (UPDATED) ====================
+
+@router.post("/reports/generate-ai")
+async def generate_ai_report(
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Generate AI narrative report for the selected period and sections."""
+    period = payload.get("period", "7d")
+    date_from = payload.get("date_from")
+    date_to = payload.get("date_to")
+    client_id = payload.get("client_id")
+    provider_id = payload.get("provider_id")
+    sections = payload.get("sections", ["providers", "drivers", "incidents", "quality"])
+
+    # Resolve dates from period if not provided
+    if not date_from or not date_to:
+        from lumi import _resolve_period
+        date_from, date_to, _ = _resolve_period(period)
+
+    j_query = {"date": {"$gte": date_from, "$lte": date_to}}
+    if client_id:
+        j_query["client_id"] = client_id
+    if provider_id:
+        j_query["provider_id"] = provider_id
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
+    if not journeys:
+        return {"narrative": "No hay datos de rutas para el período seleccionado.", "period": f"{date_from} — {date_to}"}
+
+    journey_ids = [j["id"] for j in journeys]
+    providers_map = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    incidents = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
+
+    total_pkg = sum(j.get("packages_total", 0) for j in journeys)
+    total_delivered = sum(j.get("packages_delivered", 0) for j in journeys)
+    total_failed = sum(j.get("packages_failed", 0) for j in journeys)
+    total_km = sum((j.get("close_data") or {}).get("km_traveled", 0) for j in journeys)
+    delivery_rate = round(total_delivered / total_pkg * 100, 1) if total_pkg > 0 else 0
+
+    data_block = f"""PERÍODO: {date_from} a {date_to}
+RESUMEN: {len(journeys)} rutas, {total_pkg} paquetes, {total_delivered} entregados, {total_failed} fallidos
+TASA DE ENTREGA: {delivery_rate}%
+KM TOTALES: {total_km}
+INCIDENCIAS: {len(incidents)}
+
+SECCIONES SOLICITADAS: {', '.join(sections)}"""
+
+    if "providers" in sections:
+        prov_data = {}
+        for j in journeys:
+            pn = providers_map.get(j.get("provider_id", ""), "Desconocido")
+            if pn not in prov_data:
+                prov_data[pn] = {"routes": 0, "delivered": 0, "total": 0}
+            prov_data[pn]["routes"] += 1
+            prov_data[pn]["delivered"] += j.get("packages_delivered", 0)
+            prov_data[pn]["total"] += j.get("packages_total", 0)
+        data_block += "\n\nPROVEEDORES:\n"
+        for pn, pd in prov_data.items():
+            r = round(pd["delivered"] / pd["total"] * 100, 1) if pd["total"] > 0 else 0
+            data_block += f"- {pn}: {pd['routes']} rutas, {pd['delivered']}/{pd['total']} ({r}%)\n"
+
+    if "incidents" in sections:
+        inc_types = {}
+        for inc in incidents:
+            t = inc.get("incident_type", "Otro")
+            inc_types[t] = inc_types.get(t, 0) + 1
+        data_block += f"\nINCIDENCIAS POR TIPO: {inc_types}\n"
+
+    llm_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not llm_key:
+        return {"narrative": "Clave de IA no configurada.", "period": f"{date_from} — {date_to}"}
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        chat = LlmChat(
+            api_key=llm_key,
+            session_id=f"report-ai-{uuid.uuid4()}",
+            system_message="Eres un analista de operaciones logísticas de última milla. Genera un reporte ejecutivo narrativo en español con insights accionables. Usa datos duros. Máximo 500 palabras. Formato con **negritas** para datos clave.",
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+        msg = UserMessage(text=f"Genera un reporte ejecutivo para estos datos:\n\n{data_block}")
+        narrative = await chat.send_message(msg)
+        return {"narrative": narrative, "period": f"{date_from} — {date_to}"}
+    except Exception as e:
+        logger.error(f"AI report error: {e}")
+        return {"narrative": "Error al generar el reporte con IA. Intenta de nuevo.", "period": f"{date_from} — {date_to}"}
+
+
+
+
 @router.get("/reports/schema")
 async def report_schema():
     return {

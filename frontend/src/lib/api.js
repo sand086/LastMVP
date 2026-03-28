@@ -220,4 +220,13 @@ export const resetQualityCriteria = () => api.post('/quality/criteria/reset');
 export const rescrapePackage = (packageId) => api.post(`/packages/${packageId}/rescrape`);
 export const batchRescrapeJourney = (journeyId) => api.post(`/journeys/${journeyId}/batch-rescrape`);
 
+// Reports v2
+export const getReportAttempts = (params) => api.get('/reports/attempts', { params });
+export const getReportSla = (params) => api.get('/reports/sla', { params });
+export const updateSlaTargets = (brackets) => api.patch('/config/sla-targets', { brackets });
+export const generateAiReport = (data) => api.post('/reports/generate-ai', data);
+
+// Lumi Chat
+export const sendLumiMessage = (data) => api.post('/chat/lumi', data);
+
 export default api;

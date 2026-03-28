@@ -27,6 +27,7 @@ from routes import (
     admin_router,
     quality_criteria_router,
 )
+from lumi import router as lumi_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -76,6 +77,7 @@ api_router.include_router(dashboard_router)
 api_router.include_router(analytics_router)
 api_router.include_router(admin_router)
 api_router.include_router(quality_criteria_router)
+api_router.include_router(lumi_router)
 
 app.include_router(api_router)
 

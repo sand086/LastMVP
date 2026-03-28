@@ -16,6 +16,7 @@ import SystemLogs from './pages/SystemLogs';
 import SystemErrors from './pages/SystemErrors';
 import SystemIntegrity from './pages/SystemIntegrity';
 import QualityCriteria from './pages/QualityCriteria';
+import LumiChat from './components/LumiChat';
 import './App.css';
 
 // Protected route wrapper
@@ -193,6 +194,7 @@ function App() {
         <BrowserRouter>
             <AuthProvider>
                 <AppRoutes />
+                <LumiChatWrapper />
                 <Toaster 
                     position="top-right"
                     richColors
@@ -201,6 +203,12 @@ function App() {
             </AuthProvider>
         </BrowserRouter>
     );
+}
+
+function LumiChatWrapper() {
+    const { isAuthenticated } = useAuth();
+    if (!isAuthenticated) return null;
+    return <LumiChat />;
 }
 
 export default App;
