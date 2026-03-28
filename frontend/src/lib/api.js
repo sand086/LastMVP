@@ -229,4 +229,8 @@ export const generateAiReport = (data) => api.post('/reports/generate-ai', data)
 // Lumi Chat
 export const sendLumiMessage = (data) => api.post('/chat/lumi', data);
 
+// Quality Settings v2 (master endpoints)
+export const getQualitySettings = () => api.get('/config/quality-settings');
+export const patchQualitySettings = (section, value) => api.patch('/config/quality-settings', { section, value });
+
 export default api;

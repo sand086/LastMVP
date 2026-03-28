@@ -146,3 +146,158 @@ async def reset_quality_criteria(
     )
 
     return {"message": "Criterios restablecidos a valores predeterminados", "criteria": default_with_meta}
+
+
+# ==================== MASTER QUALITY SETTINGS ====================
+
+DEFAULT_KPI_TARGETS = {
+    "score_min_acceptable": 70,
+    "score_target": 90,
+    "score_excellent": 95,
+    "weights": {"delivery_rate": 40, "visit_rate": 30, "evidence_quality": 30},
+    "critical_failure_cap": {"trigger_key": "foto_paquete_guia", "max_score_if_failed": 40},
+}
+
+DEFAULT_SLA_BRACKETS = [
+    {"id": "bracket_1", "label": "Mes 1-2", "description": "Arranque operativo", "target": 65, "status": "exceeded"},
+    {"id": "bracket_2", "label": "Mes 3-4", "description": "Crecimiento", "target": 75, "status": "active"},
+    {"id": "bracket_3", "label": "Mes 5+", "description": "Objetivo estable", "target": 90, "status": "pending"},
+]
+
+DEFAULT_SLA_TARGETS_BY_RUBRO = {
+    "delivery_rate": {"target": 75, "label": "Tasa de entrega"},
+    "visit_rate": {"target": 85, "label": "Tasa de visita efectiva"},
+    "evidence_quality": {"target": 90, "label": "Calidad de evidencias"},
+}
+
+DEFAULT_PENALTY_RULES = [
+    {"id": "p1", "label": "Sin evidencias (0 fotos)", "discount_pct": 100, "applies_to": "provider"},
+    {"id": "p2", "label": "Evidencia parcial (1-2 fotos)", "discount_pct": 50, "applies_to": "provider"},
+    {"id": "p3", "label": "Guía no legible en foto", "discount_pct": 60, "applies_to": "driver"},
+    {"id": "p4", "label": "Sin nota en entrega a terceros", "discount_pct": 30, "applies_to": "driver"},
+]
+
+DEFAULT_STRIKE_POLICY = {
+    "days_below_min_for_strike": 3,
+    "strikes_for_formal_warning": 1,
+    "strikes_for_cubbo_escalation": 3,
+}
+
+DEFAULT_IA_CONFIG = {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5-20250929",
+    "enabled": True,
+    "auto_eval_on_close": False,
+    "confidence_approve": 80,
+    "confidence_review": 60,
+    "system_prompt": "",
+    "supervised_training_enabled": False,
+}
+
+DEFAULT_ERROR_CATALOG = [
+    {"id": "falta_fachada", "key": "falta_fachada", "label": "Falta foto de fachada del domicilio", "applies_to": ["exitosa", "terceros", "fallida"], "active": True},
+    {"id": "guia_no_visible", "key": "guia_no_visible", "label": "Guía de envío no visible o ilegible", "applies_to": ["exitosa", "terceros", "fallida"], "active": True},
+    {"id": "foto_borrosa", "key": "foto_borrosa", "label": "Foto borrosa o sin foco", "applies_to": ["exitosa", "terceros", "fallida"], "active": True},
+    {"id": "sin_foto_receptor", "key": "sin_foto_receptor", "label": "Falta foto del receptor o tercero", "applies_to": ["exitosa", "terceros"], "active": True},
+    {"id": "paquete_fuera_frame", "key": "paquete_fuera_frame", "label": "Paquete fuera de encuadre o cortado", "applies_to": ["exitosa", "terceros", "fallida"], "active": True},
+    {"id": "falta_whatsapp", "key": "falta_whatsapp", "label": "Falta captura de WhatsApp o SMS de notificación", "applies_to": ["fallida"], "active": True},
+]
+
+CONFIG_DEFAULTS = {
+    "kpi_targets": DEFAULT_KPI_TARGETS,
+    "sla_brackets": DEFAULT_SLA_BRACKETS,
+    "sla_targets_by_rubro": DEFAULT_SLA_TARGETS_BY_RUBRO,
+    "penalty_rules": DEFAULT_PENALTY_RULES,
+    "strike_policy": DEFAULT_STRIKE_POLICY,
+    "ia_config": DEFAULT_IA_CONFIG,
+    "error_catalog": DEFAULT_ERROR_CATALOG,
+}
+
+QUALITY_CONFIG_KEYS = list(CONFIG_DEFAULTS.keys())
+
+
+@router.get("/config/quality-settings")
+async def get_quality_settings(
+    user: dict = Depends(require_role(["coordinator", "developer", "executive"])),
+):
+    """Return all quality configuration documents in a single response."""
+    result = {}
+    for key in QUALITY_CONFIG_KEYS:
+        doc = await db.config.find_one({"key": key}, {"_id": 0})
+        if doc:
+            result[key] = doc.get("value", CONFIG_DEFAULTS[key])
+        else:
+            result[key] = CONFIG_DEFAULTS[key]
+
+    # Enrich error_catalog with frequency_last_30d
+    thirty_days_ago = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=30)).isoformat()
+    errors = result.get("error_catalog", [])
+    for err in errors:
+        count = await db.training_samples.count_documents({
+            "error_type": err["key"],
+            "labeled_at": {"$gte": thirty_days_ago},
+        })
+        err["frequency_last_30d"] = count
+
+    result["error_catalog"] = errors
+
+    # Get quality_criteria version for display
+    qc = await db.system_config.find_one({"key": "quality_criteria"}, {"_id": 0})
+    qc_val = qc.get("value", {}) if qc else {}
+    result["_meta"] = {
+        "version": qc_val.get("version", 1),
+        "updated_by": qc_val.get("updated_by", ""),
+        "updated_at": qc_val.get("updated_at", ""),
+    }
+
+    return result
+
+
+@router.patch("/config/quality-settings")
+async def patch_quality_settings(
+    payload: dict,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Update a specific section of quality settings."""
+    section = payload.get("section")
+    value = payload.get("value")
+
+    if not section or section not in QUALITY_CONFIG_KEYS:
+        raise HTTPException(status_code=400, detail=f"Section inválida: {section}. Opciones: {QUALITY_CONFIG_KEYS}")
+    if value is None:
+        raise HTTPException(status_code=400, detail="value requerido")
+
+    # Read current doc
+    doc = await db.config.find_one({"key": section}, {"_id": 0})
+    current_version = doc.get("version", 0) if doc else 0
+
+    await db.config.update_one(
+        {"key": section},
+        {"$set": {
+            "value": value,
+            "version": current_version + 1,
+            "updated_by": user.get("name", user["email"]),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+
+    # Also increment quality_criteria version in system_config for display
+    await db.system_config.update_one(
+        {"key": "quality_criteria"},
+        {"$inc": {"value.version": 1}, "$set": {"value.updated_by": user.get("name", user["email"]), "value.updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+
+    # Audit
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "user_role": user["role"],
+        "action": f"quality_config_{section}_updated",
+        "resource_type": "config",
+        "details": f"{section} actualizado por {user.get('name', user['email'])}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {"success": True, "section": section, "version": current_version + 1}
