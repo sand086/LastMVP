@@ -121,7 +121,7 @@ function AppRoutes() {
             />
 
             <Route 
-                path="/api-docs" 
+                path="/documentation" 
                 element={
                     <ProtectedRoute allowedRoles={['coordinator', 'executive']}>
                         <ApiDocumentation />

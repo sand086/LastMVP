@@ -1,51 +1,92 @@
-# LastMile OS - Product Requirements Document
+# LastMile OS - Product Requirements Document (PRD)
 
-## Problem Statement
-Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajeria y Estrategias). Full-stack platform with authentication, dashboard, CSV/XLSX uploads, journey tracking, AI-powered quality evaluation, geographic analytics, comprehensive reporting, and AI chatbot assistant.
+## Original Problem Statement
+Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard polling, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, AI-powered evidence scoring, real-time dashboard, advanced reporting, quality criteria configurations, and API integrations.
 
 ## Tech Stack
-- **Backend:** FastAPI, MongoDB (motor), JWT Auth, APScheduler, Claude Sonnet (AI scoring + reports + chatbot), slowapi, websockets
-- **Frontend:** React, TailwindCSS, Shadcn UI, Lucide Icons, embla-carousel-react, Leaflet/react-leaflet
-- **Database:** MongoDB (test_database)
+- **Backend**: FastAPI, Motor (MongoDB), Python 3.11
+- **Frontend**: React 18, TailwindCSS, Shadcn UI, React-Leaflet
+- **Database**: MongoDB
+- **AI**: Claude Sonnet 4.5 via Emergent LLM Key
+- **Maps**: Leaflet + CartoDB Positron tiles
 
-## User Roles
-- Agent (agente@me.mx) / Coordinator (yael@me.mx) / Executive (karina@me.mx) / Developer (dev@me.mx)
-- Password (all): LastMile2026
+## User Personas
+- **Agent** (`agente@me.mx`): Field delivery agent. Views assigned routes and packages.
+- **Coordinator** (`yael@me.mx`): Manages operations, reviews quality, configures settings.
+- **Developer** (`dev@me.mx`): Full access, configures system, tests API.
+- **Executive** (`karina@me.mx`): High-level dashboards, reports.
 
-## Core Architecture
-- `/app/backend/server.py` - Slim main app loader
-- `/app/backend/routes/` - Modular route files (8 modules)
-- `/app/backend/lumi.py` - Lumi AI chatbot endpoint + context builder
-- `/app/backend/kosmo_sync.py` - External tracking data scraper
-- `/app/backend/ws_manager.py` - WebSocket manager
-- `/app/backend/evidence_scoring.py` - AI quality scoring
-- `/app/backend/cp_coordinates.py` - CDMX postal code geo dictionary
-- `/app/frontend/src/pages/` - Page components
-- `/app/frontend/src/components/` - LumiChat, HeatmapSection, ImageUploader, etc.
-- `/app/frontend/src/lib/` - API client, hooks, utilities
+## Core Requirements (Status)
+- [x] JWT role-based authentication (Agent, Coordinator, Developer, Executive)
+- [x] 2-step Cosmo layout upload (history-orders CSV + route-summary XLSX)
+- [x] Journey management (Start, Incidents, Close) with image uploads
+- [x] Kosmo tracking sync (automatic + manual)
+- [x] AI-powered evidence scoring (Claude Sonnet)
+- [x] Real-time WebSocket dashboard with geographic heatmaps
+- [x] Advanced reporting with 6 tabs (SLA, Attempts, Quality, etc.)
+- [x] Lumi AI Chatbot
+- [x] Quality Criteria V2 (5-tab settings: Evidencias, KPIs, SLA, Config IA, Tipos Error)
+- [x] Quality Tab V2 in Journey Detail (KPI strip, distribution, error chips, training)
+- [x] API Documentation with sandbox and code examples
+- [x] Database indexes for performance optimization
+- [x] Parallel query execution for dashboard endpoints
 
-## Completed Features
-- [x] JWT role-based authentication
-- [x] 2-step Cosmo layout upload
-- [x] Journey management (CRUD, start, close)
-- [x] Incident tracking with image uploads
-- [x] Dashboard v2 (heatmap, KPIs, WebSocket, sortable tables)
-- [x] Kosmo tracking sync + batch re-scrape
-- [x] AI evidence quality scoring
-- [x] **Reports v2 Redesign** - Period selector, 6 section checkboxes, KPI strip, 6 tabs
-- [x] **Attempts Tab** (NEW) - 1st/2nd/3rd attempt distribution + retry causes
-- [x] **SLA Tab** (NEW) - SLA vs Target with editable brackets, by provider/driver
-- [x] **AI Report Generation** - Claude Sonnet narrative with operational insights
-- [x] **Lumi AI Chatbot** - Global floating assistant with operational context
+## Architecture
+```
+/app/backend/
+  server.py              # Main FastAPI app loader
+  dependencies.py        # DB, auth, helpers
+  evidence_scoring.py    # AI evidence evaluation (Claude)
+  lumi.py               # Lumi chatbot logic
+  cp_coordinates.py     # Geographic coordinates
+  routes/
+    auth_routes.py       # Login, user management
+    journey_routes.py    # Journey CRUD, evidence eval
+    upload_routes.py     # CSV/XLSX file processing
+    dashboard_routes.py  # Stats, search, comparisons
+    analytics_routes.py  # Reports, schema, heatmap
+    quality_criteria_routes.py  # Settings config
+    quality_tab_routes.py      # Quality summary, training
+    admin_routes.py      # Admin operations
+    user_routes.py       # User management
 
-## Key API Endpoints (NEW)
-- `GET /api/reports/attempts` - Delivery attempts distribution
-- `GET /api/reports/sla` - SLA vs Target data
-- `PATCH /api/config/sla-targets` - Persist SLA brackets
-- `POST /api/reports/generate-ai` - AI narrative report
-- `POST /api/chat/lumi` - Lumi chatbot endpoint
-- `GET /api/reports/heatmap` - Geo-enriched CP data
+/app/frontend/
+  src/pages/
+    Dashboard.jsx        # Real-time dashboard with heatmap
+    Reports.jsx          # 6-tab reporting
+    JourneyDetail.jsx    # Journey management
+    QualityCriteria.jsx  # 5-tab quality settings
+    ApiDocumentation.jsx # API docs + sandbox
+    Layout.jsx           # File upload
+    Settings.jsx         # System settings
+  src/components/
+    QualityTabV2.jsx     # Quality tab in journey detail
+    HeatmapSection.jsx   # Leaflet map wrapper
+    LumiChat.jsx         # AI chatbot widget
+    EvidenceCarousel.jsx # Photo viewer
+    ImageUploader.jsx    # Image upload widget
+    DashboardLayout.jsx  # Sidebar navigation
+```
 
-## Design System
-- Typography: DM Sans (300-600), DM Mono (400-500)
-- Colors: --bg:#F5F4F1, --surface:#FFF, --blue:#2563EB, --green:#16A34A, --amber:#D97706, --coral:#DC2626
+## Key API Endpoints
+- POST /api/auth/login
+- GET /api/dashboard/stats
+- GET /api/journeys/{id}/quality-summary (v2)
+- GET /api/journeys/{id}/packages-quality (v2)
+- POST /api/training/samples (v2)
+- PATCH /api/journeys/{id}/packages/{guide}/review (v2)
+- GET /api/reports/schema (includes all endpoints)
+- POST /api/lumi/chat
+- WS /ws/dashboard
+
+## Credentials
+- dev@me.mx / LastMile2026 (Developer)
+- agente@me.mx / LastMile2026 (Agent)
+- yael@me.mx / LastMile2026 (Coordinator)
+
+## Backlog
+- [ ] Mobile-optimized views for field agents
+- [ ] Export journey details to PDF
+- [ ] Historical trend charts for delivery rates
+- [ ] Automatic image compression for large uploads
+- [ ] Refactor JourneyDetail.jsx into smaller components

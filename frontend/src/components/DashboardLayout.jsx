@@ -33,7 +33,7 @@ const navItems = [
     { path: '/journeys', label: 'Rutas', icon: Truck, roles: ['agent', 'coordinator', 'executive', 'developer'] },
     { path: '/layout', label: 'Layout', icon: Upload, roles: ['agent', 'coordinator', 'developer'] },
     { path: '/reports', label: 'Reportes', icon: FileText, roles: ['coordinator', 'executive', 'developer'] },
-    { path: '/api-docs', label: 'API & Reportes', icon: Code, roles: ['coordinator', 'executive', 'developer'] },
+    { path: '/documentation', label: 'API & Reportes', icon: Code, roles: ['coordinator', 'executive', 'developer'] },
     { path: '/settings', label: 'Configuración', icon: Settings, roles: ['coordinator', 'developer'] },
     { path: '/quality-criteria', label: 'Criterios Calidad', icon: ClipboardCheck, roles: ['coordinator', 'developer'] },
 ];
