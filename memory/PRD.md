@@ -67,9 +67,18 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - agente@me.mx / LastMile2026 (Agent)
 - yael@me.mx / LastMile2026 (Coordinator)
 
+## Recent Fixes (2026-03-28)
+- [x] P0 Bug: Restored "Inicio", "Incidencias", "Fin" workflow visibility in JourneyDetail
+  - Added 'developer' role to canEdit() in AuthContext.jsx
+  - Fixed default tab logic: scheduled journeys now default to 'inicio' (was 'calidad')
+  - Added 'developer' role to Layout page access in App.js
+- [x] Verified: Dynamic Assignments in Settings already functional
+- [x] Verified: API Documentation page already routed and linked in sidebar
+
 ## Backlog
 - [ ] Mobile-optimized views for field agents
 - [ ] Export journey details to PDF
 - [ ] Historical trend charts for delivery rates
 - [ ] Automatic image compression for large uploads
 - [ ] Refactor JourneyDetail.jsx into smaller components
+- [ ] Webhook integrations for external systems
