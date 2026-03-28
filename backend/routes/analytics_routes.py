@@ -935,6 +935,80 @@ async def report_kpis(
     return {"data": result, "total": len(result), "date_from": date_from, "date_to": date_to}
 
 
+# ==================== GEO HEATMAP FOR DASHBOARD ====================
+
+@router.get("/reports/heatmap")
+async def get_reports_heatmap(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Heatmap data with CP coordinates for the dashboard map."""
+    import re
+    from cp_coordinates import CP_COORDS
+
+    j_query = {}
+    if date_from:
+        j_query["date"] = {"$gte": date_from}
+    if date_to:
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+    if client_id:
+        j_query["client_id"] = client_id
+    if provider_id:
+        j_query["provider_id"] = provider_id
+    j_query = apply_assignment_filter(user, j_query)
+
+    journeys = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(5000)
+    journey_ids = [j["id"] for j in journeys]
+    if not journey_ids:
+        return []
+
+    pipeline = [
+        {"$match": {"journey_id": {"$in": journey_ids}}},
+        {"$group": {
+            "_id": "$address_cp",
+            "total": {"$sum": 1},
+            "delivered": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
+            "failed": {"$sum": {"$cond": [{"$ne": ["$status", "delivered"]}, 1, 0]}},
+        }},
+        {"$sort": {"total": -1}},
+    ]
+    results = await db.packages.aggregate(pipeline).to_list(500)
+
+    output = []
+    for r in results:
+        cp = str(r["_id"] or "").strip()
+        if not cp:
+            continue
+        # Try to match CP in dictionary
+        coords = CP_COORDS.get(cp)
+        if not coords:
+            # Try extracting 5-digit CP from field
+            match = re.search(r'\b(\d{5})\b', cp)
+            if match:
+                coords = CP_COORDS.get(match.group(1))
+                cp = match.group(1)
+        if not coords:
+            continue
+        total = r["total"]
+        delivered = r["delivered"]
+        output.append({
+            "cp": cp,
+            "zone": coords["zone"],
+            "lat": coords["lat"],
+            "lng": coords["lng"],
+            "delivered": delivered,
+            "failed": r["failed"],
+            "total": total,
+            "rate": round(delivered / total, 3) if total > 0 else 0,
+        })
+    return output
+
+
+
+
 @router.get("/reports/schema")
 async def report_schema():
     return {

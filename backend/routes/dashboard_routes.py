@@ -159,15 +159,20 @@ async def get_provider_comparison(
         total_journeys = len(journeys)
         total_delivered = sum(j.get("packages_delivered", 0) for j in journeys)
         total_packages = sum(j.get("packages_total", 0) for j in journeys)
+        total_failed = sum(j.get("packages_failed", 0) for j in journeys)
         total_km = sum((j.get("close_data") or {}).get("km_traveled", 0) for j in journeys)
         journey_ids = [j["id"] for j in journeys]
         incidents_count = await db.incidents.count_documents({"journey_id": {"$in": journey_ids}})
         avg_delivery_rate = (total_delivered / total_packages * 100) if total_packages > 0 else 0
+        # Visit rate: delivered + failed with evidence of visit
+        visited = total_delivered + total_failed
+        visit_rate = round(visited / total_packages * 100, 2) if total_packages > 0 else 0
         comparison.append({
             "provider_id": provider["id"],
             "provider_name": provider["name"],
             "journeys_count": total_journeys,
             "avg_delivery_rate": round(avg_delivery_rate, 2),
+            "visit_rate": visit_rate,
             "total_incidents": incidents_count,
             "total_km": total_km,
         })
