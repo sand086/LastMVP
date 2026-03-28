@@ -19,6 +19,12 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
 
+
+def _get_db():
+    """Get db reference for token logging."""
+    from dependencies import db
+    return db
+
 THIRD_PARTY_KEYWORDS = [
     "vecino", "vigilante", "tercero", "familiar", "portero",
     "guardia", "recepción", "conserje", "seguridad", "caseta",
@@ -254,6 +260,24 @@ async def evaluate_single_package_ai(
 
         user_msg = UserMessage(text=context, file_contents=file_contents)
         response_text = await chat.send_message(user_msg)
+
+        # Log token usage (non-blocking)
+        try:
+            from token_logger import log_token_usage
+            await log_token_usage(
+                db=_get_db(),
+                entregable="evaluacion",
+                modelo="claude-sonnet-4-5",
+                referencia=tracking,
+                input_text=context,
+                output_text=response_text or "",
+                system_prompt=CUBBO_SYSTEM_PROMPT,
+                journey_id=package.get("journey_id"),
+                guide=tracking,
+                client_id=package.get("client_id"),
+            )
+        except Exception as log_err:
+            logger.debug(f"Token log skipped: {log_err}")
 
         # Parse JSON from response
         ai_result = _parse_ai_response(response_text)

@@ -16,6 +16,7 @@ import SystemLogs from './pages/SystemLogs';
 import SystemErrors from './pages/SystemErrors';
 import SystemIntegrity from './pages/SystemIntegrity';
 import QualityCriteria from './pages/QualityCriteria';
+import AdminPage from './pages/AdminPage';
 import LumiChat from './components/LumiChat';
 import './App.css';
 
@@ -125,6 +126,15 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute allowedRoles={['coordinator', 'executive']}>
                         <ApiDocumentation />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/admin" 
+                element={
+                    <ProtectedRoute allowedRoles={['developer', 'executive', 'ejecutivo']}>
+                        <AdminPage />
                     </ProtectedRoute>
                 } 
             />

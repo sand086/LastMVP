@@ -28,6 +28,7 @@ from routes import (
     quality_criteria_router,
     quality_tab_router,
 )
+from admin import router as admin_module_router
 from lumi import router as lumi_router
 
 # Configure logging
@@ -79,6 +80,7 @@ api_router.include_router(analytics_router)
 api_router.include_router(admin_router)
 api_router.include_router(quality_criteria_router)
 api_router.include_router(quality_tab_router)
+api_router.include_router(admin_module_router)
 api_router.include_router(lumi_router)
 
 app.include_router(api_router)
@@ -162,6 +164,15 @@ async def startup_event():
     # Training samples indexes
     await db.training_samples.create_index("journey_id", background=True)
     await db.training_samples.create_index("guide", background=True)
+
+    # Token usage log indexes
+    await db.token_usage_log.create_index("timestamp", background=True)
+    await db.token_usage_log.create_index("entregable", background=True)
+    await db.token_usage_log.create_index([("timestamp", -1), ("entregable", 1)], background=True)
+    await db.token_usage_log.create_index("client_id", background=True)
+
+    # Audit logs
+    await db.audit_logs.create_index("timestamp", background=True)
 
     start_periodic_sync(db)
 

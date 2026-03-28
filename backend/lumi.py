@@ -220,6 +220,24 @@ async def lumi_chat(payload: LumiChatRequest, user: dict = Depends(get_current_u
 
         msg = UserMessage(text=full_prompt)
         reply = await chat.send_message(msg)
+
+        # Log token usage (non-blocking)
+        try:
+            from token_logger import log_token_usage
+            await log_token_usage(
+                db=db,
+                entregable="lumi",
+                modelo="claude-sonnet-4-5",
+                referencia=payload.message[:80],
+                input_text=full_prompt,
+                output_text=reply or "",
+                system_prompt=system_prompt,
+                user_id=user.get("id"),
+                client_id=payload.client_id,
+            )
+        except Exception as log_err:
+            logger.debug(f"Token log skipped: {log_err}")
+
         return {"reply": reply}
 
     except Exception as e:

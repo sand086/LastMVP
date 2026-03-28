@@ -1,0 +1,102 @@
+{
+  "summary": "Iteration 19 - Admin IA Module testing complete. All 23 backend tests passed (100%). Frontend testing verified all 3 tabs (Consumo de tokens, Reporte de rutas Cubbo ADM, Configuración de costos) working correctly. Role-based access control verified - coordinator/agent roles correctly denied admin access.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Admin IA - Routes Report Tab",
+        "issues": ["Some columns show '—' for team/provider fields when providers collection is empty - this is expected behavior per design"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration19_admin_module.py",
+    "/app/test_reports/pytest/pytest_results_iter19.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Token counts are estimated (~4 chars per token) since emergentintegrations doesn't expose actual usage data - this is documented and by design",
+    "WebSocket connection warning in console (non-blocking) - existing issue from previous iterations"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration19_admin_module.py"
+  ],
+  "success_rate": {
+    "backend": "100% (23/23 tests passed)",
+    "frontend": "100% (all features working)"
+  },
+  "test_credentials": "dev@me.mx / LastMile2026 (developer - full admin access), yael@me.mx / LastMile2026 (coordinator - no admin access)",
+  "seed_data_creation": "None - used existing seeded token_usage_log entries and config documents",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Admin IA module fully functional with 3 tabs. Token usage tracking shows 13.8K tokens, $0.08 USD cost. Routes report shows 6 routes with 250 packages. Config tab allows editing exchange rate (currently $19 MXN/USD) and budget alerts. Role-based access control working - only developer and executive roles can access /admin.",
+  "features_tested": {
+    "admin_summary_api": {
+      "status": "PASS",
+      "endpoint": "GET /api/admin/summary",
+      "verified": ["by_entregable breakdown", "totals (tokens, cost_usd, cost_mxn)", "evaluaciones_count", "lumi_count", "reportes_count", "over_budget flag", "budget_threshold"]
+    },
+    "token_usage_api": {
+      "status": "PASS",
+      "endpoint": "GET /api/admin/token-usage",
+      "verified": ["pagination", "summary by entregable", "events list", "filters (entregable, modelo, period)"]
+    },
+    "routes_report_api": {
+      "status": "PASS",
+      "endpoint": "GET /api/admin/routes-report",
+      "verified": ["totals", "rows with Cubbo ADM columns", "pagination", "filters (date_from, date_to, driver, team, status)"]
+    },
+    "routes_export_api": {
+      "status": "PASS",
+      "endpoint": "GET /api/admin/routes-report/export",
+      "verified": ["Excel file download", "LAYOUT_ADM_Cubbo filename", "column selection"]
+    },
+    "config_api": {
+      "status": "PASS",
+      "endpoints": ["GET /api/admin/config", "PATCH /api/admin/config"],
+      "verified": ["ia_cost_config", "exchange_rate with history", "budget_alerts", "section validation", "editor role restriction"]
+    },
+    "training_samples_api": {
+      "status": "PASS",
+      "endpoint": "POST /api/training/samples",
+      "verified": ["human_label field", "human_note field", "corrected_score field", "validation"]
+    },
+    "role_based_access_control": {
+      "status": "PASS",
+      "verified": [
+        "Developer role has full admin access",
+        "Coordinator role denied admin access (403)",
+        "Agent role denied admin access (403)",
+        "Admin IA sidebar item hidden for non-admin roles",
+        "Direct /admin navigation redirects non-admin users"
+      ]
+    },
+    "frontend_admin_page": {
+      "status": "PASS",
+      "tabs_verified": ["Consumo de tokens", "Reporte de rutas (Cubbo ADM)", "Configuración de costos"],
+      "kpi_cards": ["Total tokens/mes (13.8K)", "Costo USD/mes ($0.08)", "Evaluaciones IA (3)", "Consultas Lumi (2)", "Reportes IA (1)"],
+      "token_usage_tab": {
+        "cards": ["Evaluaciones IA with Input/Output/Prompt", "Reportes con IA", "Consultas Lumi"],
+        "events_table": "Working with pagination"
+      },
+      "routes_report_tab": {
+        "filters": ["Period dates", "Driver", "Team", "Status"],
+        "totals_strip": ["Rutas", "Días op.", "Total pkgs", "Completados", "Con evidencia", "Costo total", "KM extra"],
+        "table": "Working with all Cubbo ADM columns",
+        "export_button": "Working",
+        "columns_selector": "Working"
+      },
+      "config_tab": {
+        "exchange_rate": "Editable with history",
+        "model_costs": "Table with claude-opus-4-5, claude-sonnet-4-5, gpt-4o",
+        "budget_alerts": "Threshold and weekly report settings",
+        "save_button": "Working"
+      }
+    }
+  }
+}
