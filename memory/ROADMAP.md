@@ -1,13 +1,16 @@
 # LastMile OS - Roadmap
 
 ## P0 - Completed
-- [x] Batch re-scrape feature (Re-sincronizar todos)
-- [x] Full regression testing after backend refactoring
+- [x] Dashboard v2 Redesign (filters above KPIs, new design tokens, heatmap, Visita%)
+- [x] Batch re-scrape feature
+- [x] N+1 query optimization
+- [x] Deployment readiness (CORS env var)
 
 ## P1 - Next Up
-- [ ] Update API Documentation page with new batch-rescrape endpoint
+- [ ] Update API Documentation page with new endpoints (batch-rescrape, reports/heatmap)
 - [ ] Add clickable tracking_url view in package details
 - [ ] Add search functionality in main packages table of Journey Detail
+- [ ] Comprehensive regression testing of all refactored routes
 
 ## P2 - Backlog
 - [ ] Automatic compression for large image uploads
@@ -20,3 +23,4 @@
 - [ ] Multi-language support
 - [ ] Advanced reporting with exportable dashboards
 - [ ] Route optimization suggestions
+- [ ] Real-time driver location tracking on map
