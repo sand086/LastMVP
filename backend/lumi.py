@@ -53,7 +53,7 @@ async def build_lumi_context(client_id, provider_id, period):
     if provider_id:
         j_query["provider_id"] = provider_id
 
-    journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(5000)
+    journeys = await db.journeys.find(j_query, {"_id": 0}).limit(500).to_list(500)
     journey_ids = [j["id"] for j in journeys]
 
     clients_map = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
@@ -71,7 +71,7 @@ async def build_lumi_context(client_id, provider_id, period):
 
     incidents = await db.incidents.find(
         {"journey_id": {"$in": journey_ids}}, {"_id": 0, "status": 1, "incident_type": 1, "severity": 1}
-    ).to_list(5000)
+    ).limit(1000).to_list(1000)
     incidents_open = sum(1 for i in incidents if i.get("status") == "open")
 
     quality_data = await db.packages.aggregate([

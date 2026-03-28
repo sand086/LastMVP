@@ -28,10 +28,8 @@ next-env.d.ts
 # Production builds
 /build
 dist/
-dist
 
-# Environment files (comprehensive coverage)
-
+# Environment files
 *token.json*
 *credentials.json*
 
@@ -48,7 +46,7 @@ dump.rdb
 
 # Python
 __pycache__/
-*pyc*
+*.pyc
 venv/
 .venv/
 
@@ -77,73 +75,5 @@ agenthub/agents/youtube/db
 .cache/
 
 # Mobile development
-android-sdk/ frontend/node_modules/.cache/default-development/3.pack
-frontend/node_modules/.cache/default-development/3.pack
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/18.pack
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/13.pack
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/22.pack
-frontend/node_modules/.cache/default-development/28.pack
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/29.pack
-frontend/node_modules/.cache/default-development/6.pack
-frontend/node_modules/.cache/default-development/25.pack
-frontend/node_modules/.cache/default-development/43.pack
-frontend/node_modules/.cache/default-development/44.pack
-frontend/node_modules/.cache/default-development/47.pack
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/10.pack
-frontend/node_modules/.cache/default-development/51.pack
-frontend/node_modules/.cache/default-development/57.pack
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/61.pack
-frontend/node_modules/.cache/default-development/66.pack
-frontend/node_modules/.cache/default-development/50.pack
-frontend/node_modules/.cache/default-development/50.pack
-frontend/node_modules/.cache/default-development/65.pack
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/63.pack
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/72.pack
-frontend/node_modules/.cache/default-development/70.pack
-frontend/node_modules/.cache/default-development/74.pack
-frontend/node_modules/.cache/default-development/69.pack
--e 
-# Environment files
-*.env
-*.env.*
+android-sdk/
 frontend/node_modules/.cache/default-development/76.pack
