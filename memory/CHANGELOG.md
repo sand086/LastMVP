@@ -16,9 +16,17 @@
 - Added score override slider + numeric input
 - Backend accepts `human_note`, `corrected_score`, stores `evidence_score_override` and `evidence_score_original`
 
-### Testing
-- Iteration 18: Quality Tab V2 — 18/18 backend tests (100%)
-- Iteration 19: Admin IA Module — 23/23 backend tests (100%), all frontend verified
+### QA Bug Fix Round — 9/9 Bugs Resolved
+- **BUG-001 [BLOQUEANTE]**: JourneyDetail defaults to Calidad tab for scheduled journeys with packages
+- **BUG-002 [BLOQUEANTE]**: Coordinator added to ADMIN_ROLES in admin.py + AdminPage.jsx
+- **BUG-003 [BLOQUEANTE]**: Reports now include all journey statuses (scheduled, in_progress, closed)
+- **BUG-004 [ALTO]**: Training samples endpoint allows coordinator and agent roles
+- **BUG-006 [ALTO]**: JourneyStartData model uses `extra = "allow"` for flexible validation
+- **BUG-007 [MEDIO]**: Login rate limit increased from 5/min to 20/min
+- **BUG-008 [MEDIO]**: `/api-docs` → 301 redirect to `/documentation` (backend level)
+- **BUG-009 [MEDIO]**: 401 interceptor confirmed working (already existed)
+- **Additional**: AdminPage.jsx role check updated to include coordinator
+- **Testing**: Iteration 20 — 15/15 backend tests (100%), all frontend verified
 ### Quality Tab V2 — Journey Detail Redesign
 - **New QualityTabV2 component** (`/app/frontend/src/components/QualityTabV2.jsx`):
   - KPI strip: score promedio, completos, incompletos, evaluados IA con confianza

@@ -12,7 +12,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 
 ## User Personas
 - **Agent** (`agente@me.mx`): Field delivery agent. Views assigned routes and packages.
-- **Coordinator** (`yael@me.mx`): Manages operations, reviews quality, configures settings.
+- **Coordinator** (`yael@me.mx`): Manages operations, reviews quality, configures settings, admin access.
 - **Developer** (`dev@me.mx`): Full access, configures system, tests API, admin module.
 - **Executive** (`karina@me.mx`): High-level dashboards, reports, admin read-only.
 
@@ -29,52 +29,41 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Quality Tab V2 in Journey Detail (KPI strip, distribution, error chips, training)
 - [x] Supervised training (correct/incorrect + natural language notes + score override)
 - [x] Admin IA Module (3 tabs: Token Consumption, Routes Report Cubbo ADM, Cost Config)
-- [x] Token usage logging for all AI calls (evaluations, Lumi, reports)
+- [x] Token usage logging for all AI calls
 - [x] Routes Report with Excel export in Cubbo ADM format
 - [x] Cost configuration (exchange rate, model pricing, budget alerts)
 - [x] API Documentation with sandbox and code examples
-- [x] Database indexes for performance optimization
-- [x] Parallel query execution for dashboard endpoints
+- [x] Database indexes + parallel query optimization
+- [x] QA Bug Fixes (9/9 bugs resolved — iteration 20)
 
 ## Architecture
 ```
 /app/backend/
-  server.py              # Main FastAPI app loader
-  dependencies.py        # DB, auth, helpers
-  evidence_scoring.py    # AI evidence evaluation (Claude) + token logging
-  lumi.py               # Lumi chatbot logic + token logging
-  admin.py              # Admin module (token usage, routes report, config)
-  token_logger.py       # Token usage estimation and logging helper
-  cp_coordinates.py     # Geographic coordinates
-  routes/
-    auth_routes.py, journey_routes.py, upload_routes.py, dashboard_routes.py,
-    analytics_routes.py, quality_criteria_routes.py, quality_tab_routes.py,
-    admin_routes.py, user_routes.py
+  server.py, dependencies.py, models.py, evidence_scoring.py, lumi.py,
+  admin.py, token_logger.py, cp_coordinates.py, middleware.py
+  routes/ (auth, journey, upload, dashboard, analytics, quality_criteria,
+           quality_tab, admin, user)
 
-/app/frontend/
-  src/pages/
-    AdminPage.jsx        # Admin IA module (3 tabs)
-    Dashboard.jsx, Reports.jsx, JourneyDetail.jsx, QualityCriteria.jsx,
-    ApiDocumentation.jsx, Layout.jsx, Settings.jsx
-  src/components/
-    admin/TokenUsageTab.jsx, admin/RoutesReportTab.jsx, admin/CostConfigTab.jsx
-    QualityTabV2.jsx, HeatmapSection.jsx, LumiChat.jsx, EvidenceCarousel.jsx,
-    ImageUploader.jsx, DashboardLayout.jsx
+/app/frontend/src/
+  pages/ (AdminPage, Dashboard, Reports, JourneyDetail, QualityCriteria,
+          ApiDocumentation, Layout, Settings, Login)
+  components/ (admin/{TokenUsageTab,RoutesReportTab,CostConfigTab},
+               QualityTabV2, HeatmapSection, LumiChat, EvidenceCarousel,
+               ImageUploader, DashboardLayout)
 ```
 
 ## Key API Endpoints
-- POST /api/auth/login
+- POST /api/auth/login (20/min rate limit)
 - GET /api/dashboard/stats
-- GET /api/admin/summary, /api/admin/token-usage, /api/admin/routes-report
-- GET /api/admin/routes-report/export, /api/admin/config, PATCH /api/admin/config
-- GET /api/journeys/{id}/quality-summary, /api/journeys/{id}/packages-quality
-- POST /api/training/samples
-- GET /api/reports/schema
-- POST /api/lumi/chat
-- WS /ws/dashboard
+- GET /api/admin/summary, /token-usage, /routes-report, /routes-report/export, /config
+- PATCH /api/admin/config
+- GET /api/journeys/{id}/quality-summary, /packages-quality
+- POST /api/training/samples (coordinator, developer, agent)
+- GET /api/reports/journeys (includes all journey statuses)
+- GET /api-docs → 301 redirect to /documentation
 
 ## Credentials
-- dev@me.mx / LastMile2026 (Developer - full admin)
+- dev@me.mx / LastMile2026 (Developer)
 - agente@me.mx / LastMile2026 (Agent)
 - yael@me.mx / LastMile2026 (Coordinator)
 
