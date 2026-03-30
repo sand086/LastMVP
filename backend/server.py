@@ -125,13 +125,21 @@ app.include_router(api_kosmo_router)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
-cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = [
+    o.strip() for o in
+    os.environ.get("CORS_ORIGINS",
+        "https://lastmile-mvp.preview.emergentagent.com"
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+    max_age=600,
 )
 
 # ==================== STARTUP / SHUTDOWN ====================
@@ -179,6 +187,20 @@ async def startup_event():
 
     # Audit logs
     await db.audit_logs.create_index("timestamp", background=True)
+    await db.audit_logs.create_index([("user_id", 1), ("timestamp", -1)], background=True)
+
+    # Compound indexes for production performance
+    await db.journeys.create_index([("client_id", 1), ("date", -1)], background=True)
+    await db.journeys.create_index([("provider_id", 1), ("date", -1)], background=True)
+    await db.journeys.create_index([("driver", 1), ("date", -1)], background=True)
+    await db.packages.create_index([("journey_id", 1), ("evidence_score", 1)], background=True)
+    await db.packages.create_index("delivery_type", background=True, sparse=True)
+    await db.training_samples.create_index([("labeled_at", -1)], background=True)
+    await db.training_samples.create_index("human_label", background=True)
+    await db.incidents.create_index([("status", 1), ("severity", 1)], background=True)
+    await db.token_usage_log.create_index([("client_id", 1), ("timestamp", -1)], background=True)
+
+    logger.info("Production indexes created/verified")
 
     start_periodic_sync(db)
 

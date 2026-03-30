@@ -85,13 +85,13 @@ class JourneyStartData(BaseModel):
         extra = "allow"
 
 class JourneyCloseData(BaseModel):
-    closed_at: str
-    odometer_end: int
-    packages_delivered: int
-    packages_failed: int
+    closed_at: Optional[str] = None
+    odometer_end: Optional[int] = None
+    packages_delivered: Optional[int] = None
+    packages_failed: Optional[int] = None
     notes: Optional[str] = None
     failed_packages: List[dict] = []
-    checklist_completed: bool
+    checklist_completed: Optional[bool] = True
 
 class JourneyCreate(BaseModel):
     date: str

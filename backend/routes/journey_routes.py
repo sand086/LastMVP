@@ -211,7 +211,7 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
 
 
 @router.put("/journeys/{journey_id}/start")
-async def start_journey(journey_id: str, data: JourneyStartData, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def start_journey(journey_id: str, data: JourneyStartData, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
@@ -251,25 +251,31 @@ async def start_journey(journey_id: str, data: JourneyStartData, user: dict = De
 
 
 @router.put("/journeys/{journey_id}/close")
-async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     if journey["status"] != "in_progress":
         raise HTTPException(status_code=400, detail="La ruta debe estar en progreso para cerrarla")
-    if not data.checklist_completed:
-        raise HTTPException(status_code=400, detail="Debe completar el checklist antes de cerrar")
 
     start_data = journey.get("start_data", {})
     odometer_start = start_data.get("odometer_start", 0)
-    km_traveled = data.odometer_end - odometer_start
     packages_loaded = start_data.get("packages_loaded", journey["packages_total"])
+
+    # Auto-calculate fields if not provided
+    if data.packages_delivered is None:
+        data.packages_delivered = await db.packages.count_documents({"journey_id": journey_id, "status": "delivered"})
+    if data.packages_failed is None:
+        data.packages_failed = await db.packages.count_documents({"journey_id": journey_id, "status": {"$in": ["failed", "cancelled"]}})
+
+    odometer_end = data.odometer_end or 0
+    km_traveled = max(0, odometer_end - odometer_start) if odometer_end else 0
     delivery_rate = (data.packages_delivered / packages_loaded * 100) if packages_loaded > 0 else 0
-    packages_to_retry = packages_loaded - data.packages_delivered - data.packages_failed
+    packages_to_retry = max(0, packages_loaded - data.packages_delivered - data.packages_failed)
 
     close_data = {
-        "closed_at": data.closed_at,
-        "odometer_end": data.odometer_end,
+        "closed_at": data.closed_at or datetime.now(timezone.utc).isoformat(),
+        "odometer_end": odometer_end,
         "packages_delivered": data.packages_delivered,
         "packages_failed": data.packages_failed,
         "packages_to_retry": packages_to_retry,
@@ -749,6 +755,14 @@ async def evaluate_all_evidence(journey_id: str, user: dict = Depends(get_curren
             "incomplete": sum(1 for s in scores if s < 60),
         },
     }
+
+
+
+@router.post("/journeys/{journey_id}/evaluate-ia")
+async def evaluate_ia_alias(journey_id: str, user: dict = Depends(get_current_user)):
+    """Alias for evaluate-evidence-all — used by Power BI Sandbox and external tools."""
+    return await evaluate_all_evidence(journey_id, user)
+
 
 
 # ==================== PACKAGE RE-SCRAPE ====================

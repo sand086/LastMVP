@@ -32,9 +32,14 @@ db = mongo_client[os.environ['DB_NAME']]
 
 # ==================== JWT CONFIG ====================
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'lastmile-os-secret-key-2026-production-v1')
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET:
+    if os.environ.get("ENVIRONMENT") == "production":
+        raise RuntimeError("JWT_SECRET environment variable is required in production.")
+    JWT_SECRET = "lastmile-dev-secret-DO-NOT-USE-IN-PROD"
+
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_HOURS = 8
+JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
 
 # ==================== RATE LIMITER ====================
 
@@ -60,11 +65,30 @@ security = HTTPBearer()
 
 # ==================== AUTH HELPERS ====================
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+_bcrypt_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bcrypt")
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=11)).decode('utf-8')
 
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+async def verify_password_async(plain: str, hashed: str) -> bool:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _bcrypt_executor,
+        lambda: bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
+    )
+
+async def hash_password_async(plain: str) -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _bcrypt_executor,
+        lambda: bcrypt.hashpw(plain.encode('utf-8'), bcrypt.gensalt(rounds=11)).decode('utf-8')
+    )
 
 def create_token(user_id: str, email: str, role: str) -> str:
     payload = {

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,6 +21,14 @@ const Login = () => {
 
     const { login } = useAuth();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+
+    useEffect(() => {
+        const reason = searchParams.get('reason');
+        if (reason === 'expired') {
+            setError('Tu sesión expiró. Inicia sesión nuevamente.');
+        }
+    }, [searchParams]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -30,7 +38,8 @@ const Login = () => {
         const result = await login(email, password);
         
         if (result.success) {
-            navigate('/');
+            const redirect = searchParams.get('redirect') || '/';
+            navigate(redirect);
         } else {
             setError(result.error);
         }

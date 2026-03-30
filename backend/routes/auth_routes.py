@@ -9,7 +9,7 @@ from starlette.requests import Request as StarletteRequest
 
 from dependencies import (
     db, limiter, security, get_current_user, require_role,
-    hash_password, verify_password, create_token,
+    hash_password, verify_password, verify_password_async, create_token,
     JWT_SECRET, JWT_ALGORITHM,
 )
 from models import (
@@ -40,7 +40,7 @@ async def login(data: UserLogin, request: StarletteRequest):
             )
 
     user = await db.users.find_one({"email": data.email}, {"_id": 0})
-    if not user or not verify_password(data.password, user["password"]):
+    if not user or not await verify_password_async(data.password, user["password"]):
         ten_min_ago = (now - timedelta(minutes=10)).isoformat()
         if lock_record:
             last_attempt = lock_record.get("last_attempt", "")

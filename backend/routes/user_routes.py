@@ -53,8 +53,10 @@ async def create_user(data: UserCreate, user: dict = Depends(require_role(["coor
 @router.put("/users/{user_id}")
 async def update_user(user_id: str, data: dict, admin: dict = Depends(require_role(["coordinator", "developer"]))):
     update_data = {k: v for k, v in data.items() if k not in ["id", "password", "_id"]}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No hay campos para actualizar")
     result = await db.users.update_one({"id": user_id}, {"$set": update_data})
-    if result.modified_count == 0:
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return {"message": "Usuario actualizado"}
 

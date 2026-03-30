@@ -871,15 +871,32 @@ async def report_incidents(
 
 @router.get("/reports/kpis")
 async def report_kpis(
+    period: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     group_by: str = "day",
     user: dict = Depends(get_current_user),
 ):
+    now = datetime.now(timezone.utc)
+    if period and not date_from:
+        if period == "current_month":
+            date_from = now.replace(day=1).strftime("%Y-%m-%d")
+        elif period == "prev_month":
+            first_this = now.replace(day=1)
+            last_prev = first_this - timedelta(days=1)
+            date_from = last_prev.replace(day=1).strftime("%Y-%m-%d")
+            date_to = last_prev.strftime("%Y-%m-%d")
+        elif period == "7d":
+            date_from = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        elif period == "30d":
+            date_from = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+        elif period == "90d":
+            date_from = (now - timedelta(days=90)).strftime("%Y-%m-%d")
+
     if not date_from:
-        date_from = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+        date_from = (now - timedelta(days=30)).strftime("%Y-%m-%d")
     if not date_to:
-        date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_to = now.strftime("%Y-%m-%d")
 
     journeys = await db.journeys.find(
         {"date": {"$gte": date_from, "$lte": date_to}}, {"_id": 0}
@@ -932,7 +949,24 @@ async def report_kpis(
         result.append(data)
 
     result.sort(key=lambda x: x["group"])
-    return {"data": result, "total": len(result), "date_from": date_from, "date_to": date_to}
+
+    total_journeys = sum(d["journeys_count"] for d in result)
+    total_packages = sum(d["packages_total"] for d in result)
+    total_delivered = sum(d["packages_delivered"] for d in result)
+
+    return {
+        "data": result,
+        "total": len(result),
+        "date_from": date_from,
+        "date_to": date_to,
+        "has_data": len(result) > 0,
+        "summary": {
+            "total_journeys": total_journeys,
+            "total_packages": total_packages,
+            "total_delivered": total_delivered,
+            "delivery_rate": round(total_delivered / total_packages * 100, 1) if total_packages > 0 else 0,
+        },
+    }
 
 
 # ==================== GEO HEATMAP FOR DASHBOARD ====================

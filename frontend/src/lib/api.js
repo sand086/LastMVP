@@ -19,14 +19,20 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-// Handle 401 errors
+// Handle 401 errors — auto-logout with redirect reason
 api.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401) {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            window.location.href = '/login';
+            const currentPath = window.location.pathname;
+            // Avoid redirect loop on login page
+            if (currentPath !== '/login') {
+                console.warn('[Auth] Token expirado o inválido — cerrando sesión');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}&reason=expired`;
+                return new Promise(() => {}); // Prevent further processing
+            }
         }
         return Promise.reject(error);
     }

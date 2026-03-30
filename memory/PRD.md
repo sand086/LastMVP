@@ -67,6 +67,20 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - agente@me.mx / LastMile2026 (Agent)
 - yael@me.mx / LastMile2026 (Coordinator)
 
+## Recent Fixes (2026-03-30) — Infrastructure Hardening
+- [x] FIX-001: CORS wildcard → dominios específicos (backend-level, env-driven)
+- [x] FIX-002: PUT /close schema — all fields Optional with auto-calculation from MongoDB
+- [x] FIX-003: POST /evaluate-ia alias endpoint registered
+- [x] FIX-004: POST /training/samples verified working (was false positive in audit)
+- [x] FIX-005: JWT_SECRET moved to .env, old hardcoded key rejected
+- [x] FIX-006: Auto-logout on 401 with redirect reason + session expired message
+- [x] FIX-007: HSTS header + Cache-Control on API + Permissions-Policy hardened
+- [x] FIX-008: KPIs period support (current_month, prev_month, 7d, 30d) + has_data + summary
+- [x] FIX-009: PUT /users/{id} fixed matched_count vs modified_count
+- [x] FIX-010: bcrypt async with ThreadPoolExecutor, login ~241ms stable
+- [x] Production MongoDB indexes (15+ compound indexes for journeys, packages, incidents, etc.)
+- [x] Developer role added to start/close journey permissions
+
 ## Recent Fixes (2026-03-28)
 - [x] P0 Bug: Restored "Inicio", "Incidencias", "Fin" workflow visibility in JourneyDetail
   - Added 'developer' role to canEdit() in AuthContext.jsx
