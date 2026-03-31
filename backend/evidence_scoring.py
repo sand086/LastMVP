@@ -380,8 +380,8 @@ async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incide
     import os
 
     # Create a NEW MongoDB connection for this thread's event loop
-    mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-    db_name = os.environ.get("DB_NAME", "test_database")
+    mongo_url = os.environ.get("MONGO_URL")
+    db_name = os.environ.get("DB_NAME")
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
 

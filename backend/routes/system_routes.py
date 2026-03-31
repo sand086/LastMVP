@@ -417,7 +417,7 @@ async def get_system_config(user: dict = Depends(get_current_user)):
         parsed = urlparse(mongo_url)
         mongo_host = f"{parsed.hostname}:{parsed.port}" if parsed.port else str(parsed.hostname)
     except Exception:
-        mongo_host = "localhost"
+        mongo_host = "unknown"
 
     server_file = Path(__file__).parent.parent / "server.py"
     last_deploy = ""
