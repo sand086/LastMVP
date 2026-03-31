@@ -12,9 +12,7 @@ import os
 
 from dependencies import db, limiter, mongo_client
 from middleware import AuditMiddleware, SecurityHeadersMiddleware
-from system_routes import create_system_router
-from kosmo_sync import create_kosmo_router, start_periodic_sync, stop_periodic_sync
-from dependencies import get_current_user
+from kosmo_sync import start_periodic_sync, stop_periodic_sync
 from ws_manager import ws_manager
 
 from routes import (
@@ -28,9 +26,11 @@ from routes import (
     quality_criteria_router,
     quality_tab_router,
     webhook_router,
+    system_router,
+    lumi_router,
+    admin_module_router,
+    kosmo_router,
 )
-from admin import router as admin_module_router
-from lumi import router as lumi_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -71,7 +71,6 @@ async def health():
 
 # ==================== INCLUDE ALL ROUTE MODULES ====================
 
-# Core feature routes (all prefixed under /api via api_router)
 api_router.include_router(auth_router)
 api_router.include_router(user_router)
 api_router.include_router(journey_router)
@@ -81,9 +80,11 @@ api_router.include_router(analytics_router)
 api_router.include_router(admin_router)
 api_router.include_router(quality_criteria_router)
 api_router.include_router(quality_tab_router)
-api_router.include_router(admin_module_router)
-api_router.include_router(lumi_router)
 api_router.include_router(webhook_router)
+api_router.include_router(system_router)
+api_router.include_router(lumi_router)
+api_router.include_router(admin_module_router)
+api_router.include_router(kosmo_router)
 
 app.include_router(api_router)
 
@@ -109,18 +110,6 @@ async def websocket_dashboard(websocket: WebSocket):
     except Exception:
         await ws_manager.disconnect(websocket, "dashboard")
 
-
-# System routes (factory pattern with injected deps)
-system_router = create_system_router(db, get_current_user)
-api_system_router = APIRouter(prefix="/api")
-api_system_router.include_router(system_router)
-app.include_router(api_system_router)
-
-# Kosmo sync routes
-kosmo_router = create_kosmo_router(db, get_current_user)
-api_kosmo_router = APIRouter(prefix="/api")
-api_kosmo_router.include_router(kosmo_router)
-app.include_router(api_kosmo_router)
 
 # ==================== MIDDLEWARE (order matters: last added = first executed) ====================
 

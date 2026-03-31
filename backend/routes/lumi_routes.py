@@ -11,7 +11,7 @@ from typing import Optional
 from dependencies import db, get_current_user
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["Lumi"])
 
 
 class LumiChatRequest(BaseModel):
@@ -29,7 +29,7 @@ def _resolve_period(period: str):
         return d.strftime("%Y-%m-%d")
 
     if period == "15d":
-        return fmt(now - timedelta(days=14)), fmt(now), "Últimos 15 días"
+        return fmt(now - timedelta(days=14)), fmt(now), "Ultimos 15 dias"
     elif period == "current_month":
         return fmt(now.replace(day=1)), fmt(now), "Mes actual"
     elif period == "prev_month":
@@ -41,7 +41,7 @@ def _resolve_period(period: str):
         end = start + timedelta(days=6)
         return fmt(start), fmt(end), "Semana anterior"
     else:
-        return fmt(now - timedelta(days=6)), fmt(now), "Últimos 7 días"
+        return fmt(now - timedelta(days=6)), fmt(now), "Ultimos 7 dias"
 
 
 async def build_lumi_context(client_id, provider_id, period):
@@ -111,7 +111,7 @@ async def build_lumi_context(client_id, provider_id, period):
         if rate < 70:
             drivers_alerts += f"- {dname}: {rate}% entrega ({ds['delivered']}/{ds['total']})\n"
     if not drivers_alerts:
-        drivers_alerts = "Ningún driver por debajo del 70%"
+        drivers_alerts = "Ningun driver por debajo del 70%"
 
     # SLA
     sla_config = await db.config.find_one({"key": "sla_targets"}, {"_id": 0})
@@ -146,11 +146,11 @@ async def build_lumi_context(client_id, provider_id, period):
 
 
 def build_system_prompt(data: dict, user_name: str) -> str:
-    return f"""Eres Lumi, asistente de inteligencia operacional de LastMile OS para Mensajería y Estrategias (ME).
-Estás ayudando a {user_name}.
+    return f"""Eres Lumi, asistente de inteligencia operacional de LastMile OS para Mensajeria y Estrategias (ME).
+Estas ayudando a {user_name}.
 
 DATOS OPERATIVOS ACTIVOS:
-- Período: {data['period_label']} ({data['date_from']} a {data['date_to']})
+- Periodo: {data['period_label']} ({data['date_from']} a {data['date_to']})
 - Cliente: {data['client_name']}
 - Rutas operadas: {data['total_journeys']}
 - Paquetes: {data['packages_total']}
@@ -171,12 +171,12 @@ TOP ERRORES EVIDENCIA:
 {data['quality_errors_summary']}
 
 INSTRUCCIONES:
-- Responde siempre en español
-- Sé directo y usa cifras concretas del contexto
-- Respuestas de 2-4 oraciones salvo que pidan análisis detallado
-- Usa **negritas** para resaltar métricas clave
+- Responde siempre en espanol
+- Se directo y usa cifras concretas del contexto
+- Respuestas de 2-4 oraciones salvo que pidan analisis detallado
+- Usa **negritas** para resaltar metricas clave
 - Si te preguntan algo fuera del contexto operativo de LastMile, redirige amablemente
-- Si el SLA está por debajo del target, señálalo proactivamente"""
+- Si el SLA esta por debajo del target, senalalo proactivamente"""
 
 
 @router.post("/chat/lumi")
@@ -193,7 +193,7 @@ async def lumi_chat(payload: LumiChatRequest, user: dict = Depends(get_current_u
     )
 
     if ctx["total_journeys"] == 0:
-        return {"reply": f"No hay datos de rutas para el período **{ctx['period_label']}** ({ctx['date_from']} a {ctx['date_to']}). Prueba seleccionando un rango de fechas diferente."}
+        return {"reply": f"No hay datos de rutas para el periodo **{ctx['period_label']}** ({ctx['date_from']} a {ctx['date_to']}). Prueba seleccionando un rango de fechas diferente."}
 
     system_prompt = build_system_prompt(ctx, user.get("name", "Usuario"))
 

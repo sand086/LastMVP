@@ -21,7 +21,10 @@ import {
     ExternalLink,
     Loader2,
     BookOpen,
-    Zap
+    Zap,
+    Globe,
+    Shield,
+    Key
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -349,6 +352,83 @@ print(df.head())`;
                                     </div>
                                 </div>
                             ))}
+                        </CardContent>
+                    </Card>
+                    {/* Webhooks Reference */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="font-heading text-lg flex items-center gap-2">
+                                <Globe className="w-5 h-5" />
+                                Webhooks API (Plug & Play)
+                            </CardTitle>
+                            <CardDescription>
+                                Suscribete a eventos en tiempo real para integrar sistemas externos
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="space-y-3">
+                                {[
+                                    { method: 'GET', path: '/api/webhooks/events', desc: 'Lista eventos disponibles' },
+                                    { method: 'GET', path: '/api/webhooks', desc: 'Lista webhooks configurados' },
+                                    { method: 'POST', path: '/api/webhooks', desc: 'Crear nuevo webhook' },
+                                    { method: 'PUT', path: '/api/webhooks/{id}', desc: 'Actualizar webhook' },
+                                    { method: 'DELETE', path: '/api/webhooks/{id}', desc: 'Eliminar webhook' },
+                                    { method: 'POST', path: '/api/webhooks/{id}/test', desc: 'Enviar evento de prueba' },
+                                    { method: 'GET', path: '/api/webhooks/{id}/deliveries', desc: 'Log de entregas' },
+                                    { method: 'POST', path: '/api/webhooks/{id}/regenerate-secret', desc: 'Regenerar HMAC secret' },
+                                ].map((ep, i) => (
+                                    <div key={i} className="flex items-center gap-3 text-sm">
+                                        <span className={`px-2 py-0.5 rounded text-xs font-mono font-medium ${
+                                            ep.method === 'GET' ? 'bg-emerald-100 text-emerald-700' :
+                                            ep.method === 'POST' ? 'bg-blue-100 text-blue-700' :
+                                            ep.method === 'PUT' ? 'bg-amber-100 text-amber-700' :
+                                            'bg-red-100 text-red-700'
+                                        }`}>{ep.method}</span>
+                                        <code className="text-xs text-slate-700 font-mono">{ep.path}</code>
+                                        <span className="text-slate-500 text-xs">{ep.desc}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="mt-4 p-3 bg-slate-50 rounded text-sm text-slate-600 space-y-1">
+                                <p className="font-medium text-slate-700">Eventos disponibles:</p>
+                                <div className="grid grid-cols-2 gap-1 text-xs font-mono">
+                                    <span>journey.started</span>
+                                    <span>journey.closed</span>
+                                    <span>incident.created</span>
+                                    <span>incident.resolved</span>
+                                    <span>package.status_changed</span>
+                                    <span>layout.uploaded</span>
+                                    <span>quality.evaluated</span>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Security */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="font-heading text-lg flex items-center gap-2">
+                                <Shield className="w-5 h-5" />
+                                Seguridad
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3 text-sm text-slate-600">
+                            <div className="flex items-start gap-2">
+                                <Key className="w-4 h-4 mt-0.5 text-slate-500 shrink-0" />
+                                <p><strong>JWT Auth</strong>: Todas las peticiones requieren token Bearer. Expira en 8h.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Shield className="w-4 h-4 mt-0.5 text-slate-500 shrink-0" />
+                                <p><strong>CORS</strong>: Solo dominios autorizados. Rate limiting: 10 req/min en login.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Globe className="w-4 h-4 mt-0.5 text-slate-500 shrink-0" />
+                                <p><strong>Webhook HMAC</strong>: Cada webhook tiene un secret unico. Verifica payloads con <code className="bg-slate-100 px-1 rounded">X-Webhook-Signature: sha256=...</code></p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Database className="w-4 h-4 mt-0.5 text-slate-500 shrink-0" />
+                                <p><strong>Headers de seguridad</strong>: HSTS, X-Content-Type-Options, X-Frame-Options habilitados.</p>
+                            </div>
                         </CardContent>
                     </Card>
                 </TabsContent>

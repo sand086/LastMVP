@@ -526,7 +526,7 @@ const Settings = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-5">
                     <TabsTrigger value="users" data-testid="tab-users">
                         <Users className="w-4 h-4 mr-2" />
                         Usuarios
