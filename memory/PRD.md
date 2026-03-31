@@ -67,6 +67,15 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - agente@me.mx / LastMile2026 (Agent)
 - yael@me.mx / LastMile2026 (Coordinator)
 
+## Recent Fixes (2026-03-31) — Non-blocking AI + Refactoring
+- [x] evaluate-IA non-blocking: AI evaluation runs in separate thread with own event loop
+  - Login/dashboard respond in <250ms even during active AI evaluation (was 30+ seconds)
+  - Uses ThreadPoolExecutor + asyncio.new_event_loop() in worker thread
+  - Separate MongoDB connection per thread for safety
+- [x] API Documentation updated: Added evaluate-ia, Admin IA, Routes Report, PUT /users endpoints + security section
+- [x] JourneyDetail.jsx refactored: 2508 → 1739 lines (31% reduction)
+  - Extracted: JourneyStartTab.jsx (332 lines), JourneyIncidentsTab.jsx (161 lines), JourneyCloseTab.jsx (424 lines)
+
 ## Recent Fixes (2026-03-30) — Infrastructure Hardening
 - [x] FIX-001: CORS wildcard → dominios específicos (backend-level, env-driven)
 - [x] FIX-002: PUT /close schema — all fields Optional with auto-calculation from MongoDB
