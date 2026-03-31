@@ -363,8 +363,71 @@ def _parse_ai_response(text: str) -> Optional[dict]:
     return None
 
 
+# Global semaphore to limit concurrent AI evaluations and prevent event loop starvation
+_ai_eval_semaphore = asyncio.Semaphore(2)  # Max 2 concurrent LLM calls
+_AI_BATCH_SIZE = 3  # Process N packages per batch
+_AI_BATCH_DELAY = 0.1  # Seconds to yield event loop between batches
+
+# Thread pool for isolating heavy AI work from the main event loop
+from concurrent.futures import ThreadPoolExecutor
+_ai_thread_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-eval")
+
+
+def _run_ai_eval_sync(journey_id: str, packages: list, incident_tracking_numbers: set):
+    """Run AI evaluation in a separate thread with its own event loop.
+    This completely isolates LLM calls from the main event loop."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(
+            _evaluate_packages_ai_internal(journey_id, packages, incident_tracking_numbers)
+        )
+    except Exception as e:
+        logger.error(f"AI eval thread error for journey {journey_id}: {e}")
+    finally:
+        loop.close()
+
+
+async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incident_tracking_numbers: set):
+    """Internal async function that runs in a separate thread's event loop."""
+    from dependencies import db as main_db
+    from motor.motor_asyncio import AsyncIOMotorClient
+    import os
+
+    # Create a NEW MongoDB connection for this thread's event loop
+    mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+    db_name = os.environ.get("DB_NAME", "test_database")
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[db_name]
+
+    total = len(packages)
+    evaluated = 0
+    sem = asyncio.Semaphore(2)
+
+    async def _eval_one(pkg):
+        nonlocal evaluated
+        tn = (pkg.get("tracking_number") or "").strip().lower()
+        has_incident = tn in incident_tracking_numbers if tn else False
+        async with sem:
+            result = await evaluate_single_package_ai(pkg, has_incident)
+        if result and "error" not in result:
+            await db.packages.update_one({"id": pkg["id"]}, {"$set": result})
+        evaluated += 1
+
+    for i in range(0, total, _AI_BATCH_SIZE):
+        batch = packages[i:i + _AI_BATCH_SIZE]
+        await asyncio.gather(*[_eval_one(pkg) for pkg in batch])
+        await asyncio.sleep(_AI_BATCH_DELAY)
+        if evaluated % 6 == 0 and evaluated > 0:
+            logger.info(f"AI eval progress: {evaluated}/{total} for journey {journey_id}")
+
+    logger.info(f"AI evaluation completed for journey {journey_id}: {evaluated}/{total}")
+    client.close()
+
+
 async def evaluate_packages_for_journey(db: AsyncIOMotorDatabase, journey_id: str, use_ai: bool = False):
-    """Evaluate evidence scores for all delivered/failed packages in a journey."""
+    """Evaluate evidence scores for all delivered/failed packages in a journey.
+    AI mode runs in a separate thread to avoid blocking the main event loop."""
     packages = await db.packages.find(
         {"journey_id": journey_id, "status": {"$in": ["delivered", "failed"]}},
         {"_id": 0},
@@ -380,20 +443,28 @@ async def evaluate_packages_for_journey(db: AsyncIOMotorDatabase, journey_id: st
         if i.get("tracking_number")
     }
 
-    for pkg in packages:
-        tn = (pkg.get("tracking_number") or "").strip().lower()
-        has_incident = tn in incident_tracking_numbers if tn else False
-
-        if use_ai:
-            result = await evaluate_single_package_ai(pkg, has_incident)
-        else:
+    if not use_ai:
+        # Rule-based: fast, run inline
+        for pkg in packages:
+            tn = (pkg.get("tracking_number") or "").strip().lower()
+            has_incident = tn in incident_tracking_numbers if tn else False
             result = calculate_evidence_score_rules(pkg, has_incident)
+            if result and "error" not in result:
+                await db.packages.update_one({"id": pkg["id"]}, {"$set": result})
+        return
 
-        if result and "error" not in result:
-            await db.packages.update_one(
-                {"id": pkg["id"]},
-                {"$set": result},
-            )
+    # AI mode: offload to a separate thread with its own event loop
+    total = len(packages)
+    logger.info(f"AI evaluation dispatched to background thread for journey {journey_id}: {total} packages")
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(
+        _ai_thread_pool,
+        _run_ai_eval_sync,
+        journey_id,
+        packages,
+        incident_tracking_numbers,
+    )
 
 
 async def evaluate_single_package_for_journey(

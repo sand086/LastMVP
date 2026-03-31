@@ -1405,8 +1405,9 @@ async def report_schema():
                 "name": "KPIs Report",
                 "endpoint": "/api/reports/kpis",
                 "method": "GET",
-                "description": "KPIs agregados por período o dimensión",
+                "description": "KPIs agregados por período o dimensión. Soporta period shortcut o fechas explícitas.",
                 "parameters": [
+                    {"name": "period", "type": "string", "enum": ["current_month", "prev_month", "7d", "30d", "90d"], "required": False},
                     {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
                     {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
                     {"name": "group_by", "type": "string", "enum": ["day", "week", "month", "provider", "client"], "default": "day"},
@@ -1414,6 +1415,7 @@ async def report_schema():
                 "fields": [
                     "group", "journeys_count", "journeys_completed", "packages_total",
                     "packages_delivered", "packages_failed", "km_total", "delivery_rate",
+                    "has_data", "summary.total_journeys", "summary.delivery_rate",
                 ],
             },
             {
@@ -1647,6 +1649,50 @@ async def report_schema():
                 "fields": ["response", "session_id"],
             },
             {
+                "name": "Evaluate IA (Non-Blocking)",
+                "endpoint": "/api/journeys/{journey_id}/evaluate-ia",
+                "method": "POST",
+                "description": "Lanza evaluación IA de evidencias en segundo plano. No bloquea operaciones (login, dashboard). Procesa paquetes en lotes de 3 con semáforo.",
+                "parameters": [
+                    {"name": "journey_id", "type": "string", "required": True},
+                ],
+                "fields": ["status", "message", "current_stats"],
+            },
+            {
+                "name": "Admin IA Consumption Summary",
+                "endpoint": "/api/admin/ia-consumption/summary",
+                "method": "GET",
+                "description": "Resumen de consumo de tokens LLM (Claude Sonnet) por periodo.",
+                "parameters": [
+                    {"name": "period", "type": "string", "enum": ["current_month", "prev_month", "7d"], "required": False},
+                ],
+                "fields": ["total_tokens", "total_cost_usd", "total_cost_mxn", "by_endpoint", "by_model"],
+            },
+            {
+                "name": "Admin Routes Report",
+                "endpoint": "/api/admin/routes-report",
+                "method": "GET",
+                "description": "Reporte detallado de rutas para administradores con export a Excel.",
+                "parameters": [
+                    {"name": "date_from", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                    {"name": "date_to", "type": "string", "format": "YYYY-MM-DD", "required": False},
+                ],
+                "fields": ["routes[]", "total", "summary"],
+            },
+            {
+                "name": "Update User",
+                "endpoint": "/api/users/{user_id}",
+                "method": "PUT",
+                "description": "Actualiza datos de un usuario. Solo coordinator/developer.",
+                "parameters": [
+                    {"name": "user_id", "type": "string", "required": True},
+                    {"name": "name", "type": "string", "required": False},
+                    {"name": "phone", "type": "string", "required": False},
+                    {"name": "status", "type": "string", "required": False},
+                ],
+                "fields": ["message"],
+            },
+            {
                 "name": "Quality Settings (Master)",
                 "endpoint": "/api/config/quality-settings",
                 "method": "GET/PATCH",
@@ -1663,5 +1709,19 @@ async def report_schema():
             "header": "Authorization",
             "format": "Bearer <token>",
             "obtain_token": "POST /api/auth/login with {email, password}",
+            "expiry": "8 horas (configurable via JWT_EXPIRY_HOURS)",
+            "auto_logout": "Frontend redirige a /login con reason=expired al recibir 401",
+        },
+        "security": {
+            "cors": "Restringido a dominios autorizados (configurable via CORS_ORIGINS)",
+            "hsts": "Strict-Transport-Security: max-age=31536000; includeSubDomains",
+            "headers": [
+                "X-Frame-Options: DENY",
+                "X-Content-Type-Options: nosniff",
+                "X-XSS-Protection: 1; mode=block",
+                "Referrer-Policy: strict-origin-when-cross-origin",
+                "Cache-Control: no-store (en rutas /api/)",
+            ],
+            "jwt_secret": "Configurado via variable de entorno JWT_SECRET",
         },
     }
