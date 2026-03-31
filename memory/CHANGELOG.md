@@ -1,5 +1,13 @@
 # LastMile OS - CHANGELOG
 
+## 2026-03-31 — Code Quality Fixes
+- [x] XSS: Added DOMPurify sanitization to LumiChat.jsx (formatAIText) and Reports.jsx (AI narrative)
+- [x] Array index keys: Replaced 21 instances across 13 files with stable unique keys
+- [x] Python refactoring: evidence_scoring.py — extracted _score_delivered, _score_failed, _rules_fallback, _build_ai_result, _call_ai_vision
+- [x] Python refactoring: middleware.py — _match_action to _PATTERN_RULES table, _extract_entity to _ENTITY_KEYWORDS lookup, _log_request split to _track_error + _track_audit
+- [x] Lint fixes: Ambiguous variable names in system_routes.py
+- [x] Testing: iteration_24 — 100% backend (28/28), 100% frontend
+
 ## 2026-03-31 — Webhooks + Refactoring + API Docs Update
 - [x] Webhooks Integration (Plug & Play): Full CRUD, test dispatch, HMAC signatures, delivery log, retry logic
 - [x] WebhooksTab UI in Settings page (create, toggle, test, delete, expand deliveries, regenerate secret)

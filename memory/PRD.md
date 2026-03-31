@@ -5,7 +5,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 
 ## Tech Stack
 - **Backend**: FastAPI, Motor (MongoDB), Python 3.11
-- **Frontend**: React 18, TailwindCSS, Shadcn UI, React-Leaflet
+- **Frontend**: React 18, TailwindCSS, Shadcn UI, React-Leaflet, DOMPurify
 - **Database**: MongoDB
 - **AI**: Claude Sonnet 4.5 via Emergent LLM Key
 - **Maps**: Leaflet + CartoDB Positron tiles
@@ -34,13 +34,14 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Database indexes + parallel query optimization
 - [x] Webhook Integrations (Plug & Play) — CRUD, test, HMAC, delivery log
 - [x] Backend refactoring — all routes in /routes/ directory
+- [x] Code quality: XSS sanitization (DOMPurify), Python complexity reduction, table-driven middleware
 
 ## Architecture (Post-Refactoring 2026-03-31)
 ```
 /app/backend/
   server.py (206 lines - app setup only)
-  dependencies.py, models.py, middleware.py
-  evidence_scoring.py (ThreadPoolExecutor for AI)
+  dependencies.py, models.py, middleware.py (refactored: table-driven)
+  evidence_scoring.py (refactored: 5 extracted helpers)
   kosmo_sync.py (sync engine + periodic scheduler)
   token_logger.py, cp_coordinates.py, ws_manager.py
 
@@ -81,3 +82,4 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [ ] Export journey details to PDF (P1)
 - [ ] Automatic image compression for large uploads (P2)
 - [ ] Historical trend charts for delivery rates (P2)
+- [ ] localStorage → httpOnly cookies migration (P2, security hardening)
