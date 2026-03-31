@@ -27,6 +27,7 @@ from routes import (
     admin_router,
     quality_criteria_router,
     quality_tab_router,
+    webhook_router,
 )
 from admin import router as admin_module_router
 from lumi import router as lumi_router
@@ -82,6 +83,7 @@ api_router.include_router(quality_criteria_router)
 api_router.include_router(quality_tab_router)
 api_router.include_router(admin_module_router)
 api_router.include_router(lumi_router)
+api_router.include_router(webhook_router)
 
 app.include_router(api_router)
 
@@ -188,6 +190,10 @@ async def startup_event():
     # Audit logs
     await db.audit_logs.create_index("timestamp", background=True)
     await db.audit_logs.create_index([("user_id", 1), ("timestamp", -1)], background=True)
+
+    # Webhooks
+    await db.webhooks.create_index("is_active", background=True)
+    await db.webhook_deliveries.create_index([("webhook_id", 1), ("timestamp", -1)], background=True)
 
     # Compound indexes for production performance
     await db.journeys.create_index([("client_id", 1), ("date", -1)], background=True)

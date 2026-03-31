@@ -1704,6 +1704,45 @@ async def report_schema():
                 "fields": ["kpi_targets", "sla_brackets", "sla_targets_by_rubro", "penalty_rules", "strike_policy", "ia_config", "error_catalog", "_meta"],
             },
         ],
+        "webhooks": {
+            "description": "Sistema Plug&Play de webhooks para integrar LastMile OS con sistemas externos",
+            "endpoints": [
+                {"method": "GET",  "path": "/api/webhooks/events", "description": "Lista eventos disponibles"},
+                {"method": "GET",  "path": "/api/webhooks", "description": "Lista webhooks configurados"},
+                {"method": "POST", "path": "/api/webhooks", "description": "Crea nuevo webhook"},
+                {"method": "PUT",  "path": "/api/webhooks/{id}", "description": "Actualiza webhook"},
+                {"method": "DELETE", "path": "/api/webhooks/{id}", "description": "Elimina webhook"},
+                {"method": "POST", "path": "/api/webhooks/{id}/test", "description": "Envia payload de prueba"},
+                {"method": "GET",  "path": "/api/webhooks/{id}/deliveries", "description": "Log de entregas"},
+                {"method": "POST", "path": "/api/webhooks/{id}/regenerate-secret", "description": "Regenera HMAC secret"},
+            ],
+            "events": [
+                "journey.started", "journey.closed", "incident.created",
+                "incident.resolved", "package.status_changed",
+                "layout.uploaded", "quality.evaluated",
+            ],
+            "delivery": {
+                "method": "POST",
+                "content_type": "application/json",
+                "headers": [
+                    "X-Webhook-Event: nombre del evento",
+                    "X-Webhook-Signature: sha256={hmac_hex}",
+                    "X-Webhook-Id: id del webhook",
+                ],
+                "retry_policy": "3 intentos con backoff: 5s, 30s, 120s",
+                "timeout": "10 segundos por intento",
+            },
+            "payload_example": {
+                "event": "journey.closed",
+                "timestamp": "2026-03-31T20:00:00Z",
+                "data": {
+                    "journey_id": "uuid",
+                    "client_id": "CUBBO",
+                    "provider_id": "ME",
+                    "close_data": {"delivery_rate": 95.2, "km_traveled": 142},
+                },
+            },
+        },
         "authentication": {
             "type": "Bearer Token",
             "header": "Authorization",

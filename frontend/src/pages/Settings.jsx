@@ -64,12 +64,14 @@ import {
     Database,
     Shield,
     Link as LinkIcon,
+    Globe,
     Settings2,
     Server,
     Clock,
     Search
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { WebhooksTab } from '../components/WebhooksTab';
 
 const Settings = () => {
     const { isCoordinator } = useAuth();
@@ -541,6 +543,10 @@ const Settings = () => {
                         <Settings2 className="w-4 h-4 mr-2" />
                         Sistema
                     </TabsTrigger>
+                    <TabsTrigger value="webhooks" data-testid="tab-webhooks">
+                        <Globe className="w-4 h-4 mr-2" />
+                        Webhooks
+                    </TabsTrigger>
                 </TabsList>
 
                 {/* Users Tab */}
@@ -851,6 +857,11 @@ const Settings = () => {
                             )}
                         </CardContent>
                     </Card>
+                </TabsContent>
+
+                {/* Webhooks Tab */}
+                <TabsContent value="webhooks">
+                    <WebhooksTab />
                 </TabsContent>
             </Tabs>
 

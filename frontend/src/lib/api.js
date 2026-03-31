@@ -246,3 +246,14 @@ export const saveTrainingSample = (data) => api.post('/training/samples', data);
 export const updatePackageReview = (journeyId, guide, data) => api.patch(`/journeys/${journeyId}/packages/${encodeURIComponent(guide)}/review`, data);
 
 export default api;
+
+// Webhooks
+export const getWebhookEvents = () => api.get('/webhooks/events');
+export const getWebhooks = () => api.get('/webhooks');
+export const createWebhook = (data) => api.post('/webhooks', data);
+export const updateWebhook = (id, data) => api.put(`/webhooks/${id}`, data);
+export const deleteWebhook = (id) => api.delete(`/webhooks/${id}`);
+export const testWebhook = (id) => api.post(`/webhooks/${id}/test`);
+export const getWebhookDeliveries = (id) => api.get(`/webhooks/${id}/deliveries`);
+export const regenerateWebhookSecret = (id) => api.post(`/webhooks/${id}/regenerate-secret`);
+

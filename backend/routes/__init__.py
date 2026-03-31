@@ -7,3 +7,4 @@ from .analytics_routes import router as analytics_router
 from .admin_routes import router as admin_router
 from .quality_criteria_routes import router as quality_criteria_router
 from .quality_tab_routes import router as quality_tab_router
+from .webhook_routes import router as webhook_router
