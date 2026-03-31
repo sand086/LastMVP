@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import DOMPurify from 'dompurify';
 import { useAuth } from '../contexts/AuthContext';
 import { useSortableTable } from '../lib/useSortableTable';
 import {
@@ -88,7 +89,7 @@ const KPIStrip = ({ reportData, slaData, qualityData }) => {
     return (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', border: `1px solid ${T.border}`, borderRadius: T.radius, background: T.surface, overflow: 'hidden' }} data-testid="kpi-strip">
             {items.map((item, i) => (
-                <div key={i} style={{ padding: '16px 20px', borderRight: i < 3 ? `1px solid ${T.border}` : 'none' }}>
+                <div key={`kpi-${item.label}`} style={{ padding: '16px 20px', borderRight: i < 3 ? `1px solid ${T.border}` : 'none' }}>
                     <p style={{ fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em', color: T.textTer, marginBottom: 4 }}>{item.label}</p>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                         <span style={{ fontSize: 24, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", color: T.textPri }}>{item.value}</span>
@@ -392,7 +393,7 @@ const SLATab = ({ slaData, canEditBrackets }) => {
                 </div>
                 <h5 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Brackets de escalamiento</h5>
                 {brackets.map((b, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 12px', borderRadius: T.radiusSm, background: T.surface2 }}>
+                    <div key={`bracket-${b.label}`} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 12px', borderRadius: T.radiusSm, background: T.surface2 }}>
                         <span style={{ fontSize: 13, fontWeight: 500, width: 80, flexShrink: 0 }}>{b.label}</span>
                         {canEditBrackets ? (
                             <input
@@ -687,7 +688,7 @@ const Reports = () => {
                         </div>
                     ) : (
                         <div style={{ fontSize: 13, lineHeight: 1.7, color: T.textPri }}
-                            dangerouslySetInnerHTML={{ __html: (aiNarrative || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>') }} />
+                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((aiNarrative || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')) }} />
                     )}
                 </div>
             )}

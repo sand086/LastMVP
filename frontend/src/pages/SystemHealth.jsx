@@ -174,7 +174,7 @@ const SystemHealth = () => {
                                 </thead>
                                 <tbody>
                                     {health.recent_errors.map((err, i) => (
-                                        <tr key={i}>
+                                        <tr key={`err-${err.timestamp}-${err.status_code}`}>
                                             <td className="font-mono text-xs">{err.timestamp?.slice(0, 19)}</td>
                                             <td><span className="px-1.5 py-0.5 text-xs font-mono bg-slate-100 rounded">{err.method}</span></td>
                                             <td className="font-mono text-xs">{err.path}</td>
@@ -240,7 +240,7 @@ const SystemHealth = () => {
                                 <CardContent>
                                     <div className="space-y-2">
                                         {perf.slowest_endpoints.map((ep, i) => (
-                                            <div key={i} className="flex items-center justify-between p-2 bg-slate-50 rounded-sm text-sm">
+                                            <div key={`ep-${ep.method}-${ep.path}`} className="flex items-center justify-between p-2 bg-slate-50 rounded-sm text-sm">
                                                 <div className="flex items-center gap-2 min-w-0">
                                                     <span className="px-1.5 py-0.5 text-xs font-mono bg-slate-200 rounded shrink-0">{ep.method}</span>
                                                     <span className="font-mono text-xs truncate">{ep.path}</span>
@@ -271,7 +271,7 @@ const SystemHealth = () => {
                                         {perf.active_users.map((u, i) => {
                                             const maxActions = perf.active_users[0]?.actions || 1;
                                             return (
-                                                <div key={i} className="flex items-center gap-3">
+                                                <div key={`user-${u.user_id}`} className="flex items-center gap-3">
                                                     <span className="text-sm font-medium w-32 truncate">{u.name}</span>
                                                     <div className="flex-1">
                                                         <Progress value={(u.actions / maxActions) * 100} className="h-2" />

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import DOMPurify from 'dompurify';
 import { sendLumiMessage } from '../lib/api';
 import { X, Send, MessageCircle } from 'lucide-react';
 
@@ -21,11 +22,12 @@ const TruckSVG = ({ size = 28 }) => (
 );
 
 function formatAIText(text) {
-    return text
+    const html = text
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/`([^`]+)`/g, '<code style="background:#F0EFEC;padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
         .replace(/\n/g, '<br>')
         .replace(/(\d+\.?\d*%)/g, '<strong style="color:#1A1916">$1</strong>');
+    return DOMPurify.sanitize(html);
 }
 
 const WELCOME_MSG = {
@@ -153,7 +155,7 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                     {/* Messages */}
                     <div className="lumi-messages" ref={scrollRef}>
                         {messages.map((msg, i) => (
-                            <div key={i}>
+                            <div key={`msg-${msg.role}-${i}-${msg.content?.slice(0,12)}`}>
                                 <div className={`lumi-bubble ${msg.role === 'user' ? 'lumi-bubble-user' : 'lumi-bubble-ai'}`}
                                     dangerouslySetInnerHTML={{ __html: formatAIText(msg.content) }}
                                 />

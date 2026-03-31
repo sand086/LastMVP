@@ -336,7 +336,7 @@ const ExpandedPanel = ({ pkg, catalogMap, journeyId, onTrainingDone, canEdit }) 
                         const status = getPhotoStatus(i);
                         const borderC = photoStatusBorder(status);
                         return (
-                            <div key={i} style={{ position: 'relative', width: 64, height: 64, borderRadius: T.radiusSm, border: `2px solid ${borderC}`, overflow: 'hidden', cursor: 'pointer' }}>
+                            <div key={`photo-${type}-${i}`} style={{ position: 'relative', width: 64, height: 64, borderRadius: T.radiusSm, border: `2px solid ${borderC}`, overflow: 'hidden', cursor: 'pointer' }}>
                                 <img src={url} alt={type} style={{ width: '100%', height: '100%', objectFit: 'cover' }} loading="lazy" />
                                 <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '1px 4px', fontSize: 9, background: 'rgba(0,0,0,0.7)', color: '#fff', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                                     {type.replace(/_/g, ' ')} {photoStatusIcon(status)}

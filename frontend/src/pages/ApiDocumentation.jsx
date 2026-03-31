@@ -287,7 +287,7 @@ print(df.head())`;
                         </CardHeader>
                         <CardContent className="space-y-6">
                             {schema?.endpoints?.map((endpoint, idx) => (
-                                <div key={idx} className="border border-slate-200 rounded-sm overflow-hidden">
+                                <div key={`ep-${endpoint.method}-${endpoint.name}`} className="border border-slate-200 rounded-sm overflow-hidden">
                                     <div className="bg-slate-50 p-4 border-b border-slate-200">
                                         <div className="flex items-center justify-between">
                                             <div>
@@ -377,7 +377,7 @@ print(df.head())`;
                                     { method: 'GET', path: '/api/webhooks/{id}/deliveries', desc: 'Log de entregas' },
                                     { method: 'POST', path: '/api/webhooks/{id}/regenerate-secret', desc: 'Regenerar HMAC secret' },
                                 ].map((ep, i) => (
-                                    <div key={i} className="flex items-center gap-3 text-sm">
+                                    <div key={`wh-${ep.method}-${ep.path}`} className="flex items-center gap-3 text-sm">
                                         <span className={`px-2 py-0.5 rounded text-xs font-mono font-medium ${
                                             ep.method === 'GET' ? 'bg-emerald-100 text-emerald-700' :
                                             ep.method === 'POST' ? 'bg-blue-100 text-blue-700' :

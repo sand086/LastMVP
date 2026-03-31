@@ -158,7 +158,7 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
                                 <thead><tr style={{ borderBottom: `1px solid ${T.border}` }}><th style={{ textAlign: 'left', padding: '4px 0', color: T.textTer }}>Fecha</th><th style={{ textAlign: 'right', padding: '4px 0', color: T.textTer }}>TC MXN/USD</th></tr></thead>
                                 <tbody>
                                     {(config?.exchange_rate?.history || []).slice(0, 5).map((h, i) => (
-                                        <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                                        <tr key={`rate-${h.date}`} style={{ borderBottom: `1px solid ${T.border}` }}>
                                             <td style={{ padding: '4px 0' }}>{h.date}</td>
                                             <td style={{ padding: '4px 0', textAlign: 'right', fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>${h.rate}</td>
                                         </tr>

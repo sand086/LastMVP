@@ -171,7 +171,7 @@ const EvidenceCarousel = ({ open, onClose, images, initialIndex = 0, packageInfo
                     <div className="flex gap-1.5 overflow-x-auto pb-1" data-testid="carousel-thumbnails">
                         {images.map((img, idx) => (
                             <button
-                                key={idx}
+                                key={`thumb-${img.url}`}
                                 onClick={() => { setCurrentIndex(idx); setZoom(1); }}
                                 className={`shrink-0 w-12 h-12 rounded overflow-hidden border-2 transition ${
                                     idx === currentIndex ? 'border-blue-500 opacity-100' : 'border-transparent opacity-50 hover:opacity-80'

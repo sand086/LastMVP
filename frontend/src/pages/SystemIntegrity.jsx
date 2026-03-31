@@ -138,7 +138,7 @@ const SystemIntegrity = () => {
                             {results.issues.map((issue, idx) => {
                                 const Icon = SEVERITY_ICONS[issue.severity] || Info;
                                 return (
-                                    <Card key={idx} data-testid={`integrity-issue-${idx}`}>
+                                    <Card key={`issue-${issue.entity_id}-${issue.type}`} data-testid={`integrity-issue-${idx}`}>
                                         <CardContent className="p-4">
                                             <div className="flex items-start gap-3">
                                                 <Icon className={`w-5 h-5 mt-0.5 shrink-0 ${

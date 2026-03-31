@@ -675,7 +675,7 @@ const Layout = () => {
                                         <p className="text-sm font-medium text-emerald-800 mb-2">Rutas creadas:</p>
                                         <ul className="space-y-1 text-sm text-emerald-700">
                                             {creationResult.created_journeys.map((j, idx) => (
-                                                <li key={idx}>
+                                                <li key={`created-${j.route_id}`}>
                                                     • {j.driver} - {j.packages} paquetes nuevos (Ruta: {j.route_id})
                                                     {j.duplicates_updated > 0 && (
                                                         <span className="text-blue-600 ml-2">
@@ -693,7 +693,7 @@ const Layout = () => {
                                         <p className="text-sm font-medium text-blue-700 mb-2">Rutas con paquetes actualizados:</p>
                                         <ul className="space-y-1 text-sm text-blue-600">
                                             {creationResult.updated_journeys.map((j, idx) => (
-                                                <li key={idx}>
+                                                <li key={`updated-${j.route_id || j.driver}`}>
                                                     • {j.driver || j.route_id} - {j.packages_updated} paquetes actualizados
                                                 </li>
                                             ))}
@@ -714,7 +714,7 @@ const Layout = () => {
                                         <p className="text-sm font-medium text-amber-700 mb-2">Rutas duplicadas omitidas:</p>
                                         <ul className="space-y-1 text-sm text-amber-600">
                                             {creationResult.skipped_duplicates.map((id, idx) => (
-                                                <li key={idx}>• {id}</li>
+                                                <li key={`skip-${id}`}>• {id}</li>
                                             ))}
                                         </ul>
                                     </div>
@@ -725,7 +725,7 @@ const Layout = () => {
                                         <p className="text-sm font-medium text-red-700 mb-2">Errores:</p>
                                         <ul className="space-y-1 text-sm text-red-600">
                                             {creationResult.errors.map((err, idx) => (
-                                                <li key={idx}>• {err}</li>
+                                                <li key={`err-${idx}-${err.slice(0,12)}`}>• {err}</li>
                                             ))}
                                         </ul>
                                     </div>

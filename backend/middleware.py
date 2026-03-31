@@ -54,69 +54,63 @@ ACTION_MAP = {
 }
 
 
+_PATTERN_RULES = [
+    # (method, path_contains, path_endswith, action)
+    ("POST", "/journeys/", "/start", "route_started"),
+    ("POST", "/journeys/", "/close", "route_closed"),
+    ("POST", "/journeys/", "/incidents", "incident_created"),
+    ("PUT", "/incidents/", "/resolve", "incident_resolved"),
+    ("PUT", "/incidents/", None, "incident_updated"),
+    ("DELETE", "/users/", None, "user_deleted"),
+    ("PUT", "/users/", None, "user_modified"),
+    ("POST", "/upload/", None, "layout_uploaded"),
+]
+
+
 def _match_action(method: str, path: str) -> str:
-    """Match a request to an audit action."""
-    # Exact matches
+    """Match a request to an audit action using lookup table then pattern rules."""
     key = (method, path)
     if key in ACTION_MAP:
         return ACTION_MAP[key]
-    
-    # Pattern matches
-    if method == "POST" and "/journeys/" in path:
-        if path.endswith("/start"):
-            return "route_started"
-        if path.endswith("/close"):
-            return "route_closed"
-        if "/incidents" in path:
-            return "incident_created"
-    if method == "PUT" and "/incidents/" in path:
-        if "/resolve" in path:
-            return "incident_resolved"
-        return "incident_updated"
-    if method == "DELETE" and "/users/" in path:
-        return "user_deleted"
-    if method == "PUT" and "/users/" in path:
-        if "/assignments" in path:
-            return "user_modified"
-        if "/password" in path:
-            return "user_modified"
-        return "user_modified"
-    if method == "POST" and "/upload/" in path:
-        return "layout_uploaded"
-    
+
+    for rule_method, contains, endswith, action in _PATTERN_RULES:
+        if method != rule_method or contains not in path:
+            continue
+        if endswith is None or path.endswith(endswith):
+            return action
+
     return ""
 
 
+_ENTITY_KEYWORDS = ["journeys", "incidents", "users", "upload", "reports"]
+_ENTITY_TYPE_MAP = {
+    "journeys": "journey",
+    "incidents": "incident",
+    "users": "user",
+    "upload": "layout",
+    "reports": "report",
+}
+_NO_ID_KEYWORDS = {"upload", "reports"}
+_SKIP_ID_VALUES = {"from-cosmo"}
+
+
 def _extract_entity(path: str) -> tuple:
-    """Extract entity type and ID from path."""
+    """Extract entity type and ID from path using lookup tables."""
     parts = path.strip("/").split("/")
-    # /api/journeys/{id}/start -> journeys, id
-    # /api/incidents/{id} -> incidents, id
-    # /api/users/{id} -> users, id
-    entity_type = ""
-    entity_id = ""
-    
-    if "journeys" in parts:
-        idx = parts.index("journeys")
-        entity_type = "journey"
-        if idx + 1 < len(parts) and parts[idx + 1] not in ("from-cosmo",):
+
+    for keyword in _ENTITY_KEYWORDS:
+        if keyword not in parts:
+            continue
+        entity_type = _ENTITY_TYPE_MAP[keyword]
+        if keyword in _NO_ID_KEYWORDS:
+            return entity_type, ""
+        idx = parts.index(keyword)
+        entity_id = ""
+        if idx + 1 < len(parts) and parts[idx + 1] not in _SKIP_ID_VALUES:
             entity_id = parts[idx + 1]
-    elif "incidents" in parts:
-        idx = parts.index("incidents")
-        entity_type = "incident"
-        if idx + 1 < len(parts):
-            entity_id = parts[idx + 1]
-    elif "users" in parts:
-        idx = parts.index("users")
-        entity_type = "user"
-        if idx + 1 < len(parts):
-            entity_id = parts[idx + 1]
-    elif "upload" in parts:
-        entity_type = "layout"
-    elif "reports" in parts:
-        entity_type = "report"
-    
-    return entity_type, entity_id
+        return entity_type, entity_id
+
+    return "", ""
 
 
 class AuditMiddleware(BaseHTTPMiddleware):
@@ -177,88 +171,71 @@ class AuditMiddleware(BaseHTTPMiddleware):
         """Log request metrics and errors asynchronously."""
         try:
             now = datetime.now(timezone.utc)
-            
+            now_iso = now.isoformat()
+            date_str = now.strftime("%Y-%m-%d")
+
             # Always store request metric
-            metric = {
+            await db.request_metrics.insert_one({
                 "id": str(uuid.uuid4()),
-                "timestamp": now.isoformat(),
+                "timestamp": now_iso,
                 "method": method,
                 "path": path,
                 "status_code": status_code,
                 "duration_ms": duration_ms,
                 "client_ip": client_ip,
                 "hour": now.hour,
-                "date": now.strftime("%Y-%m-%d"),
-            }
-            await db.request_metrics.insert_one(metric)
-            
-            # Track errors (4xx and 5xx)
+                "date": date_str,
+            })
+
             if status_code >= 400:
-                error_key = f"{method}:{path}:{status_code}"
-                existing = await db.system_errors.find_one(
-                    {"error_key": error_key, "reviewed": False}, {"_id": 0}
-                )
-                
-                if existing:
-                    await db.system_errors.update_one(
-                        {"id": existing["id"]},
-                        {
-                            "$inc": {"occurrence_count": 1},
-                            "$set": {
-                                "last_seen": now.isoformat(),
-                                "last_detail": error_detail or "",
-                                "last_ip": client_ip,
-                            }
-                        }
-                    )
-                else:
-                    error_type = "api_error"
-                    if "/upload/" in path:
-                        error_type = "parsing_error"
-                    elif status_code == 422:
-                        error_type = "validation_error"
-                    
-                    await db.system_errors.insert_one({
-                        "id": str(uuid.uuid4()),
-                        "error_key": error_key,
-                        "error_type": error_type,
-                        "method": method,
-                        "endpoint": path,
-                        "status_code": status_code,
-                        "detail": error_detail or "",
-                        "last_detail": error_detail or "",
-                        "last_ip": client_ip,
-                        "occurrence_count": 1,
-                        "first_seen": now.isoformat(),
-                        "last_seen": now.isoformat(),
-                        "reviewed": False,
-                        "reviewed_by": None,
-                        "reviewed_at": None,
-                    })
-            
-            # Audit logging for critical actions
-            action = _match_action(method, path)
-            if action and status_code < 400:
-                entity_type, entity_id = _extract_entity(path)
-                
-                audit_entry = {
-                    "id": str(uuid.uuid4()),
-                    "timestamp": now.isoformat(),
-                    "user_id": user_id,
-                    "user_role": user_role,
-                    "action": action,
-                    "entity_type": entity_type,
-                    "entity_id": entity_id,
-                    "ip": client_ip,
-                    "status": "success" if status_code < 400 else "error",
-                    "status_code": status_code,
-                    "details": "",
-                    "date": now.strftime("%Y-%m-%d"),
-                }
-                await db.audit_logs.insert_one(audit_entry)
-        
+                await self._track_error(db, method, path, status_code, client_ip, error_detail, now_iso)
+
+            if status_code < 400:
+                await self._track_audit(db, method, path, user_id, user_role, client_ip, status_code, now_iso, date_str)
+
         except Exception as e:
             logger.error(f"Middleware logging error: {e}")
+
+    async def _track_error(self, db, method, path, status_code, client_ip, error_detail, now_iso):
+        """Track 4xx/5xx errors in system_errors collection."""
+        error_key = f"{method}:{path}:{status_code}"
+        existing = await db.system_errors.find_one(
+            {"error_key": error_key, "reviewed": False}, {"_id": 0}
+        )
+
+        if existing:
+            await db.system_errors.update_one(
+                {"id": existing["id"]},
+                {"$inc": {"occurrence_count": 1}, "$set": {
+                    "last_seen": now_iso, "last_detail": error_detail or "", "last_ip": client_ip,
+                }}
+            )
+        else:
+            error_type = "parsing_error" if "/upload/" in path else (
+                "validation_error" if status_code == 422 else "api_error"
+            )
+            await db.system_errors.insert_one({
+                "id": str(uuid.uuid4()), "error_key": error_key,
+                "error_type": error_type, "method": method, "endpoint": path,
+                "status_code": status_code, "detail": error_detail or "",
+                "last_detail": error_detail or "", "last_ip": client_ip,
+                "occurrence_count": 1, "first_seen": now_iso, "last_seen": now_iso,
+                "reviewed": False, "reviewed_by": None, "reviewed_at": None,
+            })
+
+    async def _track_audit(self, db, method, path, user_id, user_role, client_ip, status_code, now_iso, date_str):
+        """Log audit trail for critical actions."""
+        action = _match_action(method, path)
+        if not action:
+            return
+        entity_type, entity_id = _extract_entity(path)
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()), "timestamp": now_iso,
+            "user_id": user_id, "user_role": user_role, "action": action,
+            "entity_type": entity_type, "entity_id": entity_id,
+            "ip": client_ip, "status": "success",
+            "status_code": status_code, "details": "", "date": date_str,
+        })
 
 
 async def log_audit_event(db, user_id: str, user_role: str, action: str,

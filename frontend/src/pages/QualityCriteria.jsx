@@ -67,7 +67,7 @@ const EvidenciasTab = ({ criteria, setCriteria, setDirty, canEdit }) => {
                     style={inp} disabled={!canEdit} data-testid="third-party-keywords-input"
                 />
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
-                    {(criteria.third_party_keywords || []).map((kw, i) => <Pill key={i} bg={T.blueLt} color={T.blue}>{kw}</Pill>)}
+                    {(criteria.third_party_keywords || []).map((kw, i) => <Pill key={`kw-${kw}`} bg={T.blueLt} color={T.blue}>{kw}</Pill>)}
                 </div>
             </div>
             {/* Delivery types */}

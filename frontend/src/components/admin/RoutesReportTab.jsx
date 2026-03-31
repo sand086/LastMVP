@@ -193,7 +193,7 @@ export default function RoutesReportTab({ canEdit }) {
                     { label: 'Costo total', val: fmtMoney(totals.costo_total || 0), color: T.textPri },
                     { label: 'KM extra', val: fmtMoney(totals.km_excedente_cost || 0), color: T.amber },
                 ].map((t, i) => (
-                    <div key={i} style={{ padding: '10px 14px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, background: T.surface, flex: 1, textAlign: 'center' }}>
+                    <div key={`total-${t.label}`} style={{ padding: '10px 14px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, background: T.surface, flex: 1, textAlign: 'center' }}>
                         <p style={{ fontSize: 10, color: T.textTer, fontWeight: 500, textTransform: 'uppercase', marginBottom: 4 }}>{t.label}</p>
                         <span style={{ fontSize: 16, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: t.color }}>{t.val}</span>
                     </div>
@@ -217,7 +217,7 @@ export default function RoutesReportTab({ canEdit }) {
                             ) : rows.length === 0 ? (
                                 <tr><td colSpan={activeCols.length} style={{ padding: 40, textAlign: 'center', color: T.textTer }}>No hay rutas para este período</td></tr>
                             ) : rows.map((row, idx) => (
-                                <tr key={idx} style={{ borderBottom: `1px solid ${T.border}` }}>
+                                <tr key={`row-${row.order_id || idx}`} style={{ borderBottom: `1px solid ${T.border}` }}>
                                     {activeCols.map(c => {
                                         const val = getCellValue(row, c.key);
                                         let style = { padding: '7px 8px', textAlign: 'center', whiteSpace: 'nowrap' };

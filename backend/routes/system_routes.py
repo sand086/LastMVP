@@ -192,7 +192,7 @@ async def get_audit_logs(
     skip = (page - 1) * page_size
     logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(page_size).to_list(page_size)
 
-    uid_set = list(set(l.get("user_id", "") for l in logs if l.get("user_id")))
+    uid_set = list(set(log.get("user_id", "") for log in logs if log.get("user_id")))
     users_map = {}
     if uid_set:
         ul = await db.users.find({"id": {"$in": uid_set}}, {"_id": 0, "id": 1, "name": 1}).to_list(100)
@@ -237,10 +237,10 @@ async def export_audit_logs(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Timestamp", "Usuario", "Rol", "Accion", "Entidad", "ID Entidad", "IP", "Status"])
-    for l in logs:
-        writer.writerow([l.get("timestamp",""), l.get("user_id",""), l.get("user_role",""),
-                         l.get("action",""), l.get("entity_type",""), l.get("entity_id",""),
-                         l.get("ip",""), l.get("status","")])
+    for log in logs:
+        writer.writerow([log.get("timestamp",""), log.get("user_id",""), log.get("user_role",""),
+                         log.get("action",""), log.get("entity_type",""), log.get("entity_id",""),
+                         log.get("ip",""), log.get("status","")])
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),

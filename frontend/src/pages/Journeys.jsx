@@ -230,7 +230,7 @@ const Journeys = () => {
                     {loading ? (
                         <div className="p-8 space-y-4">
                             {[1, 2, 3].map((i) => (
-                                <div key={i} className="h-16 bg-slate-100 animate-pulse rounded" />
+                                <div key={`skel-${i}`} className="h-16 bg-slate-100 animate-pulse rounded" />
                             ))}
                         </div>
                     ) : journeys.length === 0 ? (

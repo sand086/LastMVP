@@ -432,7 +432,7 @@ const QualityTab = ({ journey, packages, onEvaluate, onRefreshJourney }) => {
                                                                 <div>
                                                                     <p className="text-xs font-medium text-amber-700 mb-1">Alertas:</p>
                                                                     <ul className="text-xs text-amber-600 list-disc list-inside">
-                                                                        {alerts.map((a, i) => <li key={i}>{a}</li>)}
+                                                                        {alerts.map((a, i) => <li key={`alert-${i}-${a.slice(0,10)}`}>{a}</li>)}
                                                                     </ul>
                                                                 </div>
                                                             )}
@@ -449,7 +449,7 @@ const QualityTab = ({ journey, packages, onEvaluate, onRefreshJourney }) => {
                                                                     <p className="text-xs font-medium text-slate-700 mb-1">Análisis de fotos:</p>
                                                                     <div className="flex gap-2 overflow-x-auto">
                                                                         {(pkg.evidence_detail.photos_analysis).map((pa, i) => (
-                                                                            <button key={i}
+                                                                            <button key={`photo-${pa.photo_type || 'foto'}-${i}`}
                                                                                 className="shrink-0 bg-white border border-slate-200 rounded p-2 text-left hover:border-blue-300 transition w-36"
                                                                                 onClick={() => openCarousel(pkg, i)}
                                                                             >
@@ -469,7 +469,7 @@ const QualityTab = ({ journey, packages, onEvaluate, onRefreshJourney }) => {
                                                                 <div>
                                                                     <p className="text-xs font-medium text-red-700 mb-1">Faltantes:</p>
                                                                     <ul className="text-xs text-red-600 list-disc list-inside">
-                                                                        {missing.map((m, i) => <li key={i}>{m}</li>)}
+                                                                        {missing.map((m, i) => <li key={`missing-${i}-${m.slice(0,10)}`}>{m}</li>)}
                                                                     </ul>
                                                                 </div>
                                                             )}
