@@ -1,7 +1,7 @@
 # LastMile OS - Product Requirements Document (PRD)
 
 ## Original Problem Statement
-Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajería y Estrategias). Includes authentication, dashboard polling, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, AI-powered evidence scoring, real-time dashboard, advanced reporting, quality criteria configurations, admin AI consumption tracking, and API integrations.
+Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensajeria y Estrategias). Includes authentication, dashboard polling, CSV/XLSX Cosmo data layout uploads, journey execution tracking (Start/Incidents/Close), dynamic assignment, AI-powered evidence scoring, real-time dashboard, advanced reporting, quality criteria configurations, admin AI consumption tracking, webhook integrations, and API documentation.
 
 ## Tech Stack
 - **Backend**: FastAPI, Motor (MongoDB), Python 3.11
@@ -9,6 +9,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - **Database**: MongoDB
 - **AI**: Claude Sonnet 4.5 via Emergent LLM Key
 - **Maps**: Leaflet + CartoDB Positron tiles
+- **Webhooks**: httpx async dispatch with HMAC-SHA256 signatures
 
 ## User Personas
 - **Agent** (`agente@me.mx`): Field delivery agent. Views assigned routes and packages.
@@ -26,82 +27,57 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Advanced reporting with 6 tabs (SLA, Attempts, Quality, etc.)
 - [x] Lumi AI Chatbot
 - [x] Quality Criteria V2 (5-tab settings)
-- [x] Quality Tab V2 in Journey Detail (KPI strip, distribution, error chips, training)
+- [x] Quality Tab V2 in Journey Detail
 - [x] Supervised training (correct/incorrect + natural language notes + score override)
-- [x] Admin IA Module (3 tabs: Token Consumption, Routes Report Cubbo ADM, Cost Config)
-- [x] Token usage logging for all AI calls
-- [x] Routes Report with Excel export in Cubbo ADM format
-- [x] Cost configuration (exchange rate, model pricing, budget alerts)
-- [x] API Documentation with sandbox and code examples
+- [x] Admin IA Module (Token Consumption, Routes Report, Cost Config)
+- [x] API Documentation with sandbox, Webhooks reference, and code examples
 - [x] Database indexes + parallel query optimization
-- [x] QA Bug Fixes (9/9 bugs resolved — iteration 20)
+- [x] Webhook Integrations (Plug & Play) — CRUD, test, HMAC, delivery log
+- [x] Backend refactoring — all routes in /routes/ directory
 
-## Architecture
+## Architecture (Post-Refactoring 2026-03-31)
 ```
 /app/backend/
-  server.py, dependencies.py, models.py, evidence_scoring.py, lumi.py,
-  admin.py, token_logger.py, cp_coordinates.py, middleware.py
-  routes/ (auth, journey, upload, dashboard, analytics, quality_criteria,
-           quality_tab, admin, user)
+  server.py (206 lines - app setup only)
+  dependencies.py, models.py, middleware.py
+  evidence_scoring.py (ThreadPoolExecutor for AI)
+  kosmo_sync.py (sync engine + periodic scheduler)
+  token_logger.py, cp_coordinates.py, ws_manager.py
+
+  routes/ (14 modules via __init__.py)
+    auth_routes.py, user_routes.py, journey_routes.py
+    upload_routes.py, dashboard_routes.py, analytics_routes.py
+    admin_routes.py, admin_module_routes.py
+    quality_criteria_routes.py, quality_tab_routes.py
+    webhook_routes.py, system_routes.py
+    lumi_routes.py, kosmo_routes.py
 
 /app/frontend/src/
   pages/ (AdminPage, Dashboard, Reports, JourneyDetail, QualityCriteria,
-          ApiDocumentation, Layout, Settings, Login)
-  components/ (admin/{TokenUsageTab,RoutesReportTab,CostConfigTab},
-               QualityTabV2, HeatmapSection, LumiChat, EvidenceCarousel,
-               ImageUploader, DashboardLayout)
+          ApiDocumentation, Layout, Settings, Login, Journeys)
+  components/ (admin/*, QualityTabV2, WebhooksTab, JourneyStartTab,
+               JourneyIncidentsTab, JourneyCloseTab, HeatmapSection,
+               LumiChat, EvidenceCarousel, ImageUploader, DashboardLayout)
 ```
 
 ## Key API Endpoints
 - POST /api/auth/login (20/min rate limit)
 - GET /api/dashboard/stats
-- GET /api/admin/summary, /token-usage, /routes-report, /routes-report/export, /config
-- PATCH /api/admin/config
-- GET /api/journeys/{id}/quality-summary, /packages-quality
-- POST /api/training/samples (coordinator, developer, agent)
-- GET /api/reports/journeys (includes all journey statuses)
-- GET /api-docs → 301 redirect to /documentation
+- GET/POST/PUT/DELETE /api/webhooks, /api/webhooks/{id}/test, /deliveries, /regenerate-secret
+- GET /api/webhooks/events
+- GET /api/admin/summary, /token-usage, /routes-report, /config
+- GET /api/system/health, /config, /errors, /logs
+- GET /api/sync/status, POST /api/sync/tracking
+- POST /api/chat/lumi
+- GET /api/reports/journeys, /packages, /incidents, /kpis
 
 ## Credentials
 - dev@me.mx / LastMile2026 (Developer)
 - agente@me.mx / LastMile2026 (Agent)
 - yael@me.mx / LastMile2026 (Coordinator)
 
-## Recent Fixes (2026-03-31) — Non-blocking AI + Refactoring
-- [x] evaluate-IA non-blocking: AI evaluation runs in separate thread with own event loop
-  - Login/dashboard respond in <250ms even during active AI evaluation (was 30+ seconds)
-  - Uses ThreadPoolExecutor + asyncio.new_event_loop() in worker thread
-  - Separate MongoDB connection per thread for safety
-- [x] API Documentation updated: Added evaluate-ia, Admin IA, Routes Report, PUT /users endpoints + security section
-- [x] JourneyDetail.jsx refactored: 2508 → 1739 lines (31% reduction)
-  - Extracted: JourneyStartTab.jsx (332 lines), JourneyIncidentsTab.jsx (161 lines), JourneyCloseTab.jsx (424 lines)
-
-## Recent Fixes (2026-03-30) — Infrastructure Hardening
-- [x] FIX-001: CORS wildcard → dominios específicos (backend-level, env-driven)
-- [x] FIX-002: PUT /close schema — all fields Optional with auto-calculation from MongoDB
-- [x] FIX-003: POST /evaluate-ia alias endpoint registered
-- [x] FIX-004: POST /training/samples verified working (was false positive in audit)
-- [x] FIX-005: JWT_SECRET moved to .env, old hardcoded key rejected
-- [x] FIX-006: Auto-logout on 401 with redirect reason + session expired message
-- [x] FIX-007: HSTS header + Cache-Control on API + Permissions-Policy hardened
-- [x] FIX-008: KPIs period support (current_month, prev_month, 7d, 30d) + has_data + summary
-- [x] FIX-009: PUT /users/{id} fixed matched_count vs modified_count
-- [x] FIX-010: bcrypt async with ThreadPoolExecutor, login ~241ms stable
-- [x] Production MongoDB indexes (15+ compound indexes for journeys, packages, incidents, etc.)
-- [x] Developer role added to start/close journey permissions
-
-## Recent Fixes (2026-03-28)
-- [x] P0 Bug: Restored "Inicio", "Incidencias", "Fin" workflow visibility in JourneyDetail
-  - Added 'developer' role to canEdit() in AuthContext.jsx
-  - Fixed default tab logic: scheduled journeys now default to 'inicio' (was 'calidad')
-  - Added 'developer' role to Layout page access in App.js
-- [x] Verified: Dynamic Assignments in Settings already functional
-- [x] Verified: API Documentation page already routed and linked in sidebar
-
 ## Backlog
-- [ ] Mobile-optimized views for field agents
-- [ ] Export journey details to PDF
-- [ ] Historical trend charts for delivery rates
-- [ ] Automatic image compression for large uploads
-- [ ] Refactor JourneyDetail.jsx into smaller components
-- [ ] Webhook integrations for external systems
+- [ ] Mobile-optimized views for field agents (P1)
+- [ ] Export journey details to PDF (P1)
+- [ ] Automatic image compression for large uploads (P2)
+- [ ] Historical trend charts for delivery rates (P2)
