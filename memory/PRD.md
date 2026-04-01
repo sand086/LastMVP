@@ -14,7 +14,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 ## User Personas
 - **Agent** (`agente@me.mx`): Field delivery agent. Views assigned routes and packages.
 - **Coordinator** (`yael@me.mx`): Manages operations, reviews quality, configures settings, admin access.
-- **Developer** (`dev@me.mx`): Full access, configures system, tests API, admin module.
+- **Developer** (`dev@me.mx`): Full access, configures system, tests API, admin module, can upload layouts.
 - **Executive** (`karina@me.mx`): High-level dashboards, reports, admin read-only.
 
 ## Core Requirements (Status)
@@ -35,23 +35,29 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Webhook Integrations (Plug & Play) — CRUD, test, HMAC, delivery log
 - [x] Backend refactoring — all routes in /routes/ directory
 - [x] Code quality: XSS sanitization (DOMPurify), Python complexity reduction, table-driven middleware
+- [x] Resilient data loading: Promise.allSettled in all page fetchers
+- [x] Test security: credentials via env vars (conftest.py)
 
-## Architecture (Post-Refactoring 2026-03-31)
+## Architecture
 ```
 /app/backend/
   server.py (206 lines - app setup only)
-  dependencies.py, models.py, middleware.py (refactored: table-driven)
+  dependencies.py (refactored: extracted address helpers)
+  middleware.py (refactored: table-driven patterns)
   evidence_scoring.py (refactored: 5 extracted helpers)
-  kosmo_sync.py (sync engine + periodic scheduler)
-  token_logger.py, cp_coordinates.py, ws_manager.py
+  kosmo_sync.py, token_logger.py, cp_coordinates.py, ws_manager.py
 
   routes/ (14 modules via __init__.py)
     auth_routes.py, user_routes.py, journey_routes.py
     upload_routes.py, dashboard_routes.py, analytics_routes.py
-    admin_routes.py, admin_module_routes.py
+    admin_routes.py, admin_module_routes.py (refactored: report helpers)
     quality_criteria_routes.py, quality_tab_routes.py
-    webhook_routes.py, system_routes.py
+    webhook_routes.py, system_routes.py (top-level imports)
     lumi_routes.py, kosmo_routes.py
+
+  tests/
+    conftest.py (shared fixtures, env-based credentials)
+    22 test files
 
 /app/frontend/src/
   pages/ (AdminPage, Dashboard, Reports, JourneyDetail, QualityCriteria,
@@ -60,17 +66,6 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
                JourneyIncidentsTab, JourneyCloseTab, HeatmapSection,
                LumiChat, EvidenceCarousel, ImageUploader, DashboardLayout)
 ```
-
-## Key API Endpoints
-- POST /api/auth/login (20/min rate limit)
-- GET /api/dashboard/stats
-- GET/POST/PUT/DELETE /api/webhooks, /api/webhooks/{id}/test, /deliveries, /regenerate-secret
-- GET /api/webhooks/events
-- GET /api/admin/summary, /token-usage, /routes-report, /config
-- GET /api/system/health, /config, /errors, /logs
-- GET /api/sync/status, POST /api/sync/tracking
-- POST /api/chat/lumi
-- GET /api/reports/journeys, /packages, /incidents, /kpis
 
 ## Credentials
 - dev@me.mx / LastMile2026 (Developer)
@@ -83,3 +78,4 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [ ] Automatic image compression for large uploads (P2)
 - [ ] Historical trend charts for delivery rates (P2)
 - [ ] localStorage → httpOnly cookies migration (P2, security hardening)
+- [ ] Split large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P2)

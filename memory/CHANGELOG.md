@@ -1,5 +1,14 @@
 # LastMile OS - CHANGELOG
 
+## 2026-04-01 — Code Quality Improvements (Round 2)
+- [x] Promise.all → Promise.allSettled in Dashboard.jsx, Journeys.jsx, Layout.jsx, SystemHealth.jsx
+- [x] Python complexity: admin_module_routes.py — extracted _calc_working_hours, _check_on_time, _build_report_row
+- [x] Python complexity: dependencies.py — extracted _extract_cp, _extract_state, _extract_colonia_municipio
+- [x] Lazy imports → top-level in system_routes.py (uuid, fastapi, urlparse)
+- [x] Test secrets: conftest.py with env vars (TEST_API_URL, TEST_DEV_PASSWORD, etc.)
+- [x] Developer role added to upload and from-cosmo endpoints
+- [x] Testing: iteration_25 — 100% backend (17/17), 100% frontend
+
 ## 2026-04-01 — Bug Fix: "Error al cargar" en Layout
 - [x] `Promise.all` → `Promise.allSettled` en Layout.jsx y Journeys.jsx (carga parcial resiliente)
 - [x] Rol `developer` agregado a endpoints upload y from-cosmo (antes: 403)
