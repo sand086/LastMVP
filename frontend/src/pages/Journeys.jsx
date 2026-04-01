@@ -52,15 +52,26 @@ const Journeys = () => {
             if (selectedProvider !== 'all') params.provider_id = selectedProvider;
             if (selectedStatus !== 'all') params.status = selectedStatus;
 
-            const [journeysRes, clientsRes, providersRes] = await Promise.all([
+            const results = await Promise.allSettled([
                 getJourneys(params),
                 getClients(),
                 getProviders(),
             ]);
 
-            setJourneys(journeysRes.data?.data || journeysRes.data || []);
-            setClients(clientsRes.data);
-            setProviders(providersRes.data);
+            const [journeysRes, clientsRes, providersRes] = results;
+
+            if (journeysRes.status === 'fulfilled') {
+                setJourneys(journeysRes.value.data?.data || journeysRes.value.data || []);
+            }
+            if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data);
+            if (providersRes.status === 'fulfilled') setProviders(providersRes.value.data);
+
+            const failed = results.filter(r => r.status === 'rejected');
+            if (failed.length === results.length) {
+                toast.error('Error al cargar rutas');
+            } else if (failed.length > 0) {
+                console.warn('Partial fetch failures:', failed.map(f => f.reason?.message));
+            }
         } catch (error) {
             console.error('Error fetching journeys:', error);
             toast.error('Error al cargar rutas');

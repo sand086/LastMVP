@@ -432,7 +432,7 @@ async def review_package(package_id: str, user: dict = Depends(get_current_user)
 @router.post("/journeys/from-cosmo")
 async def create_journeys_from_cosmo(
     data: CosmoJourneyCreate,
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     created_journeys = []
     updated_journeys = []

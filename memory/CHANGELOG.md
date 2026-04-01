@@ -1,5 +1,12 @@
 # LastMile OS - CHANGELOG
 
+## 2026-04-01 — Bug Fix: "Error al cargar" en Layout
+- [x] `Promise.all` → `Promise.allSettled` en Layout.jsx y Journeys.jsx (carga parcial resiliente)
+- [x] Rol `developer` agregado a endpoints upload y from-cosmo (antes: 403)
+- [x] CORS → `*` para deployment
+- [x] Eliminados fallbacks localhost en evidence_scoring y system_routes
+- [x] Fix `@/` alias en index.js + 43 componentes Shadcn UI (build de producción fallaba)
+
 ## 2026-03-31 — Code Quality Fixes
 - [x] XSS: Added DOMPurify sanitization to LumiChat.jsx (formatAIText) and Reports.jsx (AI narrative)
 - [x] Array index keys: Replaced 21 instances across 13 files with stable unique keys

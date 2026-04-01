@@ -101,21 +101,29 @@ const Layout = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [clientsRes, providersRes, mappingsRes, historyRes] = await Promise.all([
+                const results = await Promise.allSettled([
                     getClients(),
                     getProviders(),
                     getMessengerMappings(),
                     getUploadHistory(),
                 ]);
-                setClients(clientsRes.data);
-                setProviders(providersRes.data);
-                // Convert mappings array to object
-                const mappingsObj = {};
-                mappingsRes.data.forEach(m => {
-                    mappingsObj[m.messenger_name] = m.provider_id;
-                });
-                setMessengerMappings(mappingsObj);
-                setUploadHistory(historyRes.data);
+                const [clientsRes, providersRes, mappingsRes, historyRes] = results;
+
+                if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data);
+                if (providersRes.status === 'fulfilled') setProviders(providersRes.value.data);
+                if (mappingsRes.status === 'fulfilled') {
+                    const mappingsObj = {};
+                    (mappingsRes.value.data || []).forEach(m => {
+                        mappingsObj[m.messenger_name] = m.provider_id;
+                    });
+                    setMessengerMappings(mappingsObj);
+                }
+                if (historyRes.status === 'fulfilled') setUploadHistory(historyRes.value.data);
+
+                const failed = results.filter(r => r.status === 'rejected');
+                if (failed.length > 0) {
+                    console.warn('Partial load failures:', failed.map(f => f.reason?.message));
+                }
             } catch (error) {
                 toast.error('Error al cargar datos');
             } finally {

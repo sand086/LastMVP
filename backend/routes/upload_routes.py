@@ -31,7 +31,7 @@ router = APIRouter(tags=["Uploads"])
 async def upload_history_orders(
     request: StarletteRequest,
     file: UploadFile = File(...),
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     _validate_upload_file(file)
     contents = await file.read()
@@ -123,7 +123,7 @@ async def upload_history_orders(
 async def upload_route_summary(
     request: StarletteRequest,
     file: UploadFile = File(...),
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     _validate_upload_file(file)
     contents = await file.read()
@@ -184,7 +184,7 @@ async def upload_route_summary(
 @router.post("/upload/layout")
 async def upload_layout(
     file: UploadFile = File(...),
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     if not file.filename.endswith(('.csv', '.xlsx')):
         raise HTTPException(status_code=400, detail="Solo se permiten archivos CSV o XLSX")
@@ -220,7 +220,7 @@ async def upload_photo(
     file: UploadFile = File(...),
     journey_id: str = Form(...),
     photo_type: str = Form(...),
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     if not file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
         raise HTTPException(status_code=400, detail="Solo se permiten archivos JPG o PNG")
@@ -242,7 +242,7 @@ async def upload_journey_images(
     journey_id: str = Form(...),
     section: str = Form(...),
     incident_id: Optional[str] = Form(None),
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     uploaded_files = []
     for file in files:
@@ -292,7 +292,7 @@ async def get_journey_images(
 @router.delete("/journey-images/{image_id}")
 async def delete_journey_image(
     image_id: str,
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     image = await db.journey_images.find_one({"id": image_id}, {"_id": 0})
     if not image:
@@ -336,7 +336,7 @@ async def get_messenger_mappings(user: dict = Depends(get_current_user)):
 @router.post("/messenger-mappings")
 async def save_messenger_mappings(
     mappings: List[MessengerProviderMapping],
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     for mapping in mappings:
         await db.messenger_mappings.update_one(
@@ -355,7 +355,7 @@ async def save_messenger_mappings(
 @router.delete("/messenger-mappings/{messenger_name}")
 async def delete_messenger_mapping(
     messenger_name: str,
-    user: dict = Depends(require_role(["coordinator", "agent"])),
+    user: dict = Depends(require_role(["coordinator", "agent", "developer"])),
 ):
     result = await db.messenger_mappings.delete_one({"messenger_name": messenger_name})
     if result.deleted_count == 0:
