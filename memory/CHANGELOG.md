@@ -12,6 +12,20 @@
 - [x] Frontend WebSocket URL updated accordingly
 - [x] Production build verified: passes successfully
 
+## 2026-04-01 — Unified Guías Tab + Proveedor Role
+- [x] Replaced "Calidad" tab with new unified "Guías" tab in JourneyDetail
+- [x] Removed standalone "Paquetes" card from JourneyDetail
+- [x] KPI cards: Score promedio, Completos, Evaluados IA, Revisión manual
+- [x] AI Alert banner with grouped error types and driver name
+- [x] Segment filter pills: Todas, Con alerta, Sin evidencia, Pendiente revisión
+- [x] Expandable rows with 3-column detail (Evidencias Kosmo, Evaluación IA, Revisión manual)
+- [x] Approve/Reject buttons with note capture (coordinator/developer only)
+- [x] New PATCH /api/packages/{id}/review endpoint with role restrictions
+- [x] Package data enrichment (ai_score, ai_errors, ai_confidence, photos_count, kosmo_url)
+- [x] New "Proveedor" role: read-only access to Dashboard + Rutas, filtered by assigned_providers
+- [x] Proveedor user seed: proveedor@me.mx / LastMile2026
+- [x] Testing: iteration_27 — 17/17 backend, 100% frontend
+
 ## 2026-04-01 — Code Quality Improvements (Round 2)
 - [x] Promise.all → Promise.allSettled in Dashboard.jsx, Journeys.jsx, Layout.jsx, SystemHealth.jsx
 - [x] Python complexity: admin_module_routes.py — extracted _calc_working_hours, _check_on_time, _build_report_row

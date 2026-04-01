@@ -74,9 +74,11 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 
 ## Backlog
 - [x] Validate export filters across all report sections (P0) — Done 2026-04-01
-- [ ] Mobile-optimized views for field agents (P1)
-- [ ] Export journey details to PDF (P1)
+- [x] Unified Guías tab replacing Calidad + Paquetes (P0) — Done 2026-04-01
+- [x] Proveedor role with read-only access (P0) — Done 2026-04-01
+- [ ] Split large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P1)
+- [ ] localStorage → httpOnly cookies migration (P1, security hardening)
+- [ ] Mobile-optimized views for field agents (P2)
+- [ ] Export journey details to PDF (P2)
 - [ ] Automatic image compression for large uploads (P2)
-- [ ] Historical trend charts for delivery rates (P2)
-- [ ] localStorage → httpOnly cookies migration (P2, security hardening)
-- [ ] Split large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P2)
+- [ ] Historical trend charts for delivery rates (P3)
