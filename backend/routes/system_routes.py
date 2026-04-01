@@ -223,6 +223,7 @@ async def export_audit_logs(
     date_to: Optional[str] = None,
     user_id: Optional[str] = None,
     action: Optional[str] = None,
+    errors_only: bool = False,
     user: dict = Depends(get_current_user)
 ):
     _check_system_role(user)
@@ -235,6 +236,8 @@ async def export_audit_logs(
         query["user_id"] = user_id
     if action:
         query["action"] = action
+    if errors_only:
+        query["status"] = "error"
 
     logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(10000)
     output = io.StringIO()

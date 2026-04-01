@@ -560,7 +560,13 @@ const Reports = () => {
     const handleExport = async () => {
         setExporting(true);
         try {
-            const res = await generateReportExcel({ date_from: effectiveDates.from, date_to: effectiveDates.to, sections });
+            const res = await generateReportExcel({
+                date_from: effectiveDates.from,
+                date_to: effectiveDates.to,
+                sections,
+                client_id: clientId || undefined,
+                provider_id: providerId || undefined,
+            });
             downloadFile(res.data, `reporte_${effectiveDates.from}_${effectiveDates.to}.xlsx`);
             toast.success('Reporte exportado');
         } catch { toast.error('Error al exportar'); }

@@ -176,6 +176,8 @@ class ReportRequest(BaseModel):
     date_to: str
     sections: List[str] = []
     group_by: Optional[str] = "provider"
+    client_id: Optional[str] = None
+    provider_id: Optional[str] = None
 
 
 # ==================== MESSENGER MAPPING MODELS ====================

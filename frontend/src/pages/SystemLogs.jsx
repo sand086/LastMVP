@@ -92,6 +92,7 @@ const SystemLogs = () => {
             if (dateTo) params.append('date_to', dateTo);
             if (filterUser) params.append('user_id', filterUser);
             if (filterAction && filterAction !== 'all') params.append('action', filterAction);
+            if (errorsOnly) params.append('errors_only', 'true');
             
             const res = await api.get(`/system/logs/export?${params}`, { responseType: 'blob' });
             downloadFile(res.data, `audit_logs_${new Date().toISOString().slice(0,10)}.csv`);

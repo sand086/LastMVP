@@ -329,6 +329,10 @@ async def export_quality_report(
 async def generate_report(data: ReportRequest, user: dict = Depends(get_current_user)):
     j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
     j_query = apply_assignment_filter(user, j_query)
+    if data.client_id:
+        j_query["client_id"] = data.client_id
+    if data.provider_id:
+        j_query["provider_id"] = data.provider_id
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     if not journeys:
@@ -448,6 +452,10 @@ Genera un análisis ejecutivo con: 1) Resumen general, 2) Hallazgos clave, 3) Re
 async def generate_report_excel(data: ReportRequest, user: dict = Depends(get_current_user)):
     j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
     j_query = apply_assignment_filter(user, j_query)
+    if data.client_id:
+        j_query["client_id"] = data.client_id
+    if data.provider_id:
+        j_query["provider_id"] = data.provider_id
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     journey_ids = [j["id"] for j in journeys]
