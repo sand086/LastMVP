@@ -151,50 +151,75 @@ def _next_day(date_str: str) -> str:
     dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
     return (dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
+_MEXICAN_STATES = [
+    "Ciudad de México", "CDMX", "Estado de México", "Edo. Méx", "Edomex",
+    "Jalisco", "Nuevo León", "Puebla", "Querétaro", "Guanajuato",
+    "Aguascalientes", "Baja California", "Chihuahua", "Coahuila",
+    "Colima", "Durango", "Guerrero", "Hidalgo", "Michoacán",
+    "Morelos", "Nayarit", "Oaxaca", "San Luis Potosí", "Sinaloa",
+    "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz",
+    "Yucatán", "Zacatecas", "Campeche", "Chiapas", "Quintana Roo",
+]
+
+_RE_CP = re_mod.compile(r'\b(\d{5})\b')
+_RE_COLONIA = re_mod.compile(r'(?:Col\.?|Colonia)\s+([^,\d]+)', re_mod.IGNORECASE)
+_RE_MUNICIPIO = re_mod.compile(r'(?:Mun\.?|Municipio|Del\.?|Delegación|Alcaldía)\s+([^,\d]+)', re_mod.IGNORECASE)
+
+
+def _extract_cp(addr: str) -> str | None:
+    m = _RE_CP.search(addr)
+    return m.group(1) if m else None
+
+
+def _extract_state(addr_lower: str) -> str | None:
+    for state in _MEXICAN_STATES:
+        if state.lower() in addr_lower:
+            return state
+    return None
+
+
+def _extract_colonia_municipio(addr: str) -> tuple:
+    colonia = None
+    municipio = None
+    col_m = _RE_COLONIA.search(addr)
+    if col_m:
+        colonia = col_m.group(1).strip().rstrip(',')
+    mun_m = _RE_MUNICIPIO.search(addr)
+    if mun_m:
+        municipio = mun_m.group(1).strip().rstrip(',')
+
+    # Fallback: infer from comma-separated parts
+    if colonia is None or municipio is None:
+        parts = [p.strip() for p in addr.split(',') if p.strip()]
+        if len(parts) >= 3:
+            if colonia is None:
+                colonia = parts[-3] if len(parts) >= 4 else parts[-2]
+            if municipio is None:
+                municipio = parts[-2]
+
+    return colonia, municipio
+
+
 def _normalize_address(address: str) -> dict:
     """Parse a Mexican address string to extract structured components."""
     if not address:
         return {}
-    result = {}
     addr = address.strip()
+    result = {}
 
-    cp_match = re_mod.search(r'\b(\d{5})\b', addr)
-    if cp_match:
-        result["address_cp"] = cp_match.group(1)
+    cp = _extract_cp(addr)
+    if cp:
+        result["address_cp"] = cp
 
-    states = [
-        "Ciudad de México", "CDMX", "Estado de México", "Edo. Méx", "Edomex",
-        "Jalisco", "Nuevo León", "Puebla", "Querétaro", "Guanajuato",
-        "Aguascalientes", "Baja California", "Chihuahua", "Coahuila",
-        "Colima", "Durango", "Guerrero", "Hidalgo", "Michoacán",
-        "Morelos", "Nayarit", "Oaxaca", "San Luis Potosí", "Sinaloa",
-        "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz",
-        "Yucatán", "Zacatecas", "Campeche", "Chiapas", "Quintana Roo",
-    ]
-    addr_lower = addr.lower()
-    for state in states:
-        if state.lower() in addr_lower:
-            result["address_estado"] = state
-            break
+    state = _extract_state(addr.lower())
+    if state:
+        result["address_estado"] = state
 
-    col_match = re_mod.search(r'(?:Col\.?|Colonia)\s+([^,\d]+)', addr, re_mod.IGNORECASE)
-    if col_match:
-        result["address_colonia"] = col_match.group(1).strip().rstrip(',')
-
-    mun_match = re_mod.search(
-        r'(?:Mun\.?|Municipio|Del\.?|Delegación|Alcaldía)\s+([^,\d]+)',
-        addr, re_mod.IGNORECASE
-    )
-    if mun_match:
-        result["address_municipio"] = mun_match.group(1).strip().rstrip(',')
-
-    if "address_colonia" not in result or "address_municipio" not in result:
-        parts = [p.strip() for p in addr.split(',') if p.strip()]
-        if len(parts) >= 3:
-            if "address_colonia" not in result:
-                result["address_colonia"] = parts[-3] if len(parts) >= 4 else parts[-2]
-            if "address_municipio" not in result and len(parts) >= 3:
-                result["address_municipio"] = parts[-2]
+    colonia, municipio = _extract_colonia_municipio(addr)
+    if colonia:
+        result["address_colonia"] = colonia
+    if municipio:
+        result["address_municipio"] = municipio
 
     return result
 

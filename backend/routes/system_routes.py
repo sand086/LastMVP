@@ -10,7 +10,10 @@ import os
 import time
 import io
 import csv
+import uuid
+import fastapi
 from pathlib import Path
+from urllib.parse import urlparse
 import logging
 
 from dependencies import db, get_current_user
@@ -297,7 +300,6 @@ async def review_all_errors(user: dict = Depends(get_current_user)):
 @router.post("/integrity/run")
 async def run_integrity_checks(user: dict = Depends(get_current_user)):
     _check_system_role(user)
-    import uuid as _uuid
     issues = []
     now = datetime.now(timezone.utc)
 
@@ -362,7 +364,7 @@ async def run_integrity_checks(user: dict = Depends(get_current_user)):
             })
 
     result = {
-        "id": str(_uuid.uuid4()),
+        "id": str(uuid.uuid4()),
         "timestamp": now.isoformat(),
         "run_by": user["id"],
         "total_issues": len(issues),
@@ -410,10 +412,8 @@ async def export_integrity_report(user: dict = Depends(get_current_user)):
 @router.get("/config")
 async def get_system_config(user: dict = Depends(get_current_user)):
     _check_system_role(user)
-    import fastapi
     mongo_url = os.environ.get("MONGO_URL", "")
     try:
-        from urllib.parse import urlparse
         parsed = urlparse(mongo_url)
         mongo_host = f"{parsed.hostname}:{parsed.port}" if parsed.port else str(parsed.hostname)
     except Exception:

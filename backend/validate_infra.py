@@ -1,3 +1,4 @@
+import os
 """
 LastMile OS — Infrastructure Validation Post-Fixes
 """
@@ -7,7 +8,7 @@ import time
 
 BASE = "https://lastmile-mvp.preview.emergentagent.com"
 LOCAL = "http://localhost:8001"
-CREDS = {"email": "dev@me.mx", "password": "LastMile2026"}
+CREDS = {"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
 
 # Get token
 resp = requests.post(f"{BASE}/api/auth/login", json=CREDS)

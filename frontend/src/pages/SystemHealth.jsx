@@ -32,14 +32,16 @@ const SystemHealth = () => {
 
     const fetchData = useCallback(async () => {
         try {
-            const [healthRes, perfRes, tokenRes] = await Promise.all([
+            const results = await Promise.allSettled([
                 api.get('/system/health'),
                 api.get('/system/performance'),
                 getTokenConsumption().catch(() => ({ data: null })),
             ]);
-            setHealth(healthRes.data);
-            setPerf(perfRes.data);
-            if (tokenRes.data) setTokenData(tokenRes.data);
+            const [healthRes, perfRes, tokenRes] = results;
+
+            if (healthRes.status === 'fulfilled') setHealth(healthRes.value.data);
+            if (perfRes.status === 'fulfilled') setPerf(perfRes.value.data);
+            if (tokenRes.status === 'fulfilled' && tokenRes.value.data) setTokenData(tokenRes.value.data);
             setLastRefresh(new Date());
         } catch (error) {
             console.error('Error fetching health data:', error);

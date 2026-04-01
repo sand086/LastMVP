@@ -1,3 +1,4 @@
+import os
 """
 LastMile OS — Stress Test Suite
 Ejecutar: python backend/stress_test.py
@@ -16,7 +17,7 @@ JOURNEY_ID = "c8d4c292-5c27-46bf-8b81-e83e40fb8a05"
 # ─── OBTENER TOKEN ────────────────────────────────────────────────
 async def get_token(session):
     r = await session.post(f"{BASE_URL}/api/auth/login",
-        json={"email": "dev@me.mx", "password": "LastMile2026"})
+        json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")})
     data = await r.json()
     return data.get("access_token") or data.get("token")
 
@@ -265,7 +266,7 @@ async def test_auth_load(session):
     async def do_login():
         t0 = time.perf_counter()
         async with session.post(f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         ) as r:
             return {"status": r.status, "ms": round((time.perf_counter() - t0) * 1000)}
 

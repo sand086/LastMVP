@@ -26,7 +26,7 @@ class TestQualityCriteriaEndpoints:
         # Login as developer
         login_res = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_res.status_code == 200, f"Developer login failed: {login_res.text}"
         self.dev_token = login_res.json().get("access_token")
@@ -120,7 +120,7 @@ class TestQualityCriteriaRoleAccess:
         # Login as agent
         login_res = session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "agente@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_res.status_code == 200, f"Agent login failed: {login_res.text}"
         agent_token = login_res.json().get("access_token")
@@ -151,7 +151,7 @@ class TestQualityCriteriaRoleAccess:
         # Login as coordinator
         login_res = session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_res.status_code == 200, f"Coordinator login failed: {login_res.text}"
         coord_token = login_res.json().get("access_token")
@@ -176,7 +176,7 @@ class TestReportsSchemaEndpoint:
         # Login as developer
         login_res = session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_res.status_code == 200
         token = login_res.json().get("access_token")
@@ -216,7 +216,7 @@ class TestMajorEndpointsAfterRefactoring:
         
         login_res = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_res.status_code == 200
         self.token = login_res.json().get("access_token")

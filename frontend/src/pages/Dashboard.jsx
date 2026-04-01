@@ -184,7 +184,7 @@ const Dashboard = () => {
 
     const fetchData = useCallback(async () => {
         try {
-            const [statsRes, journeysRes, breakdownRes, comparisonRes, clientsRes, providersRes, kosmoRes] = await Promise.all([
+            const results = await Promise.allSettled([
                 getDashboardStats(dateFromStr, dateToStr),
                 getJourneys({
                     date_from: dateFromStr, date_to: dateToStr,
@@ -199,15 +199,24 @@ const Dashboard = () => {
                 getProviders(),
                 getKosmoSyncStatus().catch(() => ({ data: { last_sync: null } })),
             ]);
-            setStats(statsRes.data);
-            const jData = journeysRes.data;
-            setJourneys(jData.data || []);
-            setPagination(jData.pagination || { page: 1, page_size: 25, total_count: 0, total_pages: 1 });
-            setIncidentsBreakdown(breakdownRes.data);
-            setProviderComparison(comparisonRes.data);
-            setClients(clientsRes.data);
-            setProviders(providersRes.data);
-            if (kosmoRes.data) setKosmoSync(kosmoRes.data);
+            const [statsRes, journeysRes, breakdownRes, comparisonRes, clientsRes, providersRes, kosmoRes] = results;
+
+            if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
+            if (journeysRes.status === 'fulfilled') {
+                const jData = journeysRes.value.data;
+                setJourneys(jData.data || []);
+                setPagination(jData.pagination || { page: 1, page_size: 25, total_count: 0, total_pages: 1 });
+            }
+            if (breakdownRes.status === 'fulfilled') setIncidentsBreakdown(breakdownRes.value.data);
+            if (comparisonRes.status === 'fulfilled') setProviderComparison(comparisonRes.value.data);
+            if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data);
+            if (providersRes.status === 'fulfilled') setProviders(providersRes.value.data);
+            if (kosmoRes.status === 'fulfilled' && kosmoRes.value.data) setKosmoSync(kosmoRes.value.data);
+
+            const failed = results.filter(r => r.status === 'rejected');
+            if (failed.length === results.length) {
+                toast.error('Error al cargar datos');
+            }
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
             toast.error('Error al cargar datos');

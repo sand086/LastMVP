@@ -25,7 +25,7 @@ class TestSyncEndpoint:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["access_token"]
@@ -65,7 +65,7 @@ class TestCompositeKeyDeduplication:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["access_token"]
@@ -100,7 +100,7 @@ class TestDeliveryAttemptField:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["access_token"]
@@ -142,7 +142,7 @@ class TestCreationDateParsing:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["access_token"]
@@ -174,7 +174,7 @@ class TestEvidenceQualityReEvaluation:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["access_token"]
@@ -225,7 +225,7 @@ class TestAPIEndpoints:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["access_token"]

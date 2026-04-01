@@ -15,7 +15,7 @@ def auth_token():
     """Get authentication token for coordinator (full access)"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "yael@me.mx",
-        "password": "LastMile2026"
+        "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
     })
     if response.status_code == 200:
         return response.json().get("access_token")
@@ -224,7 +224,7 @@ class TestAuthEndpoints:
         """Login as coordinator should work"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -236,7 +236,7 @@ class TestAuthEndpoints:
         """Login as developer should work"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()

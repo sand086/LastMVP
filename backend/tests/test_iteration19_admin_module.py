@@ -16,9 +16,9 @@ import os
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-DEV_CREDS = {"email": "dev@me.mx", "password": "LastMile2026"}  # developer role - full admin access
-COORD_CREDS = {"email": "yael@me.mx", "password": "LastMile2026"}  # coordinator role - NO admin access
-AGENT_CREDS = {"email": "agente@me.mx", "password": "LastMile2026"}  # agent role - NO admin access
+DEV_CREDS = {"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}  # developer role - full admin access
+COORD_CREDS = {"email": "yael@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}  # coordinator role - NO admin access
+AGENT_CREDS = {"email": "agente@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}  # agent role - NO admin access
 
 
 @pytest.fixture(scope="module")

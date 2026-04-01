@@ -31,7 +31,7 @@ class TestIteration12Findings:
         # Login as developer
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_response.status_code == 200, f"Login failed: {login_response.text}"
         token = login_response.json().get("access_token")
@@ -132,7 +132,7 @@ class TestIteration12Findings:
         coord_session.headers.update({"Content-Type": "application/json"})
         login_response = coord_session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_response.status_code == 200, f"Coordinator login failed: {login_response.text}"
         token = login_response.json().get("access_token")

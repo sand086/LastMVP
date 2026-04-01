@@ -15,10 +15,10 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_USERS = [
-    {"email": "dev@me.mx", "password": "LastMile2026", "role": "developer"},
-    {"email": "agente@me.mx", "password": "LastMile2026", "role": "agent"},
-    {"email": "yael@me.mx", "password": "LastMile2026", "role": "coordinator"},
-    {"email": "karina@me.mx", "password": "LastMile2026", "role": "executive"},
+    {"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026"), "role": "developer"},
+    {"email": "agente@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026"), "role": "agent"},
+    {"email": "yael@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026"), "role": "coordinator"},
+    {"email": "karina@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026"), "role": "executive"},
 ]
 
 
@@ -74,7 +74,7 @@ class TestJourneysEndpoint:
         """Get auth token for developer user"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         if response.status_code == 200:
             return response.json()["access_token"]
@@ -131,7 +131,7 @@ class TestCleanupEndpoint:
         """Get auth token for coordinator user"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "yael@me.mx", "password": "LastMile2026"}
+            json={"email": "yael@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         if response.status_code == 200:
             return response.json()["access_token"]
@@ -142,7 +142,7 @@ class TestCleanupEndpoint:
         """Get auth token for developer user"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         if response.status_code == 200:
             return response.json()["access_token"]
@@ -153,7 +153,7 @@ class TestCleanupEndpoint:
         """Get auth token for agent user"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "agente@me.mx", "password": "LastMile2026"}
+            json={"email": "agente@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         if response.status_code == 200:
             return response.json()["access_token"]
@@ -203,7 +203,7 @@ class TestDashboardStats:
         """Get auth token for developer user"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         if response.status_code == 200:
             return response.json()["access_token"]
@@ -250,7 +250,7 @@ class TestAuthMe:
         # Login first
         login_response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         token = login_response.json()["access_token"]
         
@@ -275,7 +275,7 @@ class TestClientsProviders:
         """Get auth token for developer user"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         if response.status_code == 200:
             return response.json()["access_token"]

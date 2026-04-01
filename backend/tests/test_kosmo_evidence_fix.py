@@ -24,7 +24,7 @@ class TestKosmoEvidenceFix:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json().get("access_token")
@@ -95,7 +95,7 @@ class TestPackageReview:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json().get("access_token")
@@ -150,7 +150,7 @@ class TestResolveAllIncidents:
         """Login as coordinator to get auth token (resolve-all requires coordinator/agent role)"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json().get("access_token")
@@ -177,7 +177,7 @@ class TestDashboardDriverColumn:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json().get("access_token")
@@ -214,7 +214,7 @@ class TestEvidenceScoring:
         """Login and get auth token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json().get("access_token")

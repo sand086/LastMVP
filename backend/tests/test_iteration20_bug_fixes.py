@@ -421,7 +421,7 @@ class TestAuthenticationFlow:
         """Verify login returns valid token structure"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         
         assert response.status_code == 200, f"Login failed: {response.status_code}"
@@ -451,7 +451,7 @@ class TestJourneyData:
         """Verify journeys have packages (223 delivered, 11 failed per bug report)"""
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "dev@me.mx", "password": "LastMile2026"}
+            json={"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
         )
         token = response.json().get("access_token")
         headers = {"Authorization": f"Bearer {token}"}

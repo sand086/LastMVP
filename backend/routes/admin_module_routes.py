@@ -224,6 +224,89 @@ async def get_token_usage(
     }
 
 
+def _calc_working_hours(arrival: str, departure: str) -> float:
+    """Calculate hours worked from arrival/departure time strings."""
+    if not arrival or not departure:
+        return 0
+    try:
+        t1 = datetime.strptime(arrival, "%H:%M")
+        t2 = datetime.strptime(departure, "%H:%M")
+        return round((t2 - t1).total_seconds() / 3600, 2)
+    except Exception:
+        return 0
+
+
+def _check_on_time(arrival: str, scheduled: str) -> str:
+    """Check if arrival was within 20min tolerance of scheduled time."""
+    if not arrival or not scheduled:
+        return ""
+    try:
+        t_arr = datetime.strptime(arrival, "%H:%M")
+        t_sched = datetime.strptime(scheduled, "%H:%M")
+        tolerance = t_sched + timedelta(minutes=20)
+        return "Si" if t_arr <= tolerance else "No"
+    except Exception:
+        return ""
+
+
+async def _build_report_row(j: dict, prov: dict) -> dict:
+    """Build a single report row from a journey and its provider."""
+    close_data = j.get("close_data") or {}
+    start_data = j.get("start_data") or {}
+    km = close_data.get("km_traveled", 0)
+    km_excedente = max(0, km - 120) if km else 0
+
+    # Quality score from packages
+    pkgs = await db.packages.find(
+        {"journey_id": j["id"], "evidence_score": {"$ne": None}},
+        {"_id": 0, "evidence_score": 1}
+    ).to_list(1000)
+    scores = [p["evidence_score"] for p in pkgs]
+    score_ia = round(sum(scores) / len(scores)) if scores else None
+    delivered = j.get("packages_delivered", 0)
+    with_evidence = sum(1 for s in scores if s == 100)
+
+    arrival = start_data.get("arrival_time", "")
+    departure = close_data.get("departure_time", "")
+    scheduled = start_data.get("scheduled_time", "07:00")
+    prov_team = prov.get("team", "")
+
+    return {
+        "order_id": j.get("cosmo_route_id", j.get("id", "")[:14]),
+        "fecha": j.get("date", ""),
+        "driver": j.get("driver_name", ""),
+        "team": prov_team,
+        "tipo_unidad": prov.get("vehicle_type", "Sedán"),
+        "estado": prov.get("state", "CDMX/EDOMEX"),
+        "tipo_servicio": prov.get("service_type", "Última milla"),
+        "proveedor": prov.get("name", ""),
+        "costo": prov.get("cost", 0),
+        "pv": prov.get("sale_price", 0),
+        "horario_asistencia": scheduled,
+        "hora_entrada": arrival,
+        "hora_salida": departure,
+        "tolerancia": "",
+        "asistencia_en_tiempo": _check_on_time(arrival, scheduled),
+        "horas_laboradas": _calc_working_hours(arrival, departure),
+        "distancia_km": round(km, 2),
+        "km_excedente": round(km_excedente, 2) if km_excedente > 0 else None,
+        "tipo_tarifa": "Tarifa extra" if km_excedente > 0 else "Tarifa normal",
+        "costo_km_adicional": round(km_excedente * 5, 2) if km_excedente > 0 else None,
+        "backup_activado": j.get("backup_activated", False),
+        "hora_inicio_backup": j.get("backup_start_time"),
+        "horas_laboradas_backup": None,
+        "total_paquetes": j.get("packages_total", 0),
+        "completados": delivered,
+        "cancelados": j.get("packages_cancelled", 0),
+        "pendientes": j.get("packages_pending", j.get("packages_total", 0) - delivered - j.get("packages_failed", 0)),
+        "con_evidencia": with_evidence,
+        "sin_evidencia": max(0, delivered - with_evidence),
+        "score_ia": score_ia,
+        "comentarios": j.get("comments", ""),
+        "journey_id": j["id"],
+    }
+
+
 # ═══════════════ ROUTES REPORT ═══════════════
 
 @router.get("/routes-report")
@@ -252,91 +335,14 @@ async def routes_report(
     for p in await db.providers.find({}, {"_id": 0}).to_list(100):
         providers_map[p["id"]] = p
 
-    # Build rows
     rows = []
     for j in journeys:
         prov = providers_map.get(j.get("provider_id"), {})
         prov_team = prov.get("team", "")
         if team and team.lower() not in prov_team.lower():
             continue
-
-        close_data = j.get("close_data") or {}
-        start_data = j.get("start_data") or {}
-        km = close_data.get("km_traveled", 0)
-        km_excedente = max(0, km - 120) if km else 0
-        tarifa = "Tarifa extra" if km_excedente > 0 else "Tarifa normal"
-        costo_km_extra = round(km_excedente * 5, 2)
-
-        # Calculate quality score
-        pkgs = await db.packages.find(
-            {"journey_id": j["id"], "evidence_score": {"$ne": None}},
-            {"_id": 0, "evidence_score": 1}
-        ).to_list(1000)
-        scores = [p["evidence_score"] for p in pkgs]
-        score_ia = round(sum(scores) / len(scores)) if scores else None
-
-        delivered = j.get("packages_delivered", 0)
-        with_evidence = sum(1 for s in scores if s == 100)
-
-        arrival = start_data.get("arrival_time", "")
-        departure = close_data.get("departure_time", "")
-        scheduled = start_data.get("scheduled_time", "07:00")
-
-        # Hours worked
-        hours_worked = 0
-        if arrival and departure:
-            try:
-                t1 = datetime.strptime(arrival, "%H:%M")
-                t2 = datetime.strptime(departure, "%H:%M")
-                hours_worked = round((t2 - t1).total_seconds() / 3600, 2)
-            except Exception:
-                pass
-
-        # Attendance on time
-        on_time = ""
-        if arrival and scheduled:
-            try:
-                t_arr = datetime.strptime(arrival, "%H:%M")
-                t_sched = datetime.strptime(scheduled, "%H:%M")
-                tolerance = t_sched + timedelta(minutes=20)
-                on_time = "Si" if t_arr <= tolerance else "No"
-            except Exception:
-                pass
-
-        rows.append({
-            "order_id": j.get("cosmo_route_id", j.get("id", "")[:14]),
-            "fecha": j.get("date", ""),
-            "driver": j.get("driver_name", ""),
-            "team": prov_team,
-            "tipo_unidad": prov.get("vehicle_type", "Sedán"),
-            "estado": prov.get("state", "CDMX/EDOMEX"),
-            "tipo_servicio": prov.get("service_type", "Última milla"),
-            "proveedor": prov.get("name", ""),
-            "costo": prov.get("cost", 0),
-            "pv": prov.get("sale_price", 0),
-            "horario_asistencia": scheduled,
-            "hora_entrada": arrival,
-            "hora_salida": departure,
-            "tolerancia": "",
-            "asistencia_en_tiempo": on_time,
-            "horas_laboradas": hours_worked,
-            "distancia_km": round(km, 2),
-            "km_excedente": round(km_excedente, 2) if km_excedente > 0 else None,
-            "tipo_tarifa": tarifa,
-            "costo_km_adicional": costo_km_extra if km_excedente > 0 else None,
-            "backup_activado": j.get("backup_activated", False),
-            "hora_inicio_backup": j.get("backup_start_time"),
-            "horas_laboradas_backup": None,
-            "total_paquetes": j.get("packages_total", 0),
-            "completados": delivered,
-            "cancelados": j.get("packages_cancelled", 0),
-            "pendientes": j.get("packages_pending", j.get("packages_total", 0) - delivered - j.get("packages_failed", 0)),
-            "con_evidencia": with_evidence,
-            "sin_evidencia": max(0, delivered - with_evidence),
-            "score_ia": score_ia,
-            "comentarios": j.get("comments", ""),
-            "journey_id": j["id"],
-        })
+        row = await _build_report_row(j, prov)
+        rows.append(row)
 
     total = len(rows)
     skip = (page - 1) * page_size
@@ -399,7 +405,7 @@ async def export_routes_report(
     ]
 
     selected = columns.split(",") if columns else [c[0] for c in all_cols]
-    cols = [(k, l) for k, l in all_cols if k in selected]
+    cols = [(key, label) for key, label in all_cols if key in selected]
 
     wb = Workbook()
     ws = wb.active
