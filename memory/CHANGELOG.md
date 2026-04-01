@@ -1,5 +1,12 @@
 # LastMile OS - CHANGELOG
 
+## 2026-04-01 — Export Filters Bug Fixes
+- [x] Bug Fix: Reports Excel export (`generate-excel`) now passes `client_id` and `provider_id` filters from UI
+- [x] Bug Fix: Reports generate endpoint also filters by `client_id`/`provider_id`
+- [x] Bug Fix: System Logs CSV export now passes `errors_only` filter
+- [x] Updated `ReportRequest` model with optional `client_id` and `provider_id` fields
+- [x] Testing: iteration_26 — 100% backend (26/26), 100% frontend
+
 ## 2026-04-01 — Code Quality Improvements (Round 2)
 - [x] Promise.all → Promise.allSettled in Dashboard.jsx, Journeys.jsx, Layout.jsx, SystemHealth.jsx
 - [x] Python complexity: admin_module_routes.py — extracted _calc_working_hours, _check_on_time, _build_report_row

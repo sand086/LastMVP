@@ -73,6 +73,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - yael@me.mx / LastMile2026 (Coordinator)
 
 ## Backlog
+- [x] Validate export filters across all report sections (P0) — Done 2026-04-01
 - [ ] Mobile-optimized views for field agents (P1)
 - [ ] Export journey details to PDF (P1)
 - [ ] Automatic image compression for large uploads (P2)
