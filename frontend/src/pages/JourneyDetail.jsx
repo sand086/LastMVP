@@ -104,6 +104,7 @@ import { toast } from 'sonner';
 import ImageUploader from '../components/ImageUploader';
 import EvidenceCarousel from '../components/EvidenceCarousel';
 import QualityTabV2 from '../components/QualityTabV2';
+import GuiasTab from '../components/GuiasTab';
 import { JourneyStartTab } from '../components/JourneyStartTab';
 import { JourneyIncidentsTab } from '../components/JourneyIncidentsTab';
 import { JourneyCloseTab } from '../components/JourneyCloseTab';
@@ -745,7 +746,7 @@ const JourneyDetail = () => {
                 } else if (res.data.status === 'in_progress') {
                     setActiveTab('incidencias');
                 } else if (res.data.status === 'closed') {
-                    setActiveTab('calidad');
+                    setActiveTab('guias');
                 } else {
                     setActiveTab('inicio');
                 }
@@ -1123,318 +1124,6 @@ const JourneyDetail = () => {
                 </Card>
             </div>
 
-            {/* Packages Overview with Kosmo Sync Indicators */}
-            {journey.packages && journey.packages.length > 0 && (
-                <Card>
-                    <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between">
-                            <CardTitle className="font-heading text-base flex items-center gap-2">
-                                <Package className="w-4 h-4" />
-                                Paquetes ({journey.packages.length})
-                            </CardTitle>
-                            <div className="flex items-center gap-2">
-                                {selectedPkgIds.length > 0 && (
-                                    <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded px-3 py-1" data-testid="bulk-status-bar">
-                                        <span className="text-xs text-blue-700 font-medium">{selectedPkgIds.length} seleccionados</span>
-                                        <Select value={bulkStatus} onValueChange={setBulkStatus}>
-                                            <SelectTrigger className="w-[130px] h-7 text-xs" data-testid="bulk-status-select">
-                                                <SelectValue placeholder="Nuevo estado" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="pending">Pendiente</SelectItem>
-                                                <SelectItem value="delivered">Entregado</SelectItem>
-                                                <SelectItem value="failed">Fallido</SelectItem>
-                                                <SelectItem value="returned">Devuelto</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <Button
-                                            size="sm"
-                                            className="h-7 text-xs"
-                                            disabled={!bulkStatus || bulkSaving}
-                                            onClick={handleBulkSave}
-                                            data-testid="bulk-save-btn"
-                                        >
-                                            {bulkSaving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}
-                                            Guardar
-                                        </Button>
-                                    </div>
-                                )}
-                                <button
-                                    onClick={() => setShowPackagesList(!showPackagesList)}
-                                    className="text-xs text-slate-500 hover:text-slate-700 underline"
-                                    data-testid="toggle-packages-list"
-                                >
-                                    {showPackagesList ? 'Ocultar' : 'Ver todos'}
-                                </button>
-                                {(() => {
-                                    const needsRescrape = (journey.packages || []).filter(p => p.tracking_url && (!p.kosmo_proof_count || p.kosmo_status_raw === 'unknown' || !p.kosmo_status_raw));
-                                    if (needsRescrape.length === 0) return null;
-                                    return (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-7 text-xs text-orange-600 border-orange-200 hover:bg-orange-50"
-                                            disabled={batchRescraping}
-                                            onClick={async () => {
-                                                setBatchRescraping(true);
-                                                setBatchRescrapeProgress({ done: 0, total: needsRescrape.length, recovered: 0 });
-                                                try {
-                                                    const res = await batchRescrapeJourney(journey.id);
-                                                    const data = res.data;
-                                                    setBatchRescrapeProgress({ done: data.total, total: data.total, recovered: data.recovered });
-                                                    toast.success(data.message || `Re-sincronización completa: ${data.recovered} recuperados de ${data.total}`);
-                                                    fetchJourney();
-                                                } catch (err) {
-                                                    toast.error(err.response?.data?.detail || 'Error al re-sincronizar');
-                                                } finally {
-                                                    setBatchRescraping(false);
-                                                }
-                                            }}
-                                            data-testid="batch-rescrape-btn"
-                                        >
-                                            <RefreshCw className={`w-3 h-3 mr-1 ${batchRescraping ? 'animate-spin' : ''}`} />
-                                            {batchRescraping
-                                                ? `Sincronizando...`
-                                                : `Re-sincronizar (${needsRescrape.length})`
-                                            }
-                                        </Button>
-                                    );
-                                })()}
-                            </div>
-                        </div>
-                    </CardHeader>
-                    {showPackagesList && (
-                        <CardContent className="p-0">
-                            <div className="max-h-96 overflow-y-auto">
-                                <table className="data-table w-full text-sm">
-                                    <thead>
-                                        <tr>
-                                            <th className="w-8">
-                                                <Checkbox
-                                                    checked={journey.packages?.length > 0 && journey.packages.every(p => selectedPackages[p.id])}
-                                                    onCheckedChange={toggleSelectAll}
-                                                    data-testid="select-all-packages"
-                                                />
-                                            </th>
-                                            <PkgSortHeader field="tracking_number">No. Guía</PkgSortHeader>
-                                            <PkgSortHeader field="recipient_name">Destinatario</PkgSortHeader>
-                                            <PkgSortHeader field="status">Estado</PkgSortHeader>
-                                            <PkgSortHeader field="evidence_score">Soporte</PkgSortHeader>
-                                            <th>Evidencias</th>
-                                            <PkgSortHeader field="delivery_attempt">Intentos</PkgSortHeader>
-                                            <PkgSortHeader field="reviewed_by">Revisado</PkgSortHeader>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {sortedPackages.map((pkg) => (
-                                            <tr key={pkg.id} data-testid={`pkg-row-${pkg.id}`}>
-                                                <td>
-                                                    <Checkbox
-                                                        checked={!!selectedPackages[pkg.id]}
-                                                        onCheckedChange={(v) => setSelectedPackages(prev => ({ ...prev, [pkg.id]: v }))}
-                                                        data-testid={`select-pkg-${pkg.id}`}
-                                                    />
-                                                </td>
-                                                <td className="font-mono text-xs">
-                                                    {pkg.tracking_url ? (
-                                                        <a href={pkg.tracking_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                                                            {pkg.tracking_number || pkg.order_reference_id}
-                                                        </a>
-                                                    ) : (
-                                                        pkg.tracking_number || pkg.order_reference_id
-                                                    )}
-                                                </td>
-                                                <td className="truncate max-w-[120px]">{pkg.recipient_name}</td>
-                                                <td>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span className={`status-badge ${
-                                                            pkg.status === 'returned' ? 'bg-slate-600 text-white' : getStatusColor(pkg.status)
-                                                        }`}>
-                                                            {getStatusLabel(pkg.status)}
-                                                        </span>
-                                                        {pkg.status === 'delivered' && pkg.kosmo_finished_at && (
-                                                            <span className="text-xs text-slate-400 font-mono">
-                                                                {formatMsTimestamp(pkg.kosmo_finished_at)}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    {pkg.evidence_score != null ? (
-                                                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                                                            pkg.evidence_score === 100 ? 'bg-emerald-100 text-emerald-700' :
-                                                            pkg.evidence_score >= 60 ? 'bg-amber-100 text-amber-700' :
-                                                            'bg-red-100 text-red-700'
-                                                        }`} data-testid={`evidence-badge-${pkg.id}`}>
-                                                            {pkg.evidence_score === 100 ? 'Completo' :
-                                                             pkg.evidence_score >= 60 ? 'Parcial' : 'Incompleto'}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Pendiente</span>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    <div className="flex items-center gap-1.5">
-                                                        {pkg.kosmo_proof_count > 0 && (
-                                                            pkg.kosmo_proof_urls?.length > 0 ? (
-                                                                <button
-                                                                    className="inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700 cursor-pointer"
-                                                                    onClick={() => openMainCarousel(pkg)}
-                                                                    data-testid={`kosmo-proof-carousel-${pkg.id}`}
-                                                                    title="Ver evidencias"
-                                                                >
-                                                                    <Camera className="w-3.5 h-3.5" />
-                                                                    <span className="text-xs font-mono">{pkg.kosmo_proof_urls.length}</span>
-                                                                </button>
-                                                            ) : pkg.tracking_url ? (
-                                                                <a
-                                                                    href={pkg.tracking_url}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    className="inline-flex items-center gap-0.5 text-blue-500 hover:text-blue-700 cursor-pointer"
-                                                                    title="Ver evidencias en Kosmo"
-                                                                    data-testid={`kosmo-proof-${pkg.id}`}
-                                                                >
-                                                                    <Camera className="w-3.5 h-3.5" />
-                                                                    <span className="text-xs font-mono">{pkg.kosmo_proof_count}</span>
-                                                                </a>
-                                                            ) : (
-                                                                <span className="inline-flex items-center gap-0.5 text-emerald-500">
-                                                                    <Camera className="w-3.5 h-3.5" />
-                                                                    <span className="text-xs font-mono">{pkg.kosmo_proof_count}</span>
-                                                                </span>
-                                                            )
-                                                        )}
-                                                        {pkg.kosmo_driver_note && (
-                                                            <span
-                                                                className="text-amber-500 cursor-help"
-                                                                title={pkg.kosmo_driver_note}
-                                                                data-testid={`kosmo-note-${pkg.id}`}
-                                                            >
-                                                                <MessageSquare className="w-3.5 h-3.5" />
-                                                            </span>
-                                                        )}
-                                                        {pkg.evidence_detail?.missing_items?.length > 0 && (
-                                                            <span
-                                                                className="text-red-400 cursor-help"
-                                                                title={`Falta: ${pkg.evidence_detail.missing_items.join(', ')}`}
-                                                                data-testid={`missing-evidence-${pkg.id}`}
-                                                            >
-                                                                <AlertTriangle className="w-3.5 h-3.5" />
-                                                            </span>
-                                                        )}
-                                                        {pkg.kosmo_scraped_at && (
-                                                            <span
-                                                                className="text-slate-400 cursor-help"
-                                                                title={`Sincronizado ${getKosmoTimeSince(pkg.kosmo_scraped_at)}`}
-                                                                data-testid={`kosmo-sync-icon-${pkg.id}`}
-                                                            >
-                                                                <Clock className="w-3 h-3" />
-                                                            </span>
-                                                        )}
-                                                        {pkg.tracking_url && (pkg.kosmo_proof_count === 0 || pkg.kosmo_status_raw === 'unknown') && (
-                                                            <button
-                                                                onClick={async () => {
-                                                                    try {
-                                                                        const res = await rescrapePackage(pkg.id);
-                                                                        if (res.data.success) {
-                                                                            toast.success(`Rescrapeado: ${res.data.proof_count} evidencias encontradas`);
-                                                                            fetchJourney();
-                                                                        } else {
-                                                                            toast.error(`Error: ${res.data.error}`);
-                                                                        }
-                                                                    } catch (err) {
-                                                                        toast.error('Error al re-scrapear');
-                                                                    }
-                                                                }}
-                                                                className="text-orange-400 hover:text-orange-600 transition-colors"
-                                                                title="Re-sincronizar tracking de Kosmo"
-                                                                data-testid={`rescrape-${pkg.id}`}
-                                                            >
-                                                                <RefreshCw className="w-3.5 h-3.5" />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td className="text-center">
-                                                    {(pkg.delivery_attempt || 1) > 1 ? (
-                                                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold" title={`Intento ${pkg.delivery_attempt}`}>
-                                                            {pkg.delivery_attempt}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-slate-300 text-xs">1</span>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    {pkg.reviewed_by ? (
-                                                        <span
-                                                            className="text-emerald-500 cursor-help"
-                                                            title={`Revisado por ${pkg.reviewed_by} a las ${formatTime(pkg.reviewed_at)}`}
-                                                            data-testid={`reviewed-${pkg.id}`}
-                                                        >
-                                                            <CheckCircle2 className="w-4 h-4" />
-                                                        </span>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => handleReviewPackage(pkg.id)}
-                                                            className="text-slate-300 hover:text-emerald-500 transition-colors"
-                                                            title="Marcar como revisado"
-                                                            data-testid={`review-btn-${pkg.id}`}
-                                                        >
-                                                            <Circle className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {/* Kosmo Evidence Panel for delivered packages */}
-                            {journey.packages.some(p => p.status === 'delivered' && p.tracking_url && (p.kosmo_proof_count > 0 || p.kosmo_driver_note)) && (
-                                <div className="border-t border-slate-200 p-3 bg-slate-50">
-                                    <p className="text-xs font-medium text-slate-600 uppercase mb-2">Evidencias de Kosmo</p>
-                                    <div className="space-y-1.5">
-                                        {journey.packages
-                                            .filter(p => p.status === 'delivered' && p.tracking_url && (p.kosmo_proof_count > 0 || p.kosmo_driver_note))
-                                            .slice(0, 10)
-                                            .map((pkg) => (
-                                                <div key={pkg.id} className="flex items-center justify-between text-xs" data-testid={`kosmo-evidence-${pkg.id}`}>
-                                                    <div className="flex items-center gap-2 min-w-0">
-                                                        <span className="font-mono text-slate-700 shrink-0">{pkg.tracking_number || pkg.order_reference_id}</span>
-                                                        {pkg.kosmo_driver_note && (
-                                                            <span className="text-slate-400 italic truncate max-w-[200px]">"{pkg.kosmo_driver_note}"</span>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center gap-2 shrink-0">
-                                                        {pkg.kosmo_finished_at && (
-                                                            <span className="text-slate-400 font-mono">{formatMsTimestamp(pkg.kosmo_finished_at)}</span>
-                                                        )}
-                                                        {pkg.kosmo_proof_count > 0 && (
-                                                            <span className="text-slate-500">{pkg.kosmo_proof_count} fotos</span>
-                                                        )}
-                                                        <a
-                                                            href={pkg.tracking_url}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="text-blue-500 hover:text-blue-700"
-                                                            title="Abrir en Kosmo"
-                                                        >
-                                                            <ExternalLink className="w-3.5 h-3.5" />
-                                                        </a>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        }
-                                    </div>
-                                </div>
-                            )}
-                        </CardContent>
-                    )}
-                </Card>
-            )}
-
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-4">
@@ -1450,9 +1139,9 @@ const JourneyDetail = () => {
                         <Square className="w-4 h-4 mr-2" />
                         Fin
                     </TabsTrigger>
-                    <TabsTrigger value="calidad" data-testid="tab-calidad">
-                        <CheckCircle2 className="w-4 h-4 mr-2" />
-                        Calidad
+                    <TabsTrigger value="guias" data-testid="tab-guias">
+                        <Package className="w-4 h-4 mr-2" />
+                        Guías
                     </TabsTrigger>
                 </TabsList>
 
@@ -1519,9 +1208,9 @@ const JourneyDetail = () => {
                     />
                 </TabsContent>
 
-                {/* Tab: Calidad */}
-                <TabsContent value="calidad" className="space-y-6" data-testid="tab-calidad-content">
-                    <QualityTabV2 journeyId={journey.id} journeyData={journey} onRefreshJourney={fetchJourney} />
+                {/* Tab: Guías */}
+                <TabsContent value="guias" className="space-y-6" data-testid="tab-guias-content">
+                    <GuiasTab journey={journey} packages={journey.packages || []} onRefreshJourney={fetchJourney} />
                 </TabsContent>
             </Tabs>
 

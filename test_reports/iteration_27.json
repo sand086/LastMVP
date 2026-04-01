@@ -1,0 +1,151 @@
+{
+  "summary": "Iteration 27 - Guías Tab and Proveedor Role Testing Complete. All 17 backend tests passed (100%). Frontend UI verified for tab structure, Guías tab content, and role-based access control.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration27_guias_proveedor.py",
+    "/app/test_reports/pytest/pytest_results_iter27.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Tab structure correctly updated: Inicio | Incidencias | Fin | Guías - Calidad tab removed",
+    "GuiasTab.jsx correctly implements KPI cards, AI alert banner, segment filters, and main table",
+    "PATCH /api/packages/{id}/review endpoint correctly requires coordinator/developer role (403 for agent/proveedor)",
+    "Proveedor role correctly filters journeys by assigned_providers",
+    "Proveedor sidebar correctly shows only Dashboard and Rutas links",
+    "Package enrichment fields (ai_score, ai_errors, photos_count, etc.) correctly added in journey_routes.py",
+    "Approve/Reject buttons correctly hidden for agent and proveedor roles (isReadOnly check)",
+    "Re-sincronizar Kosmo and Evaluar IA todas buttons correctly hidden for read-only roles"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration27_guias_proveedor.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 tests passed)",
+    "frontend": "100% (All UI elements verified)"
+  },
+  "test_credentials": {
+    "developer": "dev@me.mx / LastMile2026",
+    "coordinator": "yael@me.mx / LastMile2026",
+    "agent": "agente@me.mx / LastMile2026",
+    "proveedor": "proveedor@me.mx / LastMile2026"
+  },
+  "seed_data_creation": "Proveedor user created in seed_database with assigned_providers for Chamedé Logistics",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All Guías tab features verified. Proveedor role working correctly with journey filtering and read-only access. Tab structure is Inicio | Incidencias | Fin | Guías (no Calidad or Paquetes tabs).",
+  "features_verified": {
+    "tab_structure": {
+      "status": "VERIFIED",
+      "tabs_present": ["Inicio", "Incidencias", "Fin", "Guías"],
+      "tabs_removed": ["Calidad", "Paquetes"]
+    },
+    "guias_tab_kpi_cards": {
+      "status": "VERIFIED",
+      "cards": ["Score promedio", "Completos", "Evaluados IA", "Revisión manual"]
+    },
+    "guias_tab_ai_alert_banner": {
+      "status": "VERIFIED",
+      "shows_when": "packages have ai_errors",
+      "hidden_when": "no errors"
+    },
+    "guias_tab_segment_filters": {
+      "status": "VERIFIED",
+      "filters": ["Todas", "Con alerta", "Sin evidencia", "Pendiente revisión"]
+    },
+    "guias_tab_main_table": {
+      "status": "VERIFIED",
+      "columns": ["expand chevron", "No. guía", "Destinatario", "Estado", "Score IA", "Errores", "Fotos", "Intento", "Revisión", "Acciones"]
+    },
+    "guias_tab_expanded_row": {
+      "status": "VERIFIED",
+      "columns": ["Evidencias Kosmo", "Evaluación IA", "Revisión manual"]
+    },
+    "approve_reject_buttons": {
+      "status": "VERIFIED",
+      "visible_for": ["coordinator", "developer"],
+      "hidden_for": ["agent", "proveedor"]
+    },
+    "patch_packages_review_endpoint": {
+      "status": "VERIFIED",
+      "endpoint": "PATCH /api/packages/{id}/review",
+      "allowed_roles": ["coordinator", "developer"],
+      "denied_roles": ["agent", "proveedor (403)"]
+    },
+    "proveedor_role": {
+      "status": "VERIFIED",
+      "login": "proveedor@me.mx / LastMile2026",
+      "sidebar_visible": ["Dashboard", "Rutas"],
+      "sidebar_hidden": ["Layout", "Reportes", "Configuración", "Criterios Calidad", "Admin IA", "Sistema section"],
+      "journey_filtering": "Only sees journeys for assigned provider (Exclusive Logistics)",
+      "review_access": "403 Forbidden"
+    },
+    "resync_evaluate_buttons": {
+      "status": "VERIFIED",
+      "visible_for": ["coordinator", "developer"],
+      "hidden_for": ["agent", "proveedor"]
+    },
+    "standalone_paquetes_card": {
+      "status": "VERIFIED",
+      "removed": true
+    }
+  },
+  "backend_tests_summary": {
+    "TestAuthEndpoints": {
+      "test_developer_login": "PASSED",
+      "test_coordinator_login": "PASSED",
+      "test_agent_login": "PASSED",
+      "test_proveedor_login": "PASSED"
+    },
+    "TestPackageReviewEndpoint": {
+      "test_developer_can_approve_package": "PASSED",
+      "test_coordinator_can_approve_package": "PASSED",
+      "test_coordinator_can_reject_with_note": "PASSED",
+      "test_agent_cannot_review_package": "PASSED",
+      "test_proveedor_cannot_review_package": "PASSED"
+    },
+    "TestProveedorJourneyFiltering": {
+      "test_proveedor_can_access_journeys": "PASSED",
+      "test_proveedor_can_access_dashboard": "PASSED",
+      "test_proveedor_cannot_access_settings": "PASSED"
+    },
+    "TestPackageEnrichmentFields": {
+      "test_journey_packages_have_enriched_fields": "PASSED"
+    },
+    "TestResyncAndEvaluateEndpoints": {
+      "test_batch_rescrape_endpoint_exists": "PASSED",
+      "test_evaluate_all_evidence_endpoint_exists": "PASSED"
+    },
+    "TestJourneyDetailEndpoint": {
+      "test_journey_detail_structure": "PASSED"
+    },
+    "TestSeedDataProveedorUser": {
+      "test_proveedor_user_exists": "PASSED"
+    }
+  },
+  "frontend_ui_verification": {
+    "developer_view": {
+      "tab_structure": "Inicio | Incidencias | Fin | Guías - VERIFIED",
+      "guias_tab_content": "KPI cards, AI alert, segment filters, table with all columns - VERIFIED",
+      "expanded_row": "3 columns (Evidencias Kosmo, Evaluación IA, Revisión manual) - VERIFIED",
+      "approve_reject_buttons": "Visible - VERIFIED"
+    },
+    "proveedor_view": {
+      "sidebar": "Only Dashboard and Rutas visible - VERIFIED",
+      "journey_filtering": "Only sees assigned provider journeys - VERIFIED",
+      "approve_reject_buttons": "Hidden - VERIFIED",
+      "resync_evaluate_buttons": "Hidden - VERIFIED"
+    },
+    "agent_view": {
+      "approve_reject_buttons": "Hidden - VERIFIED",
+      "resync_evaluate_buttons": "Hidden - VERIFIED"
+    }
+  }
+}

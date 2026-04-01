@@ -30,8 +30,8 @@ import {
 import { Button } from '../components/ui/button';
 
 const navItems = [
-    { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['agent', 'coordinator', 'executive', 'developer'] },
-    { path: '/journeys', label: 'Rutas', icon: Truck, roles: ['agent', 'coordinator', 'executive', 'developer'] },
+    { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['agent', 'coordinator', 'executive', 'developer', 'proveedor'] },
+    { path: '/journeys', label: 'Rutas', icon: Truck, roles: ['agent', 'coordinator', 'executive', 'developer', 'proveedor'] },
     { path: '/layout', label: 'Layout', icon: Upload, roles: ['agent', 'coordinator', 'developer'] },
     { path: '/reports', label: 'Reportes', icon: FileText, roles: ['coordinator', 'executive', 'developer'] },
     { path: '/documentation', label: 'API & Reportes', icon: Code, roles: ['coordinator', 'executive', 'developer'] },
@@ -84,6 +84,7 @@ export const DashboardLayout = ({ children }) => {
             coordinator: 'Coordinador',
             executive: 'Ejecutivo',
             developer: 'Developer',
+            proveedor: 'Proveedor',
         };
         return labels[role] || role;
     };

@@ -78,6 +78,7 @@ async def seed_database():
         {"id": str(uuid.uuid4()), "email": "yael@me.mx", "name": "Yael Coordinador", "role": "coordinator", "password": password_hash, "created_at": datetime.now(timezone.utc).isoformat()},
         {"id": str(uuid.uuid4()), "email": "karina@me.mx", "name": "Karina Ejecutivo", "role": "executive", "password": password_hash, "created_at": datetime.now(timezone.utc).isoformat()},
         {"id": str(uuid.uuid4()), "email": "dev@me.mx", "name": "Dev Admin", "role": "developer", "password": password_hash, "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "email": "proveedor@me.mx", "name": "Proveedor Chamedé", "role": "proveedor", "password": password_hash, "assigned_providers": [providers[0]["id"]], "created_at": datetime.now(timezone.utc).isoformat()},
     ]
     await db.users.insert_many(users)
 

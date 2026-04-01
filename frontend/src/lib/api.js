@@ -191,6 +191,7 @@ export const searchPackages = (q) => api.get('/packages/search', { params: { q }
 
 // Package Review
 export const reviewPackage = (packageId) => api.put(`/packages/${packageId}/review`);
+export const reviewPackageWithNote = (packageId, data) => api.patch(`/packages/${packageId}/review`, data);
 
 // CRUD Clients & Providers
 export const updateClient = (id, data) => api.put(`/clients/${id}`, data);

@@ -155,6 +155,21 @@ async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
                 except ValueError:
                     p["delivery_attempt"] = 1
 
+    # Enrich packages with unified fields for Guías tab
+    for p in packages:
+        p.setdefault("ai_score", p.get("evidence_score"))
+        ai_errors = []
+        detail = p.get("evidence_detail", {}) or {}
+        ai_errors.extend(detail.get("missing_items", []))
+        ai_errors.extend(detail.get("alerts", []))
+        p["ai_errors"] = ai_errors
+        p["ai_confidence"] = detail.get("confidence")
+        p.setdefault("manually_reviewed", bool(p.get("reviewed_by")))
+        p.setdefault("manually_reviewed_note", p.get("review_note", None))
+        p["photos_count"] = p.get("kosmo_proof_count", len(p.get("kosmo_proof_urls", [])))
+        p.setdefault("delivery_note", p.get("kosmo_delivery_note", ""))
+        p["kosmo_url"] = p.get("tracking_url", "")
+
     journey["packages"] = packages
 
     incidents = await db.incidents.find({"journey_id": journey_id}, {"_id": 0}).to_list(100)
@@ -420,11 +435,41 @@ async def review_package(package_id: str, user: dict = Depends(get_current_user)
     now = datetime.now(timezone.utc).isoformat()
     result = await db.packages.update_one(
         {"id": package_id},
-        {"$set": {"reviewed_by": user.get("name", user["email"]), "reviewed_at": now}},
+        {"$set": {"reviewed_by": user.get("name", user["email"]), "reviewed_at": now, "manually_reviewed": True}},
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Paquete no encontrado")
     return {"message": "Paquete marcado como revisado", "reviewed_by": user.get("name", user["email"]), "reviewed_at": now}
+
+
+@router.patch("/packages/{package_id}/review")
+async def review_package_with_note(
+    package_id: str,
+    body: dict,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    now = datetime.now(timezone.utc).isoformat()
+    manually_reviewed = body.get("manually_reviewed", True)
+    note = body.get("manually_reviewed_note", "")
+
+    update_data = {
+        "manually_reviewed": manually_reviewed,
+        "review_note": note,
+        "reviewed_by": user.get("name", user["email"]),
+        "reviewed_at": now,
+    }
+    if not manually_reviewed:
+        update_data["rejection_reason"] = note
+
+    result = await db.packages.update_one(
+        {"id": package_id},
+        {"$set": update_data},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Paquete no encontrado")
+
+    pkg = await db.packages.find_one({"id": package_id}, {"_id": 0})
+    return pkg
 
 
 # ==================== COSMO JOURNEY CREATION ====================
