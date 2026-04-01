@@ -21,7 +21,7 @@ export function useWebSocket(onEvent) {
     const connect = useCallback(() => {
         // Build WebSocket URL from the backend URL
         const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-        const wsUrl = backendUrl.replace(/^http/, 'ws') + '/ws/dashboard';
+        const wsUrl = backendUrl.replace(/^http/, 'ws') + '/api/ws/dashboard';
 
         try {
             const ws = new WebSocket(wsUrl);

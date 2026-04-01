@@ -96,7 +96,7 @@ async def redirect_api_docs():
 
 # ==================== WEBSOCKET ENDPOINT ====================
 
-@app.websocket("/ws/dashboard")
+@app.websocket("/api/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
     await ws_manager.connect(websocket, "dashboard")
     try:

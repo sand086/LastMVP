@@ -7,6 +7,11 @@
 - [x] Updated `ReportRequest` model with optional `client_id` and `provider_id` fields
 - [x] Testing: iteration_26 — 100% backend (26/26), 100% frontend
 
+## 2026-04-01 — Deployment Fix
+- [x] WebSocket endpoint moved from `/ws/dashboard` to `/api/ws/dashboard` for correct K8s ingress routing
+- [x] Frontend WebSocket URL updated accordingly
+- [x] Production build verified: passes successfully
+
 ## 2026-04-01 — Code Quality Improvements (Round 2)
 - [x] Promise.all → Promise.allSettled in Dashboard.jsx, Journeys.jsx, Layout.jsx, SystemHealth.jsx
 - [x] Python complexity: admin_module_routes.py — extracted _calc_working_hours, _check_on_time, _build_report_row
