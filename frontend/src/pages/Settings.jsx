@@ -424,6 +424,7 @@ const Settings = () => {
             coordinator: 'Coordinador',
             executive: 'Ejecutivo',
             developer: 'Developer',
+            proveedor: 'Proveedor',
         };
         return labels[role] || role;
     };
@@ -434,6 +435,7 @@ const Settings = () => {
             coordinator: 'bg-blue-100 text-blue-700',
             executive: 'bg-slate-100 text-slate-700',
             developer: 'bg-violet-100 text-violet-700',
+            proveedor: 'bg-amber-100 text-amber-700',
         };
         return colors[role] || 'bg-slate-100 text-slate-700';
     };
@@ -907,6 +909,7 @@ const Settings = () => {
                                     <SelectItem value="coordinator">Coordinador</SelectItem>
                                     <SelectItem value="executive">Ejecutivo</SelectItem>
                                     <SelectItem value="developer">Developer</SelectItem>
+                                    <SelectItem value="proveedor">Proveedor</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
