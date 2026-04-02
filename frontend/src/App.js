@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from './components/ui/sonner';
+import { toast } from 'sonner';
 import DashboardLayout from './components/DashboardLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -37,10 +38,18 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     }
 
     if (allowedRoles && !hasRole(allowedRoles)) {
-        return <Navigate to="/" replace />;
+        return <NoPermissionRedirect />;
     }
 
     return <DashboardLayout>{children}</DashboardLayout>;
+};
+
+// Separate component to show toast on redirect
+const NoPermissionRedirect = () => {
+    useEffect(() => {
+        toast.info('Sin permisos — No tienes acceso a esta sección');
+    }, []);
+    return <Navigate to="/" replace />;
 };
 
 // Public route - redirect to dashboard if authenticated

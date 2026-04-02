@@ -156,7 +156,8 @@ const RoutesTable = ({ journeys }) => {
 
 /* ─────────────── DASHBOARD ─────────────── */
 const Dashboard = () => {
-    const { canEdit } = useAuth();
+    const { canEdit, hasRole } = useAuth();
+    const isProviderOnly = hasRole('proveedor');
     const [stats, setStats] = useState(null);
     const [journeys, setJourneys] = useState([]);
     const [pagination, setPagination] = useState({ page: 1, page_size: 25, total_count: 0, total_pages: 1 });
@@ -347,7 +348,10 @@ const Dashboard = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
                         className="lm-filter-btn"
-                        onClick={handleKosmoSync}
+                        onClick={() => {
+                            if (isProviderOnly) { toast.info('Sin permisos para esta acción'); return; }
+                            handleKosmoSync();
+                        }}
                         disabled={syncing}
                         data-testid="kosmo-sync-btn"
                         style={{ fontSize: 12 }}
@@ -457,7 +461,10 @@ const Dashboard = () => {
                 </button>
 
                 {/* Export */}
-                <button className="lm-filter-btn" onClick={handleExport} disabled={exporting} data-testid="export-btn">
+                <button className="lm-filter-btn" onClick={() => {
+                    if (isProviderOnly) { toast.info('Sin permisos para esta acción'); return; }
+                    handleExport();
+                }} disabled={exporting} data-testid="export-btn">
                     <Download style={{ width: 14, height: 14 }} />
                     Exportar
                 </button>
