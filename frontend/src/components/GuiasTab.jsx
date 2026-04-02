@@ -359,7 +359,14 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                     ) : guide}
                                                 </td>
                                                 <td className="truncate max-w-[120px] text-xs">{pkg.recipient_name}</td>
-                                                <td><StatusPill status={pkg.status} /></td>
+                                                <td>
+                                                    <StatusPill status={pkg.status} />
+                                                    {pkg.status === 'failed' && pkg.failure_reason && (
+                                                        <span className="block text-[10px] text-red-500 mt-0.5 truncate max-w-[100px]" title={pkg.failure_reason_note || pkg.failure_reason}>
+                                                            {pkg.failure_reason.replace(/_/g, ' ')}
+                                                        </span>
+                                                    )}
+                                                </td>
                                                 <td><ScoreCircle score={pkg.ai_score} /></td>
                                                 <td>
                                                     {hasErrors ? (
@@ -444,6 +451,25 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                                     <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2 mt-1">
                                                                         {pkg.delivery_note}
                                                                     </p>
+                                                                )}
+                                                                {pkg.kosmo_driver_note && !pkg.delivery_note && (
+                                                                    <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2 mt-1">
+                                                                        {pkg.kosmo_driver_note}
+                                                                    </p>
+                                                                )}
+                                                                {(pkg.failure_reason || pkg.failure_reason_note) && (
+                                                                    <div className="bg-red-50 border border-red-200 rounded p-2 mt-1 space-y-1">
+                                                                        {pkg.failure_reason && (
+                                                                            <p className="text-xs font-medium text-red-700">
+                                                                                Motivo de falla: {pkg.failure_reason.replace(/_/g, ' ')}
+                                                                            </p>
+                                                                        )}
+                                                                        {pkg.failure_reason_note && (
+                                                                            <p className="text-xs text-red-600 italic">
+                                                                                &ldquo;{pkg.failure_reason_note}&rdquo;
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
                                                                 )}
                                                                 <div className="text-xs text-slate-400 flex items-center gap-2">
                                                                     {pkg.kosmo_finished_at && (
