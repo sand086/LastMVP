@@ -12,7 +12,14 @@
 - [x] Frontend WebSocket URL updated accordingly
 - [x] Production build verified: passes successfully
 
-## 2026-04-01 — Unified Guías Tab + Proveedor Role
+## 2026-04-06 — Review UX Fixes (Guías Tab)
+- [x] Bug 1: Review indicator now read-only with 3 states (○ pending, ✓ approved, ✗ rejected)
+- [x] Bug 2A: Scroll position preserved after approve/reject (no jump to top)
+- [x] Bug 2B: Auto-advance to next pending guide after approve/reject
+- [x] Bug 2C: KPI "Revisión manual" and filter counts update in real-time via optimistic updates
+- [x] Toast "Todas las guías han sido revisadas" when all guides reviewed
+- [x] Enter key support in reject note input
+- [x] Testing: iteration_28 — 19/19 backend, 100% frontend
 - [x] Replaced "Calidad" tab with new unified "Guías" tab in JourneyDetail
 - [x] Removed standalone "Paquetes" card from JourneyDetail
 - [x] KPI cards: Score promedio, Completos, Evaluados IA, Revisión manual
