@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
     evaluatePackageEvidence,
@@ -22,6 +22,7 @@ import {
     AlertTriangle,
     Circle,
     CheckCircle2,
+    XCircle,
     Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -58,6 +59,17 @@ const StatusPill = ({ status }) => {
     return <span className={`text-xs font-medium px-2 py-0.5 rounded ${cls}`}>{label}</span>;
 };
 
+/* Review status indicator — read-only, 3 states */
+const ReviewIndicator = ({ pkg }) => {
+    if (pkg.manually_reviewed) {
+        return <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" data-testid={`review-approved-${pkg.id}`} />;
+    }
+    if (pkg.rejection_reason) {
+        return <XCircle className="w-4 h-4 text-red-500 mx-auto" data-testid={`review-rejected-${pkg.id}`} />;
+    }
+    return <Circle className="w-4 h-4 text-slate-300 mx-auto" data-testid={`review-pending-${pkg.id}`} />;
+};
+
 const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
     const { hasRole } = useAuth();
     const canReview = hasRole(['coordinator', 'developer']);
@@ -72,43 +84,62 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
     const [rejectNote, setRejectNote] = useState('');
     const [savingReview, setSavingReview] = useState(null);
 
+    // Optimistic local review overrides — merged with server data
+    const [reviewOverrides, setReviewOverrides] = useState({});
+
     // Carousel state
     const [carouselOpen, setCarouselOpen] = useState(false);
     const [carouselImages, setCarouselImages] = useState([]);
     const [carouselIndex, setCarouselIndex] = useState(0);
     const [carouselPkgInfo, setCarouselPkgInfo] = useState(null);
 
-    // KPI calculations
+    // Refs for scroll management
+    const rowRefs = useRef({});
+    const tableContainerRef = useRef(null);
+
+    // Reset overrides when server data refreshes
+    useEffect(() => {
+        setReviewOverrides({});
+    }, [packages]);
+
+    // Merge server packages with local optimistic overrides
+    const mergedPackages = useMemo(() => {
+        return packages.map(p => {
+            const override = reviewOverrides[p.id];
+            return override ? { ...p, ...override } : p;
+        });
+    }, [packages, reviewOverrides]);
+
+    // KPI calculations — uses merged data for real-time updates
     const kpis = useMemo(() => {
-        const totalPkgs = packages.length;
-        const withScore = packages.filter(p => p.ai_score != null);
+        const totalPkgs = mergedPackages.length;
+        const withScore = mergedPackages.filter(p => p.ai_score != null);
         const avgScore = withScore.length > 0
             ? Math.round(withScore.reduce((sum, p) => sum + p.ai_score, 0) / withScore.length)
             : 0;
         const complete = withScore.filter(p => p.ai_score === 100).length;
         const aiEvaluated = withScore.length;
-        const manualReviewed = packages.filter(p => p.manually_reviewed).length;
+        const manualReviewed = mergedPackages.filter(p => p.manually_reviewed).length;
         return { avgScore, complete, totalScored: withScore.length, aiEvaluated, manualReviewed, totalPkgs };
-    }, [packages]);
+    }, [mergedPackages]);
 
-    // AI errors aggregation for alert
+    // AI errors aggregation
     const aiErrorSummary = useMemo(() => {
         const errorMap = {};
-        packages.forEach(p => {
+        mergedPackages.forEach(p => {
             (p.ai_errors || []).forEach(e => {
                 errorMap[e] = (errorMap[e] || 0) + 1;
             });
         });
         return Object.entries(errorMap).sort((a, b) => b[1] - a[1]);
-    }, [packages]);
+    }, [mergedPackages]);
 
-    // Filtered and sorted packages
+    // Filtered and sorted packages — uses merged data
     const filteredPackages = useMemo(() => {
-        let list = [...packages];
+        let list = [...mergedPackages];
         if (segment === 'alert') list = list.filter(p => (p.ai_errors || []).length > 0);
         if (segment === 'no_evidence') list = list.filter(p => p.photos_count === 0);
-        if (segment === 'pending_review') list = list.filter(p => !p.manually_reviewed);
-        // Sort: errors first, then alphabetically by guide
+        if (segment === 'pending_review') list = list.filter(p => !p.manually_reviewed && !p.rejection_reason);
         list.sort((a, b) => {
             const aErr = (a.ai_errors || []).length;
             const bErr = (b.ai_errors || []).length;
@@ -118,7 +149,96 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
             return aGuide.localeCompare(bGuide);
         });
         return list;
-    }, [packages, segment]);
+    }, [mergedPackages, segment]);
+
+    // Find the next unreviewed package after a given id in filteredPackages
+    const findNextPending = useCallback((currentId) => {
+        const idx = filteredPackages.findIndex(p => p.id === currentId);
+        // Search forward from current position
+        for (let i = idx + 1; i < filteredPackages.length; i++) {
+            const p = filteredPackages[i];
+            if (!p.manually_reviewed && !p.rejection_reason) return p;
+        }
+        // Wrap around: search from beginning
+        for (let i = 0; i < idx; i++) {
+            const p = filteredPackages[i];
+            if (!p.manually_reviewed && !p.rejection_reason) return p;
+        }
+        return null;
+    }, [filteredPackages]);
+
+    // Scroll smoothly to a row
+    const scrollToRow = useCallback((pkgId) => {
+        // Use a short delay to let React render the expanded row first
+        setTimeout(() => {
+            const el = rowRefs.current[pkgId];
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 100);
+    }, []);
+
+    // After review: advance to next pending guide
+    const advanceToNext = useCallback((reviewedPkgId) => {
+        const next = findNextPending(reviewedPkgId);
+        if (next) {
+            setExpandedId(next.id);
+            scrollToRow(next.id);
+        } else {
+            setExpandedId(null);
+            toast.success('Todas las guías han sido revisadas');
+        }
+    }, [findNextPending, scrollToRow]);
+
+    const handleApprove = async (pkg) => {
+        setSavingReview(pkg.id);
+        try {
+            await reviewPackageWithNote(pkg.id, { manually_reviewed: true });
+            // Optimistic update
+            setReviewOverrides(prev => ({
+                ...prev,
+                [pkg.id]: { manually_reviewed: true, rejection_reason: null, reviewed_by: 'Tú' },
+            }));
+            toast.success('Guía aprobada');
+            setRejectingPkg(null);
+            setRejectNote('');
+            // Advance to next pending
+            advanceToNext(pkg.id);
+            // Silently refresh server data in background
+            onRefreshJourney?.();
+        } catch (err) {
+            toast.error('Error al aprobar');
+        } finally {
+            setSavingReview(null);
+        }
+    };
+
+    const handleReject = async (pkg) => {
+        if (!rejectNote.trim()) {
+            toast.error('Ingresa el motivo de rechazo');
+            return;
+        }
+        setSavingReview(pkg.id);
+        try {
+            await reviewPackageWithNote(pkg.id, { manually_reviewed: false, manually_reviewed_note: rejectNote });
+            // Optimistic update
+            setReviewOverrides(prev => ({
+                ...prev,
+                [pkg.id]: { manually_reviewed: false, rejection_reason: rejectNote, reviewed_by: 'Tú' },
+            }));
+            toast.success('Guía rechazada');
+            setRejectingPkg(null);
+            setRejectNote('');
+            // Advance to next pending
+            advanceToNext(pkg.id);
+            // Silently refresh in background
+            onRefreshJourney?.();
+        } catch (err) {
+            toast.error('Error al rechazar');
+        } finally {
+            setSavingReview(null);
+        }
+    };
 
     const handleEvaluatePackage = async (pkg) => {
         const guide = pkg.order_reference_id || pkg.tracking_number;
@@ -157,40 +277,6 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
             toast.error(err.response?.data?.detail || 'Error al sincronizar');
         } finally {
             setSyncing(false);
-        }
-    };
-
-    const handleApprove = async (pkg) => {
-        setSavingReview(pkg.id);
-        try {
-            await reviewPackageWithNote(pkg.id, { manually_reviewed: true });
-            toast.success('Guía aprobada');
-            setExpandedId(null);
-            onRefreshJourney?.();
-        } catch (err) {
-            toast.error('Error al aprobar');
-        } finally {
-            setSavingReview(null);
-        }
-    };
-
-    const handleReject = async (pkg) => {
-        if (!rejectNote.trim()) {
-            toast.error('Ingresa el motivo de rechazo');
-            return;
-        }
-        setSavingReview(pkg.id);
-        try {
-            await reviewPackageWithNote(pkg.id, { manually_reviewed: false, manually_reviewed_note: rejectNote });
-            toast.success('Guía rechazada');
-            setRejectingPkg(null);
-            setRejectNote('');
-            setExpandedId(null);
-            onRefreshJourney?.();
-        } catch (err) {
-            toast.error('Error al rechazar');
-        } finally {
-            setSavingReview(null);
         }
     };
 
@@ -301,9 +387,9 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                         {f.label}
                         {f.key !== 'all' && (
                             <span className="ml-1 opacity-70">
-                                ({f.key === 'alert' ? packages.filter(p => (p.ai_errors || []).length > 0).length :
-                                  f.key === 'no_evidence' ? packages.filter(p => p.photos_count === 0).length :
-                                  packages.filter(p => !p.manually_reviewed).length})
+                                ({f.key === 'alert' ? mergedPackages.filter(p => (p.ai_errors || []).length > 0).length :
+                                  f.key === 'no_evidence' ? mergedPackages.filter(p => p.photos_count === 0).length :
+                                  mergedPackages.filter(p => !p.manually_reviewed && !p.rejection_reason).length})
                             </span>
                         )}
                     </button>
@@ -313,7 +399,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
             {/* Main Table */}
             <Card>
                 <CardContent className="p-0">
-                    <div className="max-h-[600px] overflow-y-auto">
+                    <div className="max-h-[600px] overflow-y-auto" ref={tableContainerRef}>
                         <table className="data-table w-full text-sm">
                             <thead>
                                 <tr>
@@ -340,6 +426,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                     return (
                                         <React.Fragment key={pkg.id}>
                                             <tr
+                                                ref={el => { rowRefs.current[pkg.id] = el; }}
                                                 className={`cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
                                                 onClick={() => setExpandedId(isExpanded ? null : pkg.id)}
                                                 data-testid={`guia-row-${pkg.id}`}
@@ -390,12 +477,9 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                     )}
                                                 </td>
                                                 <td className="text-center text-xs font-mono">{pkg.delivery_attempt || 1}°</td>
-                                                <td className="text-center">
-                                                    {pkg.manually_reviewed ? (
-                                                        <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" />
-                                                    ) : (
-                                                        <Circle className="w-4 h-4 text-slate-300 mx-auto" />
-                                                    )}
+                                                {/* Review indicator — read-only, 3 states */}
+                                                <td className="text-center" onClick={e => e.stopPropagation()}>
+                                                    <ReviewIndicator pkg={pkg} />
                                                 </td>
                                                 <td onClick={e => e.stopPropagation()}>
                                                     <div className="flex items-center gap-1">
@@ -522,7 +606,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                                         <p className="text-xs text-red-700">Rechazado: {pkg.rejection_reason}</p>
                                                                     </div>
                                                                 )}
-                                                                {canReview && !pkg.manually_reviewed && (
+                                                                {canReview && !pkg.manually_reviewed && !pkg.rejection_reason && (
                                                                     <div className="space-y-2 mt-2">
                                                                         {rejectingPkg === pkg.id ? (
                                                                             <div className="space-y-2">
@@ -532,6 +616,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                                                     onChange={e => setRejectNote(e.target.value)}
                                                                                     className="text-xs h-8"
                                                                                     data-testid={`reject-note-${pkg.id}`}
+                                                                                    onKeyDown={e => { if (e.key === 'Enter') handleReject(pkg); }}
                                                                                 />
                                                                                 <div className="flex gap-2">
                                                                                     <Button size="sm" variant="destructive" className="h-7 text-xs"

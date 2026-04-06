@@ -1,0 +1,138 @@
+{
+  "summary": "Iteration 28 - Review Indicator and Auto-Advance Bug Fixes Testing Complete. All 19 backend tests passed (100%). All frontend UI tests passed. Both bugs are FIXED.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration28_review_bugs.py",
+    "/app/test_reports/pytest/pytest_results_iter28.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Bug 1 FIXED: ReviewIndicator component correctly shows 3 read-only states (CheckCircle2 green for approved, XCircle red for rejected, Circle gray for pending)",
+    "Bug 1 FIXED: Review indicator is NOT clickable as a toggle - clicking it does not change review state",
+    "Bug 2A FIXED: After approve/reject, page does NOT scroll to top (scroll position maintained)",
+    "Bug 2B FIXED: After approving last pending guide, toast 'Todas las guías han sido revisadas' appears correctly",
+    "Bug 2C FIXED: KPI 'REVISIÓN MANUAL X/Y' updates immediately after approve/reject (11/27 -> 12/27)",
+    "Bug 2C FIXED: Segment filter counts update immediately after approve/reject (Pendiente revisión(1) -> (0))",
+    "Role-based access: Agent and Proveedor correctly cannot see approve/reject buttons",
+    "Role-based access: Agent and Proveedor correctly cannot see Re-sincronizar Kosmo and Evaluar IA todas buttons",
+    "PATCH /api/packages/{id}/review endpoint correctly returns 403 for agent and proveedor roles"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration28_review_bugs.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 tests passed)",
+    "frontend": "100% (All UI tests passed)"
+  },
+  "test_credentials": {
+    "developer": "dev@me.mx / LastMile2026",
+    "coordinator": "yael@me.mx / LastMile2026",
+    "agent": "agente@me.mx / LastMile2026",
+    "proveedor": "proveedor@me.mx / LastMile2026"
+  },
+  "seed_data_creation": "None - used existing test data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All review indicator and auto-advance bugs are fixed. The 27-guide journey now has 12 approved and 15 rejected packages (0 pending). KPIs update in real-time via optimistic updates with reviewOverrides state.",
+  "features_verified": {
+    "bug_1_review_indicator_states": {
+      "status": "FIXED",
+      "approved_state": "CheckCircle2 (green) - data-testid='review-approved-{id}'",
+      "rejected_state": "XCircle (red) - data-testid='review-rejected-{id}'",
+      "pending_state": "Circle (gray) - data-testid='review-pending-{id}'",
+      "read_only": "Clicking indicator does NOT change review state"
+    },
+    "bug_2a_no_scroll_jump": {
+      "status": "FIXED",
+      "test_result": "Scroll position maintained at 0 before and after approve"
+    },
+    "bug_2b_auto_advance": {
+      "status": "FIXED",
+      "test_result": "When no more pending guides, toast 'Todas las guías han sido revisadas' appears"
+    },
+    "bug_2c_kpi_realtime_update": {
+      "status": "FIXED",
+      "test_result": "KPI changed from 11/27 to 12/27 immediately after approve",
+      "segment_filter_update": "Pendiente revisión count changed from (1) to (0) immediately"
+    },
+    "role_based_access": {
+      "status": "VERIFIED",
+      "developer_coordinator": "Can see and use approve/reject buttons",
+      "agent_proveedor": "Cannot see approve/reject buttons, Re-sincronizar Kosmo, Evaluar IA todas"
+    },
+    "patch_review_endpoint": {
+      "status": "VERIFIED",
+      "approve": "manually_reviewed: true works correctly",
+      "reject": "manually_reviewed: false with manually_reviewed_note sets rejection_reason",
+      "role_restriction": "403 for agent and proveedor roles"
+    }
+  },
+  "backend_tests_summary": {
+    "TestAuthEndpoints": {
+      "test_developer_login": "PASSED",
+      "test_coordinator_login": "PASSED",
+      "test_agent_login": "PASSED",
+      "test_proveedor_login": "PASSED"
+    },
+    "TestJourneyDetailEndpoint": {
+      "test_journey_27_guides_exists": "PASSED",
+      "test_journey_1_guide_exists": "PASSED",
+      "test_packages_have_review_fields": "PASSED"
+    },
+    "TestPackageReviewEndpoint": {
+      "test_developer_can_approve_package": "PASSED",
+      "test_coordinator_can_approve_package": "PASSED",
+      "test_coordinator_can_reject_with_note": "PASSED",
+      "test_agent_cannot_review_package": "PASSED (403)",
+      "test_proveedor_cannot_review_package": "PASSED (403)"
+    },
+    "TestReviewIndicatorStates": {
+      "test_approved_package_state": "PASSED",
+      "test_rejected_package_state": "PASSED",
+      "test_pending_package_state": "PASSED"
+    },
+    "TestKPICalculations": {
+      "test_manual_review_count_updates": "PASSED"
+    },
+    "TestResyncAndEvaluateEndpoints": {
+      "test_batch_rescrape_endpoint_exists": "PASSED",
+      "test_evaluate_all_evidence_endpoint_exists": "PASSED"
+    },
+    "TestResetPackageForTesting": {
+      "test_reset_package_to_pending": "PASSED"
+    }
+  },
+  "frontend_ui_verification": {
+    "guias_tab_kpi_cards": {
+      "score_promedio": "98% (green)",
+      "completos": "24/27",
+      "evaluados_ia": "27/27",
+      "revision_manual": "12/27 (updated in real-time)"
+    },
+    "segment_filters": {
+      "todas": "Working",
+      "con_alerta": "(3) - Working",
+      "sin_evidencia": "(0) - Working",
+      "pendiente_revision": "(0) - Updated in real-time"
+    },
+    "review_indicators": {
+      "approved_count": 12,
+      "rejected_count": 15,
+      "pending_count": 0,
+      "total": 27
+    },
+    "expanded_row_sections": {
+      "evidencias_kosmo": "Photos, delivery note, timestamp",
+      "evaluacion_ia": "AI errors list, score, confidence",
+      "revision_manual": "Reviewed by info or approve/reject buttons"
+    }
+  }
+}
