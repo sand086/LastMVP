@@ -13,9 +13,10 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 
 ## User Personas
 - **Agent** (`agente@me.mx`): Field delivery agent. Views assigned routes and packages.
-- **Coordinator** (`yael@me.mx`): Manages operations, reviews quality, configures settings, admin access.
+- **Coordinator** (`yael@me.mx`): Manages operations, reviews quality, configures settings, admin access. Can edit SLA and Pulse config.
 - **Developer** (`dev@me.mx`): Full access, configures system, tests API, admin module, can upload layouts.
 - **Executive** (`karina@me.mx`): High-level dashboards, reports, admin read-only.
+- **Proveedor** (`proveedor@me.mx`): Read-only restricted view.
 
 ## Core Requirements (Status)
 - [x] JWT role-based authentication (Agent, Coordinator, Developer, Executive)
@@ -78,6 +79,8 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Proveedor role with read-only access (P0) — Done 2026-04-01
 - [x] Liquidación del Servicio export (Belgos/SOP format, P0) — Done 2026-04-07
 - [x] Dynamic SLA Configuration per Provider (P0) — Done 2026-04-07
+- [x] SLA/Pulse config edit permissions for Coordinators (P1) — Done 2026-04-07
+- [x] Pulse: Real-time feasibility monitor (PulseStrip, PulseCell, PulseBanner, PulseConfig) — Done 2026-04-07
 - [ ] Split large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P1)
 - [ ] localStorage → httpOnly cookies migration (P1, security hardening)
 - [ ] Mobile-optimized views for field agents (P2)
