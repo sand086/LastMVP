@@ -1,11 +1,10 @@
 import React from 'react';
-import { Plus, Trash2, Clock, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 const T = {
     bg: '#F5F4F1', surface: '#FFFFFF', surface2: '#F0EFEC',
     border: '#E2E0DB', textPri: '#1A1916', textSec: '#6B6960', textTer: '#9C9A92',
-    green: '#10B981', greenLt: '#ECFDF5', amber: '#D97706', amberLt: '#FFFBEB',
-    red: '#EF4444', redLt: '#FEF2F2', blue: '#2563EB',
+    green: '#10B981', amber: '#D97706', red: '#EF4444',
     radius: 10, radiusSm: 6,
 };
 
@@ -15,15 +14,13 @@ const inputStyle = {
     fontFamily: "'DM Mono', monospace", textAlign: 'center',
 };
 
-export default function PulseConfigSection({ pulseConfig, onChange, canEdit, providers }) {
+export default function PulseConfigSection({ pulseConfig, onChange, canEdit }) {
     const cfg = pulseConfig || {};
     const horaH = cfg.hora_limite?.hour ?? 21;
     const horaM = cfg.hora_limite?.minute ?? 30;
-    const trasladoDefault = cfg.traslado_primer_punto_default ?? 40;
     const tiempoEntrega = cfg.tiempo_promedio_entrega ?? 5;
     const umbralOk = cfg.umbral_ok ?? 10;
     const umbralWarn = cfg.umbral_warn ?? 5;
-    const excepciones = cfg.excepciones_traslado_por_proveedor || [];
 
     const update = (key, val) => {
         onChange({ ...cfg, [key]: val });
@@ -34,26 +31,6 @@ export default function PulseConfigSection({ pulseConfig, onChange, canEdit, pro
         onChange({ ...cfg, hora_limite: hora });
     };
 
-    const addExcepcion = (providerId) => {
-        if (!providerId) return;
-        const next = [...excepciones, { provider_id: providerId, traslado_primer_punto: trasladoDefault }];
-        onChange({ ...cfg, excepciones_traslado_por_proveedor: next });
-    };
-
-    const removeExcepcion = (idx) => {
-        const next = excepciones.filter((_, i) => i !== idx);
-        onChange({ ...cfg, excepciones_traslado_por_proveedor: next });
-    };
-
-    const updateExcepcion = (idx, val) => {
-        const next = [...excepciones];
-        next[idx] = { ...next[idx], traslado_primer_punto: Number(val) };
-        onChange({ ...cfg, excepciones_traslado_por_proveedor: next });
-    };
-
-    const usedProviderIds = new Set(excepciones.map(e => e.provider_id));
-    const availableProviders = (providers || []).filter(p => !usedProviderIds.has(p.id));
-
     return (
         <div style={{ borderTop: `1px dashed ${T.border}`, marginTop: 20, paddingTop: 20 }} data-testid="pulse-config-section">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -63,7 +40,7 @@ export default function PulseConfigSection({ pulseConfig, onChange, canEdit, pro
                 </h4>
             </div>
             <p style={{ fontSize: 11, color: T.textTer, marginBottom: 16 }}>
-                Configuracion del monitor de factibilidad en tiempo real. Estos valores se usan para calcular si una ruta activa puede completar sus entregas dentro de la ventana operativa.
+                Configuracion global del monitor de factibilidad en tiempo real. El traslado al primer punto se configura individualmente al iniciar cada ruta.
             </p>
 
             {/* Ventana operativa */}
@@ -86,14 +63,6 @@ export default function PulseConfigSection({ pulseConfig, onChange, canEdit, pro
                             data-testid="pulse-hora-m" />
                     </Row>
 
-                    <Row label="Tiempo traslado a 1er punto">
-                        <input type="number" min={1} max={240} value={trasladoDefault}
-                            onChange={e => update('traslado_primer_punto_default', Number(e.target.value))}
-                            disabled={!canEdit} style={inputStyle}
-                            data-testid="pulse-traslado" />
-                        <span style={{ fontSize: 11, color: T.textTer }}>min</span>
-                    </Row>
-
                     <Row label="Tiempo promedio por entrega">
                         <input type="number" min={1} max={60} value={tiempoEntrega}
                             onChange={e => update('tiempo_promedio_entrega', Number(e.target.value))}
@@ -107,14 +76,14 @@ export default function PulseConfigSection({ pulseConfig, onChange, canEdit, pro
             {/* Umbrales del semaforo */}
             <div style={{
                 padding: 14, borderRadius: T.radiusSm,
-                border: `1px solid ${T.border}`, background: T.surface, marginBottom: 12,
+                border: `1px solid ${T.border}`, background: T.surface,
             }}>
                 <p style={{ fontSize: 11, fontWeight: 600, color: T.textSec, marginBottom: 10 }}>Umbrales del semaforo</p>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ width: 10, height: 10, borderRadius: '50%', background: T.green }} />
-                        <span style={{ fontSize: 11, color: T.textSec, flex: 1 }}>En tiempo: ≥</span>
+                        <span style={{ fontSize: 11, color: T.textSec, flex: 1 }}>En tiempo: &ge;</span>
                         <input type="number" min={1} max={60} value={umbralOk}
                             onChange={e => update('umbral_ok', Number(e.target.value))}
                             disabled={!canEdit} style={{ ...inputStyle, width: 50 }}
@@ -123,7 +92,7 @@ export default function PulseConfigSection({ pulseConfig, onChange, canEdit, pro
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ width: 10, height: 10, borderRadius: '50%', background: T.amber }} />
-                        <span style={{ fontSize: 11, color: T.textSec, flex: 1 }}>Ajustada: ≥</span>
+                        <span style={{ fontSize: 11, color: T.textSec, flex: 1 }}>Ajustada: &ge;</span>
                         <input type="number" min={1} max={60} value={umbralWarn}
                             onChange={e => update('umbral_warn', Number(e.target.value))}
                             disabled={!canEdit} style={{ ...inputStyle, width: 50 }}
@@ -136,50 +105,6 @@ export default function PulseConfigSection({ pulseConfig, onChange, canEdit, pro
                     </div>
                 </div>
             </div>
-
-            {/* Excepciones de traslado por proveedor */}
-            <div style={{
-                padding: 14, borderRadius: T.radiusSm,
-                border: `1px solid ${T.border}`, background: T.surface,
-            }}>
-                <p style={{ fontSize: 11, fontWeight: 600, color: T.textSec, marginBottom: 8 }}>Excepciones por proveedor (traslado)</p>
-
-                {excepciones.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-                        {excepciones.map((exc, i) => {
-                            const prov = (providers || []).find(p => p.id === exc.provider_id);
-                            return (
-                                <div key={exc.provider_id} style={{
-                                    display: 'flex', alignItems: 'center', gap: 8,
-                                    padding: '6px 10px', borderRadius: 4, background: T.surface2,
-                                }} data-testid={`pulse-exc-${exc.provider_id}`}>
-                                    <span style={{ flex: 1, fontSize: 11, fontWeight: 500, color: T.textPri }}>
-                                        {prov?.name || exc.provider_id}
-                                    </span>
-                                    <input type="number" min={1} max={240} value={exc.traslado_primer_punto}
-                                        onChange={e => updateExcepcion(i, e.target.value)}
-                                        disabled={!canEdit} style={{ ...inputStyle, width: 55 }} />
-                                    <span style={{ fontSize: 10, color: T.textTer }}>min</span>
-                                    {canEdit && (
-                                        <button onClick={() => removeExcepcion(i)}
-                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
-                                            <Trash2 size={13} color={T.red} />
-                                        </button>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <p style={{ fontSize: 11, color: T.textTer, fontStyle: 'italic', marginBottom: 10 }}>
-                        Todos usan el default de {trasladoDefault} min.
-                    </p>
-                )}
-
-                {canEdit && availableProviders.length > 0 && (
-                    <ProviderAdder providers={availableProviders} onAdd={addExcepcion} />
-                )}
-            </div>
         </div>
     );
 }
@@ -189,29 +114,6 @@ function Row({ label, children }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: '#6B6960', flex: 1, minWidth: 170 }}>{label}</span>
             {children}
-        </div>
-    );
-}
-
-function ProviderAdder({ providers, onAdd }) {
-    const [sel, setSel] = React.useState('');
-    return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <select value={sel} onChange={e => setSel(e.target.value)} data-testid="pulse-exc-select"
-                style={{ flex: 1, padding: '5px 8px', borderRadius: 4, border: `1px solid #E2E0DB`, fontSize: 11, color: '#6B6960' }}>
-                <option value="">Seleccionar proveedor...</option>
-                {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <button onClick={() => { if (sel) { onAdd(sel); setSel(''); } }} disabled={!sel}
-                data-testid="pulse-exc-add-btn"
-                style={{
-                    display: 'flex', alignItems: 'center', gap: 3, padding: '5px 10px', borderRadius: 4,
-                    border: `1px solid ${sel ? '#D97706' : '#E2E0DB'}40`,
-                    background: sel ? '#FFFBEB' : '#F0EFEC', color: sel ? '#D97706' : '#9C9A92',
-                    fontSize: 11, fontWeight: 500, cursor: sel ? 'pointer' : 'default',
-                }}>
-                <Plus size={12} /> Agregar
-            </button>
         </div>
     );
 }

@@ -112,6 +112,19 @@ export const JourneyStartTab = ({
                                 data-testid="arrival-time-cedis-input"
                             />
                         </div>
+                        <div className="space-y-2">
+                            <Label>Traslado a 1er punto (min)</Label>
+                            <Input
+                                type="number"
+                                min={1}
+                                max={240}
+                                value={startForm.traslado_primer_punto}
+                                onChange={(e) => setStartForm({ ...startForm, traslado_primer_punto: parseInt(e.target.value) || 40 })}
+                                placeholder="40"
+                                data-testid="traslado-primer-punto-input"
+                            />
+                            <p className="text-xs text-slate-400">Tiempo estimado de traslado al primer punto de entrega. Se usa en Pulse.</p>
+                        </div>
                     </div>
 
                     {/* Backup driver fields */}
@@ -289,6 +302,12 @@ export const JourneyStartTab = ({
                             <p className="text-xs text-slate-500 uppercase">Paquetes cargados</p>
                             <p className="font-mono font-medium">{journey.start_data.packages_loaded}</p>
                         </div>
+                        {journey.start_data.traslado_primer_punto && (
+                            <div className="p-3 bg-slate-50 rounded-sm">
+                                <p className="text-xs text-slate-500 uppercase">Traslado a 1er punto</p>
+                                <p className="font-mono font-medium">{journey.start_data.traslado_primer_punto} min</p>
+                            </div>
+                        )}
                     </div>
                     {journey.start_data.notes && (
                         <div className="mt-4 p-3 bg-slate-50 rounded-sm">

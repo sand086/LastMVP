@@ -481,11 +481,9 @@ async def get_admin_config(user: dict = Depends(_require_admin)):
 
     pulse_defaults = {
         "hora_limite": {"hour": 21, "minute": 30},
-        "traslado_primer_punto_default": 40,
         "tiempo_promedio_entrega": 5,
         "umbral_ok": 10,
         "umbral_warn": 5,
-        "excepciones_traslado_por_proveedor": [],
     }
 
     return {

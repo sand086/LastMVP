@@ -1,0 +1,83 @@
+{
+  "summary": "Iteration 32 - Traslado a 1er punto moved from global config to per-journey start form. All 4 backend tests passed (100%). Frontend UI verified: traslado field present in journey start form with default value 40, Pulse config section in Admin IA does NOT show traslado input fields.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/config",
+        "issue": "Database still contains old pulse_config with traslado_primer_punto_default and excepciones_traslado_por_proveedor fields. Frontend ignores these but they could be cleaned up.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration32_traslado_move.py",
+    "/app/test_reports/pytest/pytest_results_iter32.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Clean up database pulse_config to remove traslado_primer_punto_default and excepciones_traslado_por_proveedor fields (frontend already ignores them)"
+  ],
+  "critical_code_review_comments": [
+    "JourneyStartTab.jsx: Lines 116-127 - traslado-primer-punto-input field added with data-testid, default value 40, min=1, max=240 - VERIFIED",
+    "JourneyStartTab.jsx: Lines 305-310 - Read-only view shows traslado_primer_punto when present in start_data - VERIFIED (conditional rendering)",
+    "pulseUtils.js: Lines 62-67 - Reads traslado from journey.start_data.traslado_primer_punto with fallback to 40 - VERIFIED",
+    "PulseConfigSection.jsx: Simplified - NO traslado_primer_punto_default input, NO excepciones_traslado_por_proveedor section - VERIFIED",
+    "PulseConfigSection.jsx: Helper text updated to explain traslado is configured per-route - VERIFIED",
+    "admin_module_routes.py: pulse_defaults no longer includes traslado fields (lines 482-487) - VERIFIED"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration32_traslado_move.py"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 tests passed)",
+    "frontend": "100% (All UI tests passed)"
+  },
+  "test_credentials": {
+    "developer": "dev@me.mx / LastMile2026",
+    "coordinator": "yael@me.mx / LastMile2026"
+  },
+  "seed_data_creation": "None - used existing test data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Traslado a 1er punto field has been moved from global Pulse config (Admin IA > Config) to individual journey Start form. The scheduled journey at fefd8411-7a4e-4a8f-9c32-1d66d41ead9c shows the start form with traslado field (default 40). The in_progress journey at c8d4c292-5c27-46bf-8b81-e83e40fb8a05 was started BEFORE this change so its start_data doesn't have traslado_primer_punto - pulseUtils.js falls back to 40. The Pulse config section in Admin IA only shows: hora_limite, tiempo_promedio_entrega, umbral_ok, umbral_warn (no traslado fields).",
+  "features_verified": {
+    "traslado_moved_to_journey_start": {
+      "frontend_journey_start_form": {
+        "traslado_input_field_present": true,
+        "data_testid": "traslado-primer-punto-input",
+        "default_value": 40,
+        "helper_text": "Tiempo estimado de traslado al primer punto de entrega. Se usa en Pulse."
+      },
+      "frontend_pulse_config_section": {
+        "traslado_input_removed": true,
+        "excepciones_section_removed": true,
+        "helper_text_updated": "El traslado al primer punto se configura individualmente al iniciar cada ruta."
+      },
+      "frontend_read_only_view": {
+        "shows_traslado_when_present": true,
+        "old_journeys_without_traslado": "Correctly not shown (field not in start_data)"
+      },
+      "backend_pulse_utils": {
+        "reads_from_journey_start_data": true,
+        "fallback_to_40": true
+      }
+    }
+  },
+  "backend_tests_summary": {
+    "TestPulseConfigRequiredFields": {
+      "test_pulse_config_has_required_fields": "PASSED"
+    },
+    "TestScheduledJourneyStartForm": {
+      "test_scheduled_journey_exists": "PASSED",
+      "test_in_progress_journey_without_traslado_uses_fallback": "PASSED"
+    },
+    "TestPulseUtilsReadsTrasladoFromJourney": {
+      "test_journey_start_data_can_have_traslado_primer_punto": "PASSED"
+    }
+  }
+}

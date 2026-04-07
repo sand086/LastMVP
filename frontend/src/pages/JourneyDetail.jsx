@@ -549,6 +549,7 @@ const JourneyDetail = () => {
         route_type: 'CDMX / Zona Metro',
         city: '',
         max_packages: 50,
+        traslado_primer_punto: 40,
     });
     const [startChecklist, setStartChecklist] = useState({
         whatsapp: false,

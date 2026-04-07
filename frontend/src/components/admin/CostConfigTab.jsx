@@ -405,7 +405,6 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
                         pulseConfig={pulseConfig}
                         onChange={(val) => { setPulseConfig(val); setDirty(true); }}
                         canEdit={canEdit}
-                        providers={providers}
                     />
 
                     {/* Save Button */}

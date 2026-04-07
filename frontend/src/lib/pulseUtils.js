@@ -5,11 +5,9 @@
 
 const PULSE_DEFAULTS = {
     hora_limite: { hour: 21, minute: 30 },
-    traslado_primer_punto_default: 40,
     tiempo_promedio_entrega: 5,
     umbral_ok: 10,
     umbral_warn: 5,
-    excepciones_traslado_por_proveedor: [],
 };
 
 /**
@@ -62,16 +60,10 @@ export function computeFeasibility(journey, pulseConfig) {
     // All done
     if (remaining === 0) return null;
 
-    // Resolve transit time: check provider exceptions
-    let trasladoMin = cfg.traslado_primer_punto_default;
-    const provId = journey.provider_id;
-    if (provId && Array.isArray(cfg.excepciones_traslado_por_proveedor)) {
-        const exc = cfg.excepciones_traslado_por_proveedor.find(
-            e => e.provider_id === provId
-        );
-        if (exc && exc.traslado_primer_punto) {
-            trasladoMin = exc.traslado_primer_punto;
-        }
+    // Resolve transit time from journey's start_data (per-route)
+    let trasladoMin = journey.start_data?.traslado_primer_punto;
+    if (trasladoMin === undefined || trasladoMin === null) {
+        trasladoMin = 40; // fallback
     }
 
     const horaLimite = (cfg.hora_limite?.hour || 21) * 60 + (cfg.hora_limite?.minute || 30);
