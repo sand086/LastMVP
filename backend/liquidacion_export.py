@@ -8,7 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
 from openpyxl.utils import get_column_letter
 
-SLA_PACKAGES = 40
+DEFAULT_SLA_PACKAGES = 40
 
 # ── Styles ──
 _DARK_FILL = PatternFill(start_color="2E3B4E", end_color="2E3B4E", fill_type="solid")
@@ -103,7 +103,7 @@ def _build_formato_sheet(wb):
 # ═══════════════════════════════════════════════════
 # Sheet 2: Provider sheet (main)
 # ═══════════════════════════════════════════════════
-def _build_provider_sheet(wb, provider_name, rows_data):
+def _build_provider_sheet(wb, provider_name, rows_data, sla_packages=40):
     ws = wb.create_sheet(provider_name[:31])  # Excel sheet name limit
 
     # ── Row 1: Group headers ──
@@ -133,7 +133,7 @@ def _build_provider_sheet(wb, provider_name, rows_data):
         "Dif. Carga", "Dif. Entrega", "Pend./Cancel.",
         # Montos
         "Procedentes a Cobro", "Costo x Pq", "Incidencias", "Total",
-        "% Efectividad", "% Efect. SLA 40",
+        "% Efectividad", f"% Efect. SLA {sla_packages}",
     ]
     for c, h in enumerate(col_headers, 1):
         fill = _FORMULA_FILL if c >= 20 else _MED_FILL
@@ -190,11 +190,11 @@ def _build_provider_sheet(wb, provider_name, rows_data):
 
         # W-AB: Montos (formulas)
         _write_data_cell(ws, r, 23, f"=V{r}", is_formula=True)  # Procedentes a Cobro
-        _write_data_cell(ws, r, 24, f"=IFERROR(M{r}/{SLA_PACKAGES},0)", is_formula=True, fmt='$#,##0.00')
+        _write_data_cell(ws, r, 24, f"=IFERROR(M{r}/{sla_packages},0)", is_formula=True, fmt='$#,##0.00')
         _write_data_cell(ws, r, 25, "", is_formula=True, fmt='$#,##0.00')  # Incidencias (manual)
         _write_data_cell(ws, r, 26, f"=M{r}-Y{r}", is_formula=True, fmt='$#,##0.00')
         _write_data_cell(ws, r, 27, f"=IFERROR(O{r}/N{r},0)", is_formula=True, fmt='0%')
-        _write_data_cell(ws, r, 28, f"=IFERROR(O{r}/{SLA_PACKAGES},0)", is_formula=True, fmt='0%')
+        _write_data_cell(ws, r, 28, f"=IFERROR(O{r}/{sla_packages},0)", is_formula=True, fmt='0%')
 
         data_row += 1
 
@@ -370,8 +370,14 @@ def _build_route_summary_sheet(wb, all_rows):
 # ═══════════════════════════════════════════════════
 # Main generator
 # ═══════════════════════════════════════════════════
-async def generate_liquidacion_excel(db, all_rows, date_from, date_to):
+async def generate_liquidacion_excel(db, all_rows, date_from, date_to, sla_config=None):
     """Generate the full Liquidación Excel workbook."""
+
+    if sla_config is None:
+        sla_config = {"default_sla": DEFAULT_SLA_PACKAGES, "by_provider": {}}
+
+    default_sla = sla_config.get("default_sla", DEFAULT_SLA_PACKAGES)
+    by_provider_sla = sla_config.get("by_provider", {})
 
     # Fetch incidents for the period
     journey_ids = [r.get("journey_id") for r in all_rows if r.get("journey_id")]
@@ -409,7 +415,17 @@ async def generate_liquidacion_excel(db, all_rows, date_from, date_to):
     _build_formato_sheet(wb)
 
     for prov_name in sorted(by_provider.keys()):
-        _build_provider_sheet(wb, prov_name, by_provider[prov_name])
+        # Resolve SLA: check by provider name first, then by provider ID, fallback to default
+        prov_sla = default_sla
+        if prov_name in by_provider_sla:
+            prov_sla = by_provider_sla[prov_name]
+        else:
+            # Check if any row has a provider_id that matches a key in by_provider_sla
+            sample_row = by_provider[prov_name][0] if by_provider[prov_name] else {}
+            prov_id = sample_row.get("provider_id", "")
+            if prov_id and prov_id in by_provider_sla:
+                prov_sla = by_provider_sla[prov_id]
+        _build_provider_sheet(wb, prov_name, by_provider[prov_name], sla_packages=prov_sla)
 
     _build_incidencias_sheet(wb, incidents_data, comments_data)
     _build_catalogo_sheet(wb, all_rows)

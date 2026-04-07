@@ -304,6 +304,7 @@ async def _build_report_row(j: dict, prov: dict) -> dict:
         "score_ia": score_ia,
         "comentarios": j.get("comments", ""),
         "journey_id": j["id"],
+        "provider_id": j.get("provider_id", ""),
     }
 
 
@@ -493,7 +494,7 @@ async def update_admin_config(
     section = payload.get("section")
     value = payload.get("value")
 
-    if section not in ("ia_cost_config", "exchange_rate", "budget_alerts"):
+    if section not in ("ia_cost_config", "exchange_rate", "budget_alerts", "sla_config"):
         raise HTTPException(status_code=400, detail="Sección inválida")
 
     now = datetime.now(timezone.utc).isoformat()
@@ -570,7 +571,11 @@ async def export_liquidacion(
                 if feedback and not row.get("comentarios"):
                     row["comentarios"] = feedback
 
-    buf = await generate_liquidacion_excel(db, all_rows, date_from, date_to)
+    # Fetch dynamic SLA config
+    sla_doc = await db.config.find_one({"key": "sla_config"}, {"_id": 0})
+    sla_config = sla_doc.get("value", {"default_sla": 40, "by_provider": {}}) if sla_doc else {"default_sla": 40, "by_provider": {}}
+
+    buf = await generate_liquidacion_excel(db, all_rows, date_from, date_to, sla_config=sla_config)
 
     prov_label = "Todos"
     if provider_id:

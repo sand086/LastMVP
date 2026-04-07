@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../lib/api';
 import { toast } from 'sonner';
-import { Save, RefreshCw, Loader2, Info, AlertTriangle, DollarSign } from 'lucide-react';
+import { Save, RefreshCw, Loader2, Info, AlertTriangle, DollarSign, Package, Plus, Trash2 } from 'lucide-react';
 
 const T = {
     bg: '#F5F4F1', surface: '#FFFFFF', surface2: '#F0EFEC',
@@ -32,20 +32,35 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
     const [alertEnabled, setAlertEnabled] = useState(true);
     const [weeklyEnabled, setWeeklyEnabled] = useState(false);
     const [weeklyEmail, setWeeklyEmail] = useState('');
+    const [defaultSla, setDefaultSla] = useState(40);
+    const [providerSlas, setProviderSlas] = useState({});
+    const [providers, setProviders] = useState([]);
+    const [newSlaProviderId, setNewSlaProviderId] = useState('');
 
     const fetchConfig = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.get('/admin/config');
-            const cfg = res.data;
-            setConfig(cfg);
-            setTcRate(cfg.exchange_rate?.rate || 19);
-            setAutoUpdate(cfg.exchange_rate?.auto_update || false);
-            setModels(cfg.ia_cost_config?.models || []);
-            setThreshold(cfg.budget_alerts?.monthly_threshold_usd || 50);
-            setAlertEnabled(cfg.budget_alerts?.alert_enabled ?? true);
-            setWeeklyEnabled(cfg.budget_alerts?.weekly_report_enabled || false);
-            setWeeklyEmail(cfg.budget_alerts?.weekly_report_email || '');
+            const [configRes, provRes] = await Promise.allSettled([
+                api.get('/admin/config'),
+                api.get('/providers'),
+            ]);
+            if (configRes.status === 'fulfilled') {
+                const cfg = configRes.value.data;
+                setConfig(cfg);
+                setTcRate(cfg.exchange_rate?.rate || 19);
+                setAutoUpdate(cfg.exchange_rate?.auto_update || false);
+                setModels(cfg.ia_cost_config?.models || []);
+                setThreshold(cfg.budget_alerts?.monthly_threshold_usd || 50);
+                setAlertEnabled(cfg.budget_alerts?.alert_enabled ?? true);
+                setWeeklyEnabled(cfg.budget_alerts?.weekly_report_enabled || false);
+                setWeeklyEmail(cfg.budget_alerts?.weekly_report_email || '');
+                setDefaultSla(cfg.sla_config?.default_sla || 40);
+                setProviderSlas(cfg.sla_config?.by_provider || {});
+            }
+            if (provRes.status === 'fulfilled') {
+                const pData = provRes.value.data;
+                setProviders(Array.isArray(pData) ? pData : pData.providers || []);
+            }
         } catch {
             toast.error('Error al cargar configuración');
         } finally {
@@ -76,6 +91,7 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
             await api.patch('/admin/config', { section: 'exchange_rate', value: { rate: tcRate, source: 'manual', auto_update: autoUpdate, last_updated: new Date().toISOString(), history: config?.exchange_rate?.history || [] } });
             await api.patch('/admin/config', { section: 'ia_cost_config', value: { models } });
             await api.patch('/admin/config', { section: 'budget_alerts', value: { monthly_threshold_usd: threshold, alert_enabled: alertEnabled, weekly_report_enabled: weeklyEnabled, weekly_report_email: weeklyEmail } });
+            await api.patch('/admin/config', { section: 'sla_config', value: { default_sla: defaultSla, by_provider: providerSlas } });
             toast.success('Toda la configuración guardada');
             setDirty(false);
             fetchConfig();
@@ -277,6 +293,107 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
                                 style={{ width: '100%', padding: '6px 10px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12 }}
                             />
                         </div>
+                    </div>
+
+                    {/* SLA Configuration */}
+                    <div style={{ border: `1px solid ${T.border}`, borderRadius: T.radius, background: T.surface, padding: 20, marginBottom: 16 }} data-testid="sla-config-section">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <Package size={16} color={T.teal} />
+                            <h3 style={{ fontSize: 14, fontWeight: 600, color: T.textPri }}>SLA de paquetes por proveedor</h3>
+                        </div>
+                        <p style={{ fontSize: 11, color: T.textTer, marginBottom: 16 }}>
+                            Define cuántos paquetes deben entregarse por ruta. Se usa en el cálculo de "% Efectividad SLA" y "Costo x Pq" en la Liquidación.
+                        </p>
+
+                        {/* Default SLA */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, padding: '12px 14px', borderRadius: T.radiusSm, background: T.tealLt, border: `1px solid ${T.teal}20` }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: T.textSec, whiteSpace: 'nowrap' }}>SLA por defecto:</span>
+                            <input
+                                type="number" min="1" value={defaultSla}
+                                onChange={e => { setDefaultSla(Number(e.target.value)); setDirty(true); }}
+                                disabled={!canEdit}
+                                style={{ width: 70, padding: '6px 10px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 14, fontWeight: 700, fontFamily: "'DM Mono',monospace", textAlign: 'center' }}
+                                data-testid="default-sla-input"
+                            />
+                            <span style={{ fontSize: 12, color: T.textTer }}>paquetes</span>
+                        </div>
+
+                        {/* Per-provider SLA overrides */}
+                        <p style={{ fontSize: 11, fontWeight: 600, color: T.textSec, marginBottom: 8 }}>Excepciones por proveedor</p>
+                        {Object.entries(providerSlas).length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                                {Object.entries(providerSlas).map(([provId, slaVal]) => {
+                                    const prov = providers.find(p => p.id === provId);
+                                    return (
+                                        <div key={provId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: T.radiusSm, background: T.surface2 }} data-testid={`sla-override-${provId}`}>
+                                            <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: T.textPri }}>{prov?.name || provId}</span>
+                                            <input
+                                                type="number" min="1" value={slaVal}
+                                                onChange={e => {
+                                                    setProviderSlas(prev => ({ ...prev, [provId]: Number(e.target.value) }));
+                                                    setDirty(true);
+                                                }}
+                                                disabled={!canEdit}
+                                                style={{ width: 70, padding: '4px 8px', borderRadius: 4, border: `1px solid ${T.border}`, fontSize: 13, fontWeight: 600, fontFamily: "'DM Mono',monospace", textAlign: 'center' }}
+                                            />
+                                            <span style={{ fontSize: 11, color: T.textTer }}>pq</span>
+                                            {canEdit && (
+                                                <button onClick={() => {
+                                                    setProviderSlas(prev => {
+                                                        const next = { ...prev };
+                                                        delete next[provId];
+                                                        return next;
+                                                    });
+                                                    setDirty(true);
+                                                }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }} data-testid={`sla-remove-${provId}`}>
+                                                    <Trash2 size={14} color={T.coral} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <p style={{ fontSize: 11, color: T.textTer, marginBottom: 12, fontStyle: 'italic' }}>
+                                Todos los proveedores usan el SLA por defecto ({defaultSla}).
+                            </p>
+                        )}
+
+                        {/* Add new provider override */}
+                        {canEdit && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <select
+                                    value={newSlaProviderId}
+                                    onChange={e => setNewSlaProviderId(e.target.value)}
+                                    style={{ flex: 1, padding: '6px 10px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12, color: T.textSec, background: T.surface }}
+                                    data-testid="sla-provider-select"
+                                >
+                                    <option value="">Seleccionar proveedor...</option>
+                                    {providers.filter(p => !providerSlas[p.id]).map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    onClick={() => {
+                                        if (!newSlaProviderId) return;
+                                        setProviderSlas(prev => ({ ...prev, [newSlaProviderId]: defaultSla }));
+                                        setNewSlaProviderId('');
+                                        setDirty(true);
+                                    }}
+                                    disabled={!newSlaProviderId}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px',
+                                        borderRadius: T.radiusSm, border: `1px solid ${T.teal}40`,
+                                        background: newSlaProviderId ? T.tealLt : T.surface2,
+                                        color: newSlaProviderId ? T.teal : T.textTer,
+                                        fontSize: 12, fontWeight: 500, cursor: newSlaProviderId ? 'pointer' : 'default',
+                                    }}
+                                    data-testid="sla-add-provider-btn"
+                                >
+                                    <Plus size={13} /> Agregar
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     {/* Save Button */}
