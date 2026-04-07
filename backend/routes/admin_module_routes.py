@@ -523,3 +523,62 @@ async def update_admin_config(
     })
 
     return {"success": True, "section": section}
+
+
+
+# ═══════════════ LIQUIDACION EXPORT (Belgos/SOP Format) ═══════════════
+
+@router.get("/export-liquidacion")
+async def export_liquidacion(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    driver: Optional[str] = None,
+    team: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(_require_admin),
+):
+    from liquidacion_export import generate_liquidacion_excel
+
+    # Reuse routes-report logic to get all rows
+    data = await routes_report(
+        date_from=date_from, date_to=date_to, driver=driver, team=team,
+        provider_id=provider_id, status=status, page=1, page_size=99999, user=user,
+    )
+
+    all_rows = data["rows"]
+    if not all_rows:
+        raise HTTPException(status_code=404, detail="No hay rutas en el período seleccionado")
+
+    # Build AI comments from journey quality data
+    journey_ids = [r.get("journey_id") for r in all_rows if r.get("journey_id")]
+    if journey_ids:
+        qualities = await db.journey_quality.find(
+            {"journey_id": {"$in": journey_ids}},
+            {"_id": 0}
+        ).to_list(5000)
+        quality_map = {q["journey_id"]: q for q in qualities}
+
+        # Enrich rows with AI feedback as comments
+        for row in all_rows:
+            jid = row.get("journey_id")
+            if jid and jid in quality_map:
+                q = quality_map[jid]
+                feedback = q.get("ai_feedback", "")
+                if feedback and not row.get("comentarios"):
+                    row["comentarios"] = feedback
+
+    buf = await generate_liquidacion_excel(db, all_rows, date_from, date_to)
+
+    prov_label = "Todos"
+    if provider_id:
+        prov = await db.providers.find_one({"id": provider_id}, {"_id": 0, "name": 1})
+        if prov:
+            prov_label = prov["name"].replace(" ", "_")
+
+    filename = f"Liquidacion_{prov_label}_{date_from}_{date_to}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../lib/api';
 import { toast } from 'sonner';
-import { Download, Columns, Loader2, ChevronLeft, ChevronRight, ExternalLink, Filter, X, Check } from 'lucide-react';
+import { Download, Columns, Loader2, ChevronLeft, ChevronRight, ExternalLink, Filter, X, Check, FileSpreadsheet } from 'lucide-react';
 
 const T = {
     bg: '#F5F4F1', surface: '#FFFFFF', surface2: '#F0EFEC',
@@ -68,6 +68,7 @@ export default function RoutesReportTab({ canEdit }) {
     const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 25, total_pages: 1 });
     const [loading, setLoading] = useState(false);
     const [exporting, setExporting] = useState(false);
+    const [exportingLiq, setExportingLiq] = useState(false);
 
     const fetchData = useCallback(async (page = 1) => {
         setLoading(true);
@@ -110,6 +111,29 @@ export default function RoutesReportTab({ canEdit }) {
             toast.error('Error al exportar');
         } finally {
             setExporting(false);
+        }
+    };
+
+    const handleExportLiquidacion = async () => {
+        setExportingLiq(true);
+        try {
+            const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+            if (driver) params.set('driver', driver);
+            if (team) params.set('team', team);
+            if (providerId) params.set('provider_id', providerId);
+            if (status) params.set('status', status);
+            const res = await api.get(`/admin/export-liquidacion?${params}`, { responseType: 'blob' });
+            const url = window.URL.createObjectURL(new Blob([res.data]));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Liquidacion_${dateFrom}_${dateTo}.xlsx`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+            toast.success('Liquidación exportada');
+        } catch {
+            toast.error('Error al exportar liquidación');
+        } finally {
+            setExportingLiq(false);
         }
     };
 
@@ -178,6 +202,9 @@ export default function RoutesReportTab({ canEdit }) {
                     </div>
                     <button onClick={handleExport} disabled={exporting} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: T.radiusSm, border: 'none', background: T.textPri, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 600 }} data-testid="export-excel-btn">
                         {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Exportar Excel
+                    </button>
+                    <button onClick={handleExportLiquidacion} disabled={exportingLiq} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: T.radiusSm, border: `1px solid ${T.teal}`, background: T.tealLt, color: T.teal, fontSize: 11, cursor: 'pointer', fontWeight: 600 }} data-testid="export-liquidacion-btn">
+                        {exportingLiq ? <Loader2 size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />} Exportar Liquidación
                     </button>
                 </div>
             </div>
