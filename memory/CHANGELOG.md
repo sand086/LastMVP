@@ -12,6 +12,16 @@
 - [x] Frontend WebSocket URL updated accordingly
 - [x] Production build verified: passes successfully
 
+## 2026-04-07 — Liquidación del Servicio (Belgos/SOP Format)
+- [x] New endpoint: GET /api/admin/export-liquidacion with provider-specific multi-sheet Excel
+- [x] Sheet 1 "Formato": Template with 14 columns and example formulas
+- [x] Sheet 2+ "{Proveedor}": 28-column data with real Excel formulas (T-AB), group headers, freeze panes, side pivot table
+- [x] Sheet "Incidencias a cobro": Parsed from AI comments + incidents collection
+- [x] Sheet "Catalogo_Drivers": Unique drivers with provider mapping for name homologation
+- [x] Sheet "route_summary": Raw data with XLOOKUP formulas and totals rows
+- [x] Frontend: "Exportar Liquidación" button in Admin IA > Reporte de rutas
+- [x] Testing: iteration_29 — 21/21 backend, 100% frontend
+
 ## 2026-04-06 — Review UX Fixes (Guías Tab)
 - [x] Bug 1: Review indicator now read-only with 3 states (○ pending, ✓ approved, ✗ rejected)
 - [x] Bug 2A: Scroll position preserved after approve/reject (no jump to top)
