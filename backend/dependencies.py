@@ -34,9 +34,7 @@ db = mongo_client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ.get('JWT_SECRET')
 if not JWT_SECRET:
-    if os.environ.get("ENVIRONMENT") == "production":
-        raise RuntimeError("JWT_SECRET environment variable is required in production.")
-    JWT_SECRET = "lastmile-dev-secret-DO-NOT-USE-IN-PROD"
+    raise RuntimeError("JWT_SECRET environment variable is required. Set it in backend/.env")
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))

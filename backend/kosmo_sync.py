@@ -146,6 +146,92 @@ async def scrape_kosmo_page(tracking_url: str) -> dict:
         return {"error": str(e), "order_status": None}
 
 
+def _build_sync_query(journey_ids_filter: list = None) -> dict:
+    """Build the MongoDB query for finding packages eligible for sync."""
+    now = datetime.now(timezone.utc)
+    ten_min_ago = now - timedelta(minutes=10)
+
+    base_or = [
+        {"status": {"$nin": ["delivered", "failed", "returned"]},
+         "$or": [{"kosmo_scraped_at": None}, {"kosmo_scraped_at": {"$exists": False}}, {"kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()}}]},
+        {"status": {"$in": ["delivered", "failed"]},
+         "$or": [{"kosmo_scraped_at": None}, {"kosmo_scraped_at": {"$exists": False}}]},
+        {"status": {"$in": ["delivered", "failed"]},
+         "$or": [{"kosmo_proof_count": 0}, {"kosmo_proof_count": None}, {"kosmo_proof_count": {"$exists": False}}],
+         "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()}},
+        {"kosmo_status_raw": {"$in": ["unknown", None]},
+         "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()}},
+    ]
+
+    query = {"tracking_url": {"$nin": [None, ""]}, "$or": base_or}
+    if journey_ids_filter:
+        query["journey_id"] = {"$in": journey_ids_filter}
+    return query
+
+
+def _map_scrape_to_update(result: dict, pkg: dict, now: datetime) -> tuple:
+    """Map a scrape result to (update_fields, detail, status_changed)."""
+    kosmo_raw = result.get("order_status") or "unknown"
+    mapped_status = STATUS_MAP.get(kosmo_raw)
+
+    update_fields = {
+        "kosmo_scraped_at": now.isoformat(),
+        "kosmo_status_raw": kosmo_raw,
+        "kosmo_order_id": result.get("order_id"),
+    }
+    if result.get("updated_at_ms"):
+        update_fields["kosmo_updated_at"] = result["updated_at_ms"]
+    if result.get("finished_at_ms"):
+        update_fields["kosmo_finished_at"] = result["finished_at_ms"]
+    if result.get("driver_note"):
+        update_fields["kosmo_driver_note"] = result["driver_note"]
+    update_fields["kosmo_proof_count"] = result.get("proof_count", 0)
+    if result.get("proof_urls"):
+        update_fields["kosmo_proof_urls"] = result["proof_urls"]
+
+    detail = {
+        "tracking_url": pkg["tracking_url"],
+        "package_id": pkg["id"],
+        "old_status": pkg["status"],
+        "new_status": pkg["status"],
+        "changed": False,
+        "driver_note": result.get("driver_note"),
+        "proof_count": result.get("proof_count", 0),
+        "error": None,
+    }
+
+    changed = False
+    if mapped_status and mapped_status != pkg["status"]:
+        update_fields["status"] = mapped_status
+        detail["new_status"] = mapped_status
+        detail["changed"] = True
+        changed = True
+
+    return update_fields, detail, changed
+
+
+async def _recount_and_update_journeys(db, journey_ids_to_recount: set, affected_journey_ids: list, now: datetime):
+    """Recalculate package counts and update sync timestamps for affected journeys."""
+    for j_id in journey_ids_to_recount:
+        if not j_id:
+            continue
+        delivered = await db.packages.count_documents({"journey_id": j_id, "status": "delivered"})
+        failed = await db.packages.count_documents({"journey_id": j_id, "status": "failed"})
+        await db.journeys.update_one({"id": j_id}, {"$set": {"packages_delivered": delivered, "packages_failed": failed}})
+
+    if affected_journey_ids:
+        await db.journeys.update_many(
+            {"id": {"$in": affected_journey_ids}},
+            {"$set": {"last_sync_at": now.isoformat()}},
+        )
+        for j_id in affected_journey_ids:
+            j = await db.journeys.find_one({"id": j_id}, {"_id": 0, "date": 1})
+            if j:
+                interval = _get_sync_interval_minutes(j.get("date", ""))
+                next_sync = now + timedelta(minutes=interval)
+                await db.journeys.update_one({"id": j_id}, {"$set": {"next_sync_at": next_sync.isoformat()}})
+
+
 # ── Core sync logic ─────────────────────────────────────────────
 async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list = None) -> dict:
     """
@@ -156,51 +242,7 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list =
     5. Update journey sync timestamps.
     """
     now = datetime.now(timezone.utc)
-    ten_min_ago = now - timedelta(minutes=10)
-
-    # Build base query
-    base_or = [
-        # Pending packages not recently scraped
-        {
-            "status": {"$nin": ["delivered", "failed", "returned"]},
-            "$or": [
-                {"kosmo_scraped_at": None},
-                {"kosmo_scraped_at": {"$exists": False}},
-                {"kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()}},
-            ],
-        },
-        # Delivered/failed packages never scraped
-        {
-            "status": {"$in": ["delivered", "failed"]},
-            "$or": [
-                {"kosmo_scraped_at": None},
-                {"kosmo_scraped_at": {"$exists": False}},
-            ],
-        },
-        # Delivered/failed with 0 proofs (retry)
-        {
-            "status": {"$in": ["delivered", "failed"]},
-            "$or": [
-                {"kosmo_proof_count": 0},
-                {"kosmo_proof_count": None},
-                {"kosmo_proof_count": {"$exists": False}},
-            ],
-            "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()},
-        },
-        # Packages with "unknown" status (failed scrape, needs retry)
-        {
-            "kosmo_status_raw": {"$in": ["unknown", None]},
-            "kosmo_scraped_at": {"$lt": ten_min_ago.isoformat()},
-        },
-    ]
-
-    query = {
-        "tracking_url": {"$nin": [None, ""]},
-        "$or": base_or,
-    }
-
-    if journey_ids_filter:
-        query["journey_id"] = {"$in": journey_ids_filter}
+    query = _build_sync_query(journey_ids_filter)
 
     packages = await db.packages.find(
         query, {"_id": 0, "id": 1, "tracking_url": 1, "status": 1, "journey_id": 1}
@@ -209,12 +251,7 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list =
     if not packages:
         await db.system_config.update_one(
             {"key": "kosmo_last_sync"},
-            {"$set": {
-                "value": now.isoformat(),
-                "total_checked": 0,
-                "updated": 0,
-                "errors": 0,
-            }},
+            {"$set": {"value": now.isoformat(), "total_checked": 0, "updated": 0, "errors": 0}},
             upsert=True,
         )
         return {"total_checked": 0, "updated": 0, "no_change": 0, "errors": 0, "details": []}
@@ -231,104 +268,38 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list =
         async with semaphore:
             result = await scrape_kosmo_page(pkg["tracking_url"])
 
-            detail = {
-                "tracking_url": pkg["tracking_url"],
-                "package_id": pkg["id"],
-                "old_status": pkg["status"],
-                "new_status": pkg["status"],
-                "changed": False,
-                "driver_note": None,
-                "proof_count": 0,
-                "error": None,
-            }
-
             if result.get("error"):
-                detail["error"] = result["error"]
+                details.append({"tracking_url": pkg["tracking_url"], "package_id": pkg["id"],
+                                "old_status": pkg["status"], "new_status": pkg["status"],
+                                "changed": False, "driver_note": None, "proof_count": 0, "error": result["error"]})
                 error_count += 1
-                details.append(detail)
                 return
 
-            kosmo_raw = result.get("order_status") or "unknown"
-            mapped_status = STATUS_MAP.get(kosmo_raw)
-
-            update_fields = {
-                "kosmo_scraped_at": now.isoformat(),
-                "kosmo_status_raw": kosmo_raw,
-                "kosmo_order_id": result.get("order_id"),
-            }
-
-            if result.get("updated_at_ms"):
-                update_fields["kosmo_updated_at"] = result["updated_at_ms"]
-            if result.get("finished_at_ms"):
-                update_fields["kosmo_finished_at"] = result["finished_at_ms"]
-            if result.get("driver_note"):
-                update_fields["kosmo_driver_note"] = result["driver_note"]
-            update_fields["kosmo_proof_count"] = result.get("proof_count", 0)
-            if result.get("proof_urls"):
-                update_fields["kosmo_proof_urls"] = result["proof_urls"]
-
-            detail["driver_note"] = result.get("driver_note")
-            detail["proof_count"] = result.get("proof_count", 0)
-
-            if mapped_status and mapped_status != pkg["status"]:
-                update_fields["status"] = mapped_status
-                detail["new_status"] = mapped_status
-                detail["changed"] = True
+            update_fields, detail, changed = _map_scrape_to_update(result, pkg, now)
+            if changed:
                 updated_count += 1
                 journey_ids_to_recount.add(pkg.get("journey_id"))
             else:
                 no_change_count += 1
 
-            await db.packages.update_one(
-                {"id": pkg["id"]}, {"$set": update_fields}
-            )
+            await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
             details.append(detail)
 
     tasks = [process_package(pkg) for pkg in packages]
     await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Recalculate journey counts for affected journeys
-    for j_id in journey_ids_to_recount:
-        if not j_id:
-            continue
-        delivered = await db.packages.count_documents({"journey_id": j_id, "status": "delivered"})
-        failed = await db.packages.count_documents({"journey_id": j_id, "status": "failed"})
-        await db.journeys.update_one(
-            {"id": j_id},
-            {"$set": {"packages_delivered": delivered, "packages_failed": failed}},
-        )
-
-    # Update last_sync_at on all affected journeys
+    # Recalculate journey counts and update sync timestamps
     affected_journey_ids = list({pkg.get("journey_id") for pkg in packages if pkg.get("journey_id")})
-    if affected_journey_ids:
-        await db.journeys.update_many(
-            {"id": {"$in": affected_journey_ids}},
-            {"$set": {"last_sync_at": now.isoformat()}},
-        )
-        # Calculate next_sync_at for each journey
-        for j_id in affected_journey_ids:
-            j = await db.journeys.find_one({"id": j_id}, {"_id": 0, "date": 1})
-            if j:
-                interval = _get_sync_interval_minutes(j.get("date", ""))
-                next_sync = now + timedelta(minutes=interval)
-                await db.journeys.update_one(
-                    {"id": j_id},
-                    {"$set": {"next_sync_at": next_sync.isoformat()}},
-                )
+    await _recount_and_update_journeys(db, journey_ids_to_recount, affected_journey_ids, now)
 
     # Save sync metadata
     await db.system_config.update_one(
         {"key": "kosmo_last_sync"},
-        {"$set": {
-            "value": now.isoformat(),
-            "total_checked": len(packages),
-            "updated": updated_count,
-            "errors": error_count,
-        }},
+        {"$set": {"value": now.isoformat(), "total_checked": len(packages), "updated": updated_count, "errors": error_count}},
         upsert=True,
     )
 
-    # Evaluate evidence scores for ALL scraped packages (not just changed)
+    # Evaluate evidence scores for ALL scraped packages
     all_scraped_ids = [d["package_id"] for d in details]
     all_journey_ids = set(pkg.get("journey_id") for pkg in packages if pkg.get("journey_id"))
     if all_scraped_ids:

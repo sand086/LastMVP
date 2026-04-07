@@ -5,7 +5,7 @@ Allows Coordinator and Developer to configure evidence scoring rules and AI eval
 import uuid
 import logging
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from dependencies import db, require_role
 
@@ -230,7 +230,7 @@ async def get_quality_settings(
             result[key] = CONFIG_DEFAULTS[key]
 
     # Enrich error_catalog with frequency_last_30d
-    thirty_days_ago = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=30)).isoformat()
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     errors = result.get("error_catalog", [])
     for err in errors:
         count = await db.training_samples.count_documents({

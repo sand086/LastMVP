@@ -122,13 +122,13 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
     const avgEvalTokens = evalData.avg_per_unit || {};
     const evalCount = evalData.count || 0;
 
-    const previewModels = models.filter(m => m.active).map(m => {
+    const previewModels = React.useMemo(() => models.filter(m => m.active).map(m => {
         const avgIn = avgEvalTokens.input || 1400;
         const avgOut = avgEvalTokens.output || 600;
         const costPerEval = ((avgIn * (m.input_per_million || 0)) + (avgOut * (m.output_per_million || 0))) / 1_000_000;
         const totalMonthly = costPerEval * (evalCount || 1842);
         return { name: m.name, costPerEval: costPerEval.toFixed(4), totalMonthly: totalMonthly.toFixed(2), totalMxn: (totalMonthly * tcRate).toFixed(2) };
-    });
+    }), [models, avgEvalTokens, evalCount, tcRate]);
 
     if (loading) return <div style={{ padding: 60, textAlign: 'center', color: T.textTer }}>Cargando configuración...</div>;
 

@@ -90,6 +90,8 @@ const ExpandedPanel = ({ pkg, catalogMap, journeyId, onTrainingDone, canEdit }) 
     const [correctedErrors, setCorrectedErrors] = useState([]);
     const [saving, setSaving] = useState(false);
 
+    const activeErrors = useMemo(() => Object.values(catalogMap).filter(e => e.active !== false), [catalogMap]);
+
     const errors = pkg.ia_errors || [];
     const feedback = pkg.ia_feedback || '';
     const photos = pkg.kosmo_proof_urls || [];
@@ -241,7 +243,7 @@ const ExpandedPanel = ({ pkg, catalogMap, journeyId, onTrainingDone, canEdit }) 
                                 {/* Error checkboxes */}
                                 <p style={{ fontSize: 12, color: T.textSec, marginTop: 12, marginBottom: 6 }}>Errores reales (selecciona los que aplican):</p>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-                                    {Object.values(catalogMap).filter(e => e.active !== false).map(e => (
+                                    {activeErrors.map(e => (
                                         <label key={e.key} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: correctedErrors.includes(e.key) ? T.coralLt : T.surface2, border: `1px solid ${correctedErrors.includes(e.key) ? T.coral + '50' : T.border}`, transition: 'all 0.15s' }}>
                                             <input type="checkbox" checked={correctedErrors.includes(e.key)} onChange={(ev) => {
                                                 setCorrectedErrors(prev => ev.target.checked ? [...prev, e.key] : prev.filter(k => k !== e.key));

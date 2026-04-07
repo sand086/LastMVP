@@ -11,6 +11,7 @@ import time
 import io
 import csv
 import uuid
+import sys
 import fastapi
 from pathlib import Path
 from urllib.parse import urlparse
@@ -438,7 +439,7 @@ async def get_system_config(user: dict = Depends(get_current_user)):
     uptime_seconds = int(time.time() - SERVER_START_TIME)
     return {
         "backend_version": f"FastAPI {fastapi.__version__}",
-        "python_version": __import__("sys").version.split()[0],
+        "python_version": sys.version.split()[0],
         "mongo_host": mongo_host,
         "db_name": os.environ.get("DB_NAME", ""),
         "db_size_mb": db_size_mb,
