@@ -22,6 +22,7 @@ import {
     rescrapePackage,
     batchRescrapeJourney,
 } from '../lib/api';
+import api from '../lib/api';
 import { 
     formatDate, 
     formatDateTime,
@@ -105,6 +106,7 @@ import ImageUploader from '../components/ImageUploader';
 import EvidenceCarousel from '../components/EvidenceCarousel';
 import QualityTabV2 from '../components/QualityTabV2';
 import GuiasTab from '../components/GuiasTab';
+import PulseBanner from '../components/PulseBanner';
 import { JourneyStartTab } from '../components/JourneyStartTab';
 import { JourneyIncidentsTab } from '../components/JourneyIncidentsTab';
 import { JourneyCloseTab } from '../components/JourneyCloseTab';
@@ -506,6 +508,7 @@ const JourneyDetail = () => {
 
     const [journey, setJourney] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [pulseConfig, setPulseConfig] = useState(null);
     const [activeTab, setActiveTab] = useState(() => {
         // Smart default: show Calidad for routes with packages, Inicio for new routes
         return 'inicio';
@@ -610,6 +613,10 @@ const JourneyDetail = () => {
     useEffect(() => {
         fetchJourney();
         fetchImages();
+        // Fetch pulse config
+        api.get('/admin/config').then(res => {
+            setPulseConfig(res.data?.pulse_config || null);
+        }).catch(() => {});
     }, [id]);
 
     const fetchImages = async () => {
@@ -1123,6 +1130,11 @@ const JourneyDetail = () => {
                     </div>
                 </Card>
             </div>
+
+            {/* Pulse Banner - between KPIs and Tabs */}
+            {journey.status === 'in_progress' && pulseConfig && (
+                <PulseBanner journey={journey} pulseConfig={pulseConfig} />
+            )}
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>

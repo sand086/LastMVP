@@ -28,7 +28,7 @@ export default function AdminPage() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
-    const canEdit = user?.role === 'developer';
+    const canEdit = user?.role === 'developer' || user?.role === 'coordinator';
 
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'tokens');
     const [summary, setSummary] = useState(null);

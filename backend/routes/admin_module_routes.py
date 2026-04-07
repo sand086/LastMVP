@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin Module"])
 
 ADMIN_ROLES = ["developer", "ejecutivo", "executive", "coordinator"]
-EDIT_ROLES = ["developer"]
+EDIT_ROLES = ["developer", "coordinator"]
 
 
 def _require_admin(user: dict = Depends(get_current_user)):
@@ -477,12 +477,23 @@ async def get_admin_config(user: dict = Depends(_require_admin)):
     exchange = await db.config.find_one({"key": "exchange_rate"}, {"_id": 0})
     budget = await db.config.find_one({"key": "budget_alerts"}, {"_id": 0})
     sla = await db.config.find_one({"key": "sla_config"}, {"_id": 0})
+    pulse = await db.config.find_one({"key": "pulse_config"}, {"_id": 0})
+
+    pulse_defaults = {
+        "hora_limite": {"hour": 21, "minute": 30},
+        "traslado_primer_punto_default": 40,
+        "tiempo_promedio_entrega": 5,
+        "umbral_ok": 10,
+        "umbral_warn": 5,
+        "excepciones_traslado_por_proveedor": [],
+    }
 
     return {
         "ia_cost_config": ia_cost.get("value", {}) if ia_cost else {"models": []},
         "exchange_rate": exchange.get("value", {"rate": 19.0, "source": "manual", "auto_update": False, "history": []}) if exchange else {"rate": 19.0, "source": "manual", "auto_update": False, "history": []},
         "budget_alerts": budget.get("value", {"monthly_threshold_usd": 50, "alert_enabled": False, "weekly_report_enabled": False}) if budget else {"monthly_threshold_usd": 50, "alert_enabled": False, "weekly_report_enabled": False},
         "sla_config": sla.get("value", {"default_sla": 40, "by_provider": {}}) if sla else {"default_sla": 40, "by_provider": {}},
+        "pulse_config": pulse.get("value", pulse_defaults) if pulse else pulse_defaults,
     }
 
 
@@ -494,7 +505,7 @@ async def update_admin_config(
     section = payload.get("section")
     value = payload.get("value")
 
-    if section not in ("ia_cost_config", "exchange_rate", "budget_alerts", "sla_config"):
+    if section not in ("ia_cost_config", "exchange_rate", "budget_alerts", "sla_config", "pulse_config"):
         raise HTTPException(status_code=400, detail="Sección inválida")
 
     now = datetime.now(timezone.utc).isoformat()

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../lib/api';
 import { toast } from 'sonner';
 import { Save, RefreshCw, Loader2, Info, AlertTriangle, DollarSign, Package, Plus, Trash2 } from 'lucide-react';
+import PulseConfigSection from './PulseConfigSection';
 
 const T = {
     bg: '#F5F4F1', surface: '#FFFFFF', surface2: '#F0EFEC',
@@ -36,6 +37,7 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
     const [providerSlas, setProviderSlas] = useState({});
     const [providers, setProviders] = useState([]);
     const [newSlaProviderId, setNewSlaProviderId] = useState('');
+    const [pulseConfig, setPulseConfig] = useState({});
 
     const fetchConfig = useCallback(async () => {
         setLoading(true);
@@ -56,6 +58,7 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
                 setWeeklyEmail(cfg.budget_alerts?.weekly_report_email || '');
                 setDefaultSla(cfg.sla_config?.default_sla || 40);
                 setProviderSlas(cfg.sla_config?.by_provider || {});
+                setPulseConfig(cfg.pulse_config || {});
             }
             if (provRes.status === 'fulfilled') {
                 const pData = provRes.value.data;
@@ -92,6 +95,7 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
             await api.patch('/admin/config', { section: 'ia_cost_config', value: { models } });
             await api.patch('/admin/config', { section: 'budget_alerts', value: { monthly_threshold_usd: threshold, alert_enabled: alertEnabled, weekly_report_enabled: weeklyEnabled, weekly_report_email: weeklyEmail } });
             await api.patch('/admin/config', { section: 'sla_config', value: { default_sla: defaultSla, by_provider: providerSlas } });
+            await api.patch('/admin/config', { section: 'pulse_config', value: pulseConfig });
             toast.success('Toda la configuración guardada');
             setDirty(false);
             fetchConfig();
@@ -395,6 +399,14 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
                             </div>
                         )}
                     </div>
+
+                    {/* Pulse Config inside SLA section */}
+                    <PulseConfigSection
+                        pulseConfig={pulseConfig}
+                        onChange={(val) => { setPulseConfig(val); setDirty(true); }}
+                        canEdit={canEdit}
+                        providers={providers}
+                    />
 
                     {/* Save Button */}
                     {canEdit && (

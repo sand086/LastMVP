@@ -27,6 +27,9 @@ import {
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import PulseStrip from '../components/PulseStrip';
+import PulseCell from '../components/PulseCell';
+import api from '../lib/api';
 
 const Journeys = () => {
     const { canEdit } = useAuth();
@@ -34,6 +37,7 @@ const Journeys = () => {
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [pulseConfig, setPulseConfig] = useState(null);
 
     // Filters
     const [dateFrom, setDateFrom] = useState(null);
@@ -56,15 +60,17 @@ const Journeys = () => {
                 getJourneys(params),
                 getClients(),
                 getProviders(),
+                api.get('/admin/config'),
             ]);
 
-            const [journeysRes, clientsRes, providersRes] = results;
+            const [journeysRes, clientsRes, providersRes, configRes] = results;
 
             if (journeysRes.status === 'fulfilled') {
                 setJourneys(journeysRes.value.data?.data || journeysRes.value.data || []);
             }
             if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data);
             if (providersRes.status === 'fulfilled') setProviders(providersRes.value.data);
+            if (configRes.status === 'fulfilled') setPulseConfig(configRes.value.data?.pulse_config || null);
 
             const failed = results.filter(r => r.status === 'rejected');
             if (failed.length === results.length) {
@@ -235,6 +241,9 @@ const Journeys = () => {
                 </Card>
             )}
 
+            {/* Pulse Strip */}
+            {pulseConfig && <PulseStrip journeys={journeys} pulseConfig={pulseConfig} />}
+
             {/* Journey List */}
             <Card>
                 <CardContent className="p-0">
@@ -276,6 +285,7 @@ const Journeys = () => {
                                         <th>Paquetes</th>
                                         <th>Progreso</th>
                                         <th>Incidencias</th>
+                                        <th>Pulse</th>
                                         <th>Estado</th>
                                         <th>Acciones</th>
                                     </tr>
@@ -330,6 +340,9 @@ const Journeys = () => {
                                                     ) : (
                                                         <span className="text-slate-400">0</span>
                                                     )}
+                                                </td>
+                                                <td>
+                                                    <PulseCell journey={journey} pulseConfig={pulseConfig} />
                                                 </td>
                                                 <td>
                                                     <span className={`status-badge ${getStatusColor(journey.status)}`}>
