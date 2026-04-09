@@ -7,10 +7,12 @@ import {
     reviewPackageWithNote,
     evaluateConfidence,
     reviewDiscrepancy,
+    bulkUpdatePackageStatus,
 } from '../lib/api';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Checkbox } from './ui/checkbox';
 import {
     RefreshCw, Search, Loader2, ChevronDown, ChevronRight, Camera,
     ExternalLink, Check, X, AlertTriangle, Circle, CheckCircle2,
@@ -114,10 +116,13 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
     const [carouselImages, setCarouselImages] = useState([]);
     const [carouselIndex, setCarouselIndex] = useState(0);
     const [carouselPkgInfo, setCarouselPkgInfo] = useState(null);
+    const [selectedPkgs, setSelectedPkgs] = useState({});
+    const [bulkStatus, setBulkStatus] = useState('');
+    const [bulkSaving, setBulkSaving] = useState(false);
     const rowRefs = useRef({});
     const tableContainerRef = useRef(null);
 
-    useEffect(() => { setReviewOverrides({}); }, [packages]);
+    useEffect(() => { setReviewOverrides({}); setSelectedPkgs({}); }, [packages]);
 
     const mergedPackages = useMemo(() => {
         return packages.map(p => {
@@ -303,6 +308,40 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
 
     const getGuide = (pkg) => pkg.order_reference_id || pkg.tracking_number || '';
 
+    /* ─── Bulk selection ─── */
+    const selectedIds = useMemo(() => Object.entries(selectedPkgs).filter(([, v]) => v).map(([k]) => k), [selectedPkgs]);
+    const allFilteredSelected = filteredPackages.length > 0 && filteredPackages.every(p => selectedPkgs[p.id]);
+
+    const toggleSelectAll = () => {
+        if (allFilteredSelected) {
+            setSelectedPkgs({});
+        } else {
+            const next = {};
+            filteredPackages.forEach(p => { next[p.id] = true; });
+            setSelectedPkgs(next);
+        }
+    };
+
+    const togglePkg = (pkgId) => {
+        setSelectedPkgs(prev => ({ ...prev, [pkgId]: !prev[pkgId] }));
+    };
+
+    const handleBulkSave = async () => {
+        if (!bulkStatus || selectedIds.length === 0) return;
+        setBulkSaving(true);
+        try {
+            const res = await bulkUpdatePackageStatus(journey.id, selectedIds, bulkStatus);
+            toast.success(`${res.data.updated} paquetes actualizados a "${bulkStatus}"`);
+            setSelectedPkgs({});
+            setBulkStatus('');
+            onRefreshJourney?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al actualizar estatus');
+        } finally {
+            setBulkSaving(false);
+        }
+    };
+
     return (
         <div className="space-y-4" data-testid="guias-tab">
             {/* Global Actions */}
@@ -404,6 +443,11 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                         <table className="data-table w-full text-sm">
                             <thead>
                                 <tr>
+                                    {canReview && (
+                                        <th className="w-8 text-center">
+                                            <Checkbox checked={allFilteredSelected} onCheckedChange={toggleSelectAll} data-testid="select-all-checkbox" />
+                                        </th>
+                                    )}
                                     <th className="w-8"></th>
                                     <th>No. guía</th>
                                     <th>Destinatario</th>
@@ -436,6 +480,12 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                 }`}
                                                 onClick={() => setExpandedId(isExpanded ? null : pkg.id)}
                                                 data-testid={`guia-row-${pkg.id}`}>
+
+                                                {canReview && (
+                                                    <td className="text-center" onClick={e => e.stopPropagation()}>
+                                                        <Checkbox checked={!!selectedPkgs[pkg.id]} onCheckedChange={() => togglePkg(pkg.id)} data-testid={`select-pkg-${pkg.id}`} />
+                                                    </td>
+                                                )}
 
                                                 <td className="text-center">
                                                     {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
@@ -499,7 +549,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                             {/* ─── Expanded Detail Row ─── */}
                                             {isExpanded && (
                                                 <tr data-testid={`guia-detail-${pkg.id}`}>
-                                                    <td colSpan={11} className="bg-slate-50 p-0">
+                                                <td colSpan={canReview ? 12 : 11} className="bg-slate-50 p-0">
                                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
                                                             {/* Col 1: Evidencias Kosmo */}
                                                             <div className="space-y-2">
@@ -673,7 +723,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                     );
                                 })}
                                 {filteredPackages.length === 0 && (
-                                    <tr><td colSpan={11} className="text-center py-8 text-slate-400 text-sm">No hay guías que coincidan con el filtro seleccionado.</td></tr>
+                                    <tr><td colSpan={canReview ? 12 : 11} className="text-center py-8 text-slate-400 text-sm">No hay guías que coincidan con el filtro seleccionado.</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -683,6 +733,35 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
 
             <EvidenceCarousel open={carouselOpen} onClose={() => setCarouselOpen(false)}
                 images={carouselImages} initialIndex={carouselIndex} packageInfo={carouselPkgInfo} />
+
+            {/* Floating Bulk Action Bar */}
+            {canReview && selectedIds.length > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white rounded-xl shadow-2xl px-6 py-3 flex items-center gap-4 min-w-[420px]"
+                     data-testid="bulk-action-bar">
+                    <span className="text-sm font-medium">{selectedIds.length} guía{selectedIds.length !== 1 ? 's' : ''} seleccionada{selectedIds.length !== 1 ? 's' : ''}</span>
+                    <div className="h-5 w-px bg-slate-600" />
+                    <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
+                            className="bg-slate-800 text-white text-sm rounded-lg px-3 py-1.5 border border-slate-600 focus:ring-2 focus:ring-blue-500"
+                            data-testid="bulk-status-select">
+                        <option value="">Cambiar estado a...</option>
+                        <option value="delivered">Exitosa</option>
+                        <option value="failed">Fallida</option>
+                        <option value="returned">Devuelta</option>
+                        <option value="pending">Pendiente</option>
+                    </select>
+                    <Button size="sm" onClick={handleBulkSave} disabled={!bulkStatus || bulkSaving}
+                            className="bg-blue-600 hover:bg-blue-700 text-white h-8 px-4"
+                            data-testid="bulk-apply-btn">
+                        {bulkSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                        Aplicar
+                    </Button>
+                    <button onClick={() => { setSelectedPkgs({}); setBulkStatus(''); }}
+                            className="text-slate-400 hover:text-white transition-colors ml-auto"
+                            data-testid="bulk-cancel-btn">
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
