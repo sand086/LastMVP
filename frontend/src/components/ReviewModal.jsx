@@ -29,6 +29,16 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
     const [reasonDetail, setReasonDetail] = useState('');
     const [aiIncorrect, setAiIncorrect] = useState(false);
 
+    // Reset state when package or action changes
+    React.useEffect(() => {
+        if (open && pkg) {
+            setAdjustedScore(pkg.ai_score ?? 0);
+            setReasonCategory('');
+            setReasonDetail('');
+            setAiIncorrect(false);
+        }
+    }, [open, pkg?.id, action]);
+
     const handleConfirm = () => {
         onConfirm({
             action: isApproval ? 'approved' : 'rejected',

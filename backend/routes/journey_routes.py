@@ -20,6 +20,7 @@ from middleware import log_audit_event
 from evidence_scoring import (
     evaluate_packages_for_journey,
     evaluate_single_package_for_journey,
+    get_ai_eval_status,
 )
 from ws_manager import ws_manager
 from routes.webhook_routes import dispatch_webhook_event
@@ -158,11 +159,17 @@ async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
     # Enrich packages with unified fields for Guías tab
     for p in packages:
         p.setdefault("ai_score", p.get("evidence_score"))
+        # Preserve raw IA error keys and severity mapping from AI evaluation
+        raw_ia_errors = p.get("ia_errors", [])
+        ia_severity = p.get("ia_severity", {})
+        # Build human-readable errors for display
         ai_errors = []
         detail = p.get("evidence_detail", {}) or {}
         ai_errors.extend(detail.get("missing_items", []))
         ai_errors.extend(detail.get("alerts", []))
         p["ai_errors"] = ai_errors
+        p["ia_errors_raw"] = raw_ia_errors
+        p["ia_severity"] = ia_severity
         p["ai_confidence"] = detail.get("confidence")
         p.setdefault("manually_reviewed", bool(p.get("reviewed_by")))
         p.setdefault("manually_reviewed_note", p.get("review_note", None))
@@ -841,6 +848,13 @@ async def evaluate_all_evidence(journey_id: str, user: dict = Depends(get_curren
 async def evaluate_ia_alias(journey_id: str, user: dict = Depends(get_current_user)):
     """Alias for evaluate-evidence-all — used by Power BI Sandbox and external tools."""
     return await evaluate_all_evidence(journey_id, user)
+
+
+@router.get("/journeys/{journey_id}/ai-eval-status")
+async def get_ai_evaluation_status(journey_id: str, user: dict = Depends(get_current_user)):
+    """Get current AI evaluation progress for a journey (used for polling)."""
+    status = get_ai_eval_status(journey_id)
+    return status
 
 
 

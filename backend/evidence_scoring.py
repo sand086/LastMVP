@@ -357,18 +357,42 @@ _AI_BATCH_DELAY = 0.1  # Seconds to yield event loop between batches
 from concurrent.futures import ThreadPoolExecutor
 _ai_thread_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-eval")
 
+# In-memory AI evaluation status tracker per journey
+_ai_eval_status: dict = {}
+
+
+def get_ai_eval_status(journey_id: str) -> dict:
+    """Get current AI evaluation status for a journey."""
+    return _ai_eval_status.get(journey_id, {"status": "idle"})
+
+
+def _set_ai_eval_status(journey_id: str, status: str, total: int = 0, evaluated: int = 0, errors: int = 0):
+    """Update AI evaluation status for a journey."""
+    _ai_eval_status[journey_id] = {
+        "status": status,
+        "total": total,
+        "evaluated": evaluated,
+        "errors": errors,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
 
 def _run_ai_eval_sync(journey_id: str, packages: list, incident_tracking_numbers: set):
     """Run AI evaluation in a separate thread with its own event loop.
     This completely isolates LLM calls from the main event loop."""
+    _set_ai_eval_status(journey_id, "running", total=len(packages))
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
             _evaluate_packages_ai_internal(journey_id, packages, incident_tracking_numbers)
         )
+        status = get_ai_eval_status(journey_id)
+        _set_ai_eval_status(journey_id, "completed", total=status["total"], evaluated=status["evaluated"], errors=status["errors"])
     except Exception as e:
         logger.error(f"AI eval thread error for journey {journey_id}: {e}")
+        status = get_ai_eval_status(journey_id)
+        _set_ai_eval_status(journey_id, "error", total=status["total"], evaluated=status["evaluated"], errors=status["errors"])
     finally:
         loop.close()
 
@@ -387,17 +411,21 @@ async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incide
 
     total = len(packages)
     evaluated = 0
+    eval_errors = 0
     sem = asyncio.Semaphore(2)
 
     async def _eval_one(pkg):
-        nonlocal evaluated
+        nonlocal evaluated, eval_errors
         tn = (pkg.get("tracking_number") or "").strip().lower()
         has_incident = tn in incident_tracking_numbers if tn else False
         async with sem:
             result = await evaluate_single_package_ai(pkg, has_incident)
         if result and "error" not in result:
             await db.packages.update_one({"id": pkg["id"]}, {"$set": result})
+        elif result and "error" in result:
+            eval_errors += 1
         evaluated += 1
+        _set_ai_eval_status(journey_id, "running", total=total, evaluated=evaluated, errors=eval_errors)
 
     for i in range(0, total, _AI_BATCH_SIZE):
         batch = packages[i:i + _AI_BATCH_SIZE]

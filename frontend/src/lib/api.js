@@ -250,6 +250,9 @@ export const updatePackageReview = (journeyId, guide, data) => api.patch(`/journ
 export const evaluateConfidence = (journeyId) => api.post(`/journeys/${journeyId}/guides/evaluate-confidence`);
 export const reviewDiscrepancy = (journeyId, guideId, data) => api.patch(`/journeys/${journeyId}/guides/${encodeURIComponent(guideId)}/review`, data);
 
+// AI Evaluation Status Polling
+export const getAiEvalStatus = (journeyId) => api.get(`/journeys/${journeyId}/ai-eval-status`);
+
 export default api;
 
 // Webhooks

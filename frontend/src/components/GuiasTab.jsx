@@ -8,6 +8,7 @@ import {
     evaluateConfidence,
     reviewDiscrepancy,
     bulkUpdatePackageStatus,
+    getAiEvalStatus,
 } from '../lib/api';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import EvidenceCarousel from './EvidenceCarousel';
+import ReviewModal from './ReviewModal';
 
 /* ─── Segment filters ─── */
 const SEGMENT_FILTERS = [
@@ -96,6 +98,57 @@ const ReviewIndicator = ({ pkg }) => {
     return <Circle className="w-4 h-4 text-slate-300 mx-auto" data-testid={`review-pending-${pkg.id}`} />;
 };
 
+/* ─── Severity badge ─── */
+const SeverityBadge = ({ level }) => {
+    if (level === 'critical') {
+        return (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white uppercase tracking-wide"
+                  data-testid="severity-critical">
+                Crítico
+            </span>
+        );
+    }
+    if (level === 'warning') {
+        return (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-white uppercase tracking-wide"
+                  data-testid="severity-warning">
+                Alerta
+            </span>
+        );
+    }
+    return null;
+};
+
+/* ─── Get max severity from ia_severity dict ─── */
+const getMaxSeverity = (iaSeverity) => {
+    if (!iaSeverity || typeof iaSeverity !== 'object') return null;
+    const vals = Object.values(iaSeverity);
+    if (vals.includes('critical')) return 'critical';
+    if (vals.includes('warning')) return 'warning';
+    return null;
+};
+
+/* ─── Map display error to severity using raw errors ─── */
+const getErrorSeverity = (displayError, iaErrorsRaw, iaSeverity) => {
+    if (!iaSeverity || !iaErrorsRaw) return null;
+    // Try direct match with raw error keys
+    for (const rawKey of iaErrorsRaw) {
+        if (iaSeverity[rawKey]) {
+            // Fuzzy match: check if the display error contains keywords from the raw key
+            const rawWords = rawKey.replace(/_/g, ' ').toLowerCase();
+            const displayWords = displayError.toLowerCase();
+            if (displayWords.includes(rawWords) || rawWords.includes(displayWords.slice(0, 10))) {
+                return iaSeverity[rawKey];
+            }
+        }
+    }
+    // Fallback: use max severity if there are raw errors
+    if (iaErrorsRaw.length > 0 && Object.keys(iaSeverity).length > 0) {
+        return getMaxSeverity(iaSeverity);
+    }
+    return null;
+};
+
 /* ─── Main component ─── */
 const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
     const { hasRole } = useAuth();
@@ -122,7 +175,49 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
     const rowRefs = useRef({});
     const tableContainerRef = useRef(null);
 
+    // ReviewModal state
+    const [reviewModalOpen, setReviewModalOpen] = useState(false);
+    const [reviewModalPkg, setReviewModalPkg] = useState(null);
+    const [reviewModalAction, setReviewModalAction] = useState('approve');
+
+    // AI eval polling state
+    const [aiEvalProgress, setAiEvalProgress] = useState(null);
+    const pollingRef = useRef(null);
+
     useEffect(() => { setReviewOverrides({}); setSelectedPkgs({}); }, [packages]);
+
+    // Polling for AI eval status
+    const startPolling = useCallback(() => {
+        if (pollingRef.current) return;
+        pollingRef.current = setInterval(async () => {
+            try {
+                const res = await getAiEvalStatus(journey.id);
+                const status = res.data;
+                setAiEvalProgress(status);
+                if (status.status === 'completed' || status.status === 'error') {
+                    clearInterval(pollingRef.current);
+                    pollingRef.current = null;
+                    setEvaluatingAll(false);
+                    onRefreshJourney?.();
+                    if (status.status === 'completed') {
+                        toast.success(`Evaluación IA completada: ${status.evaluated}/${status.total} paquetes`);
+                    } else {
+                        toast.error('Evaluación IA terminó con errores');
+                    }
+                    setTimeout(() => setAiEvalProgress(null), 5000);
+                }
+            } catch { /* silently ignore polling errors */ }
+        }, 3000);
+    }, [journey.id, onRefreshJourney]);
+
+    useEffect(() => {
+        return () => {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+            }
+        };
+    }, []);
 
     const mergedPackages = useMemo(() => {
         return packages.map(p => {
@@ -234,6 +329,46 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
         finally { setSavingReview(null); }
     };
 
+    const openReviewModal = (pkg, action) => {
+        setReviewModalPkg(pkg);
+        setReviewModalAction(action);
+        setReviewModalOpen(true);
+    };
+
+    const handleReviewModalConfirm = async (reviewData) => {
+        const pkg = reviewModalPkg;
+        if (!pkg) return;
+        setSavingReview(pkg.id);
+        try {
+            const isApproval = reviewData.action === 'approved';
+            await reviewPackageWithNote(pkg.id, {
+                manually_reviewed: isApproval,
+                manually_reviewed_note: isApproval
+                    ? `${reviewData.reason_category}: ${reviewData.reason_detail || ''}`
+                    : `${reviewData.reason_category}: ${reviewData.reason_detail || ''}`,
+                adjusted_score: reviewData.adjusted_score,
+                ai_evaluation_incorrect: reviewData.ai_evaluation_incorrect,
+            });
+            setReviewOverrides(prev => ({
+                ...prev,
+                [pkg.id]: {
+                    manually_reviewed: isApproval,
+                    rejection_reason: isApproval ? null : `${reviewData.reason_category}: ${reviewData.reason_detail || ''}`,
+                    reviewed_by: 'Tú',
+                },
+            }));
+            toast.success(isApproval ? 'Guía aprobada' : 'Guía rechazada');
+            setReviewModalOpen(false);
+            setReviewModalPkg(null);
+            advanceToNext(pkg.id);
+            onRefreshJourney?.();
+        } catch {
+            toast.error('Error al guardar revisión');
+        } finally {
+            setSavingReview(null);
+        }
+    };
+
     const handleDiscrepancyReview = async (pkg, decision) => {
         const guideId = pkg.order_reference_id || pkg.tracking_number || pkg.id;
         setSavingReview(pkg.id);
@@ -268,12 +403,16 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
 
     const handleEvaluateAll = async () => {
         setEvaluatingAll(true);
+        setAiEvalProgress({ status: 'starting', total: 0, evaluated: 0, errors: 0 });
         try {
-            const res = await evaluateAllEvidence(journey.id);
-            toast.success(res.data?.message || 'Evaluación IA iniciada');
-            setTimeout(() => onRefreshJourney?.(), 3000);
-        } catch (err) { toast.error(err.response?.data?.detail || 'Error al evaluar con IA'); }
-        finally { setEvaluatingAll(false); }
+            await evaluateAllEvidence(journey.id);
+            toast.success('Evaluación IA iniciada en segundo plano');
+            startPolling();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al evaluar con IA');
+            setEvaluatingAll(false);
+            setAiEvalProgress(null);
+        }
     };
 
     const handleEvaluateConfidence = async () => {
@@ -509,9 +648,14 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                 <td><ScoreCircle score={pkg.ai_score} /></td>
                                                 <td>
                                                     {hasErrors ? (
-                                                        <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
-                                                            {pkg.ai_errors[0]}{pkg.ai_errors.length > 1 ? ` +${pkg.ai_errors.length - 1}` : ''}
-                                                        </span>
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
+                                                                {pkg.ai_errors[0]}{pkg.ai_errors.length > 1 ? ` +${pkg.ai_errors.length - 1}` : ''}
+                                                            </span>
+                                                            {getMaxSeverity(pkg.ia_severity) && (
+                                                                <SeverityBadge level={getMaxSeverity(pkg.ia_severity)} />
+                                                            )}
+                                                        </div>
                                                     ) : pkg.ai_score != null ? (
                                                         <span className="text-xs bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded">OK</span>
                                                     ) : <span className="text-xs text-slate-400">—</span>}
@@ -603,7 +747,11 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                                         {hasErrors ? (
                                                                             <div className="bg-red-50 border border-red-200 rounded p-3 space-y-1">
                                                                                 {pkg.ai_errors.map((err, i) => (
-                                                                                    <p key={`err-${i}`} className="text-xs text-red-700 flex items-center gap-1"><X className="w-3 h-3 shrink-0" /> {err}</p>
+                                                                                    <div key={`err-${i}`} className="flex items-center gap-1.5">
+                                                                                        <X className="w-3 h-3 shrink-0 text-red-600" />
+                                                                                        <span className="text-xs text-red-700 flex-1">{err}</span>
+                                                                                        <SeverityBadge level={getErrorSeverity(err, pkg.ia_errors_raw, pkg.ia_severity)} />
+                                                                                    </div>
                                                                                 ))}
                                                                             </div>
                                                                         ) : pkg.ai_score != null ? (
@@ -700,12 +848,12 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                                                 ) : (
                                                                                     <div className="flex gap-2">
                                                                                         <Button size="sm" variant="outline" className="h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                                                                                                onClick={() => handleApprove(pkg)} disabled={savingReview === pkg.id}
+                                                                                                onClick={() => openReviewModal(pkg, 'approve')} disabled={savingReview === pkg.id}
                                                                                                 data-testid={`approve-btn-${pkg.id}`}>
-                                                                                            {savingReview === pkg.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Check className="w-3 h-3 mr-1" />}Aprobar
+                                                                                            <Check className="w-3 h-3 mr-1" />Aprobar
                                                                                         </Button>
                                                                                         <Button size="sm" variant="outline" className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-50"
-                                                                                                onClick={() => setRejectingPkg(pkg.id)} data-testid={`reject-btn-${pkg.id}`}>
+                                                                                                onClick={() => openReviewModal(pkg, 'reject')} data-testid={`reject-btn-${pkg.id}`}>
                                                                                             <X className="w-3 h-3 mr-1" /> Rechazar
                                                                                         </Button>
                                                                                     </div>
@@ -733,6 +881,64 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
 
             <EvidenceCarousel open={carouselOpen} onClose={() => setCarouselOpen(false)}
                 images={carouselImages} initialIndex={carouselIndex} packageInfo={carouselPkgInfo} />
+
+            {/* AI Evaluation Progress Banner */}
+            {aiEvalProgress && aiEvalProgress.status !== 'idle' && (
+                <div className="fixed top-4 right-4 z-50 bg-white border border-blue-200 rounded-xl shadow-lg p-4 w-80 animate-in slide-in-from-right"
+                     data-testid="ai-eval-progress-banner">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                            {(aiEvalProgress.status === 'running' || aiEvalProgress.status === 'starting') && (
+                                <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                            )}
+                            {aiEvalProgress.status === 'completed' && (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            )}
+                            {aiEvalProgress.status === 'error' && (
+                                <XCircle className="w-4 h-4 text-red-600" />
+                            )}
+                            <span className="text-sm font-semibold text-slate-800">
+                                {aiEvalProgress.status === 'starting' && 'Iniciando evaluación IA...'}
+                                {aiEvalProgress.status === 'running' && 'Evaluación IA en progreso'}
+                                {aiEvalProgress.status === 'completed' && 'Evaluación IA completada'}
+                                {aiEvalProgress.status === 'error' && 'Evaluación IA con errores'}
+                            </span>
+                        </div>
+                        <button onClick={() => setAiEvalProgress(null)} className="text-slate-400 hover:text-slate-600">
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                    {aiEvalProgress.total > 0 && (
+                        <>
+                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-1.5">
+                                <div className="h-full rounded-full transition-all duration-500"
+                                     style={{
+                                         width: `${Math.round((aiEvalProgress.evaluated / aiEvalProgress.total) * 100)}%`,
+                                         backgroundColor: aiEvalProgress.status === 'error' ? '#EF4444' :
+                                                         aiEvalProgress.status === 'completed' ? '#10B981' : '#3B82F6',
+                                     }} />
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                                <span>{aiEvalProgress.evaluated} / {aiEvalProgress.total} paquetes</span>
+                                <span className="font-mono">{Math.round((aiEvalProgress.evaluated / aiEvalProgress.total) * 100)}%</span>
+                            </div>
+                            {aiEvalProgress.errors > 0 && (
+                                <p className="text-[10px] text-red-500 mt-1">{aiEvalProgress.errors} error(es) durante evaluación</p>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* ReviewModal */}
+            <ReviewModal
+                open={reviewModalOpen}
+                onClose={() => { setReviewModalOpen(false); setReviewModalPkg(null); }}
+                pkg={reviewModalPkg}
+                action={reviewModalAction}
+                onConfirm={handleReviewModalConfirm}
+                saving={savingReview === reviewModalPkg?.id}
+            />
 
             {/* Floating Bulk Action Bar */}
             {canReview && selectedIds.length > 0 && (
