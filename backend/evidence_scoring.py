@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
@@ -56,7 +56,9 @@ CLAVES DE ERROR DISPONIBLES:
 - foto_borrosa: Foto borrosa o sin foco
 - sin_foto_receptor: Falta foto del receptor o tercero
 - paquete_fuera_frame: Paquete fuera de encuadre o cortado
-- falta_whatsapp: Falta captura de WhatsApp o SMS
+- falta_whatsapp: Falta captura de WhatsApp o SMS"""
+
+AI_RESPONSE_FORMAT = """
 
 RESPONDE SIEMPRE en formato JSON con esta estructura exacta:
 {
@@ -276,19 +278,55 @@ async def evaluate_single_package_ai(
 
 
 async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver_note: str) -> Optional[dict]:
-    """Send images to AI Vision and return parsed result."""
+    """Send images to AI Vision and return parsed result.
+    Reads custom system_prompt from quality criteria config if available."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         raise ValueError("EMERGENT_LLM_KEY not configured")
 
+    # Read custom system prompt from quality criteria config
+    base_prompt = CUBBO_SYSTEM_PROMPT
+    try:
+        db = _get_db()
+        ia_config_doc = await db.config.find_one({"key": "ia_config"}, {"_id": 0})
+        if ia_config_doc:
+            custom_prompt = ia_config_doc.get("value", {}).get("system_prompt", "")
+            if custom_prompt and custom_prompt.strip():
+                base_prompt = custom_prompt.strip()
+                logger.info(f"Using custom system prompt from quality criteria config ({len(base_prompt)} chars)")
+    except Exception as e:
+        logger.warning(f"Could not read custom system prompt: {e}")
+
+    # Always append JSON response format to ensure structured output
+    system_prompt = base_prompt + AI_RESPONSE_FORMAT
+
     chat = LlmChat(
         api_key=api_key,
         session_id=f"evidence-eval-{uuid.uuid4().hex[:8]}",
-        system_message=CUBBO_SYSTEM_PROMPT,
+        system_message=system_prompt,
     )
     chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    # Include supervised training examples as few-shot context
+    training_context = ""
+    try:
+        thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        recent_samples = await db.training_samples.find(
+            {"labeled_at": {"$gte": thirty_days_ago}, "ai_evaluation_incorrect": True},
+            {"_id": 0, "tracking_number": 1, "ia_errors": 1, "original_ai_score": 1,
+             "adjusted_score": 1, "reviewer_note": 1, "decision": 1, "proof_count": 1},
+        ).sort("labeled_at", -1).to_list(5)
+
+        if recent_samples:
+            examples = []
+            for s in recent_samples:
+                ex = f"- Guía {s.get('tracking_number','?')}: IA dio {s.get('original_ai_score',0)}, revisión humana: {s.get('decision','?')} (score ajustado: {s.get('adjusted_score','N/A')}). Nota: {s.get('reviewer_note','')}"
+                examples.append(ex)
+            training_context = "\n\nCALIBRACIÓN POR REVISIÓN HUMANA (ejemplos recientes donde la IA se equivocó):\n" + "\n".join(examples) + "\nConsidera estos casos al evaluar para calibrar mejor tu criterio.\n"
+    except Exception as e:
+        logger.debug(f"Training samples fetch skipped: {e}")
 
     file_contents = [ImageContent(image_base64=img) for img in valid_images]
     context = (
@@ -298,6 +336,8 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
     if driver_note:
         context += f"Nota del driver: {driver_note}\n"
     context += f"Total de fotos: {len(valid_images)}\n"
+    if training_context:
+        context += training_context
     context += "\nAnaliza las fotos de evidencia adjuntas y responde en JSON."
 
     user_msg = UserMessage(text=context, file_contents=file_contents)
@@ -313,7 +353,7 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
             referencia=tracking,
             input_text=context,
             output_text=response_text or "",
-            system_prompt=CUBBO_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
         )
     except Exception as log_err:
         logger.debug(f"Token log skipped: {log_err}")

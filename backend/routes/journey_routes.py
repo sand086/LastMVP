@@ -458,6 +458,8 @@ async def review_package_with_note(
     now = datetime.now(timezone.utc).isoformat()
     manually_reviewed = body.get("manually_reviewed", True)
     note = body.get("manually_reviewed_note", "")
+    adjusted_score = body.get("adjusted_score")
+    ai_incorrect = body.get("ai_evaluation_incorrect", False)
 
     update_data = {
         "manually_reviewed": manually_reviewed,
@@ -467,6 +469,10 @@ async def review_package_with_note(
     }
     if not manually_reviewed:
         update_data["rejection_reason"] = note
+    if adjusted_score is not None:
+        update_data["adjusted_score"] = adjusted_score
+    if ai_incorrect:
+        update_data["ai_evaluation_incorrect"] = True
 
     result = await db.packages.update_one(
         {"id": package_id},
@@ -476,6 +482,35 @@ async def review_package_with_note(
         raise HTTPException(status_code=404, detail="Paquete no encontrado")
 
     pkg = await db.packages.find_one({"id": package_id}, {"_id": 0})
+
+    # Save training sample for supervised learning
+    try:
+        ia_errors = pkg.get("ia_errors") or []
+        error_types = ia_errors if ia_errors else ["general"]
+        training_sample = {
+            "id": str(uuid.uuid4()),
+            "package_id": package_id,
+            "journey_id": pkg.get("journey_id"),
+            "tracking_number": pkg.get("tracking_number") or pkg.get("order_reference_id"),
+            "original_ai_score": pkg.get("evidence_score"),
+            "adjusted_score": adjusted_score,
+            "ai_evaluation_incorrect": ai_incorrect,
+            "decision": "approved" if manually_reviewed else "rejected",
+            "reviewer_note": note,
+            "error_types": error_types,
+            "ia_errors": ia_errors,
+            "ia_feedback": pkg.get("ia_feedback", ""),
+            "evidence_type": pkg.get("evidence_type"),
+            "proof_count": pkg.get("kosmo_proof_count", 0),
+            "labeled_by": user.get("name", user["email"]),
+            "labeled_at": now,
+        }
+        for err_type in error_types:
+            sample = {**training_sample, "error_type": err_type}
+            await db.training_samples.insert_one(sample)
+    except Exception as e:
+        logger.warning(f"Training sample save failed: {e}")
+
     return pkg
 
 
@@ -932,36 +967,30 @@ async def rescrape_package(package_id: str, user: dict = Depends(get_current_use
 
 @router.post("/journeys/{journey_id}/batch-rescrape")
 async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_current_user)):
-    """Re-scrape all packages in a journey that have a tracking_url but 0 proofs or unknown status."""
+    """Re-scrape ALL packages in a journey that have a tracking_url to ensure latest evidence is fetched."""
     from kosmo_sync import scrape_kosmo_page
 
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
 
-    # Find packages needing rescrape
+    # Re-scrape ALL packages with a tracking URL — not just those with 0 proofs.
+    # Kosmo may add photos after the initial scrape.
     candidates = await db.packages.find(
         {
             "journey_id": journey_id,
             "tracking_url": {"$nin": [None, ""]},
-            "$or": [
-                {"kosmo_proof_count": 0},
-                {"kosmo_proof_count": None},
-                {"kosmo_proof_count": {"$exists": False}},
-                {"kosmo_status_raw": "unknown"},
-                {"kosmo_status_raw": None},
-                {"kosmo_status_raw": {"$exists": False}},
-            ],
         },
-        {"_id": 0, "id": 1, "tracking_url": 1, "tracking_number": 1, "order_reference_id": 1, "journey_id": 1},
+        {"_id": 0, "id": 1, "tracking_url": 1, "tracking_number": 1, "order_reference_id": 1, "journey_id": 1, "kosmo_proof_count": 1},
     ).to_list(500)
 
     if not candidates:
-        return {"total": 0, "recovered": 0, "errors": 0, "message": "No hay paquetes que necesiten re-sincronización"}
+        return {"total": 0, "recovered": 0, "errors": 0, "message": "No hay paquetes con URL de tracking"}
 
     now = datetime.now(timezone.utc)
     semaphore = asyncio.Semaphore(3)
     recovered = 0
+    updated_proofs = 0
     errors = 0
     STATUS_MAP = {
         "delivered": "delivered",
@@ -971,7 +1000,7 @@ async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_curre
     }
 
     async def process_one(pkg):
-        nonlocal recovered, errors
+        nonlocal recovered, errors, updated_proofs
         async with semaphore:
             try:
                 result = await scrape_kosmo_page(pkg["tracking_url"])
@@ -981,11 +1010,14 @@ async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_curre
 
                 kosmo_raw = result.get("order_status") or "unknown"
                 mapped_status = STATUS_MAP.get(kosmo_raw)
+                new_proof_count = result.get("proof_count", 0)
+                old_proof_count = pkg.get("kosmo_proof_count") or 0
+
                 update_fields = {
                     "kosmo_scraped_at": now.isoformat(),
                     "kosmo_status_raw": kosmo_raw,
                     "kosmo_order_id": result.get("order_id"),
-                    "kosmo_proof_count": result.get("proof_count", 0),
+                    "kosmo_proof_count": new_proof_count,
                 }
                 if result.get("updated_at_ms"):
                     update_fields["kosmo_updated_at"] = result["updated_at_ms"]
@@ -1000,8 +1032,10 @@ async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_curre
 
                 await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
 
-                if result.get("proof_count", 0) > 0:
+                if new_proof_count > 0 and old_proof_count == 0:
                     recovered += 1
+                elif new_proof_count > old_proof_count:
+                    updated_proofs += 1
             except Exception as e:
                 logger.error(f"Batch rescrape error for {pkg['id']}: {e}")
                 errors += 1
@@ -1041,8 +1075,9 @@ async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_curre
     return {
         "total": len(candidates),
         "recovered": recovered,
+        "updated_proofs": updated_proofs,
         "errors": errors,
-        "message": f"Re-sincronización completa: {recovered} paquetes recuperados de {len(candidates)}",
+        "message": f"Re-sincronización completa: {recovered} nuevos recuperados, {updated_proofs} evidencias actualizadas de {len(candidates)}",
     }
 
 
