@@ -35,6 +35,33 @@
 - **Result**: False positive discrepancies dropped from 3→0, confidence now accurately reflects evidence
 - Files: `journey_routes.py` (`_compute_confidence`, `_detect_discrepancy`, `batch_rescrape_journey`)
 
+## 2026-04-09 — 3 User Findings Fixed (Kosmo Photos, System Prompt, Training)
+
+### 1. Kosmo Batch Re-Scrape: Missing Photos
+- **Root cause**: `batch_rescrape_journey` only re-scraped packages with 0 evidence or unknown status; Kosmo often adds photos after initial scrape
+- **Fix**: Changed query to re-scrape ALL packages with tracking URLs; added `updated_proofs` counter for packages that gained new evidence
+- **Result**: Package `6fzwjfH4k2fzlpgQ` went from 2→4 photos, matching Kosmo tracking page
+- Files: `journey_routes.py` (batch_rescrape_journey)
+
+### 2. System Prompt Not Connected to AI Evaluation
+- **Root cause**: `_call_ai_vision()` used hardcoded `CUBBO_SYSTEM_PROMPT` instead of the custom prompt configured in Quality Criteria settings (`ia_config.system_prompt`)
+- **Fix**: Split prompt into base criteria + JSON response format. AI now reads custom prompt from `db.config(key=ia_config)` and appends JSON format specification to ensure structured output
+- **Result**: AI evaluation now uses the detailed Cubbo standard prompt configured by the user
+- Files: `evidence_scoring.py` (_call_ai_vision, CUBBO_SYSTEM_PROMPT, AI_RESPONSE_FORMAT)
+
+### 3. Supervised Training Not Generating Value
+- **Root cause**: Manual reviews stored data on packages but never created training samples or fed them back to the AI
+- **Fix**: 
+  - `review_package_with_note` now saves `adjusted_score` and `ai_evaluation_incorrect` fields
+  - Creates `training_samples` documents in MongoDB on each review (with error_type, decision, scores, notes)
+  - `_call_ai_vision` fetches recent incorrect AI evaluations from `training_samples` and includes them as calibration examples in the AI prompt
+  - Quality Criteria error catalog shows `frequency_last_30d` from training_samples
+- Files: `journey_routes.py` (review_package_with_note), `evidence_scoring.py` (_call_ai_vision)
+
+### Test Results
+- Backend: 14/15 tests passed (93%, 1 skipped due to ID format)
+- Test report: `/app/test_reports/iteration_35.json`
+
 ---
 
 ## 2026-04-09 — Discrepancy Detection
