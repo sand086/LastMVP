@@ -27,6 +27,14 @@
 - Frontend: All UI elements verified (100%)
 - Test report: `/app/test_reports/iteration_34.json`
 
+## 2026-04-09 — Bug Fix: Confidence Score 0% with evidence present
+- **Root cause**: `_compute_confidence()` used enriched field names (`ai_score`, `photos_count`, `ai_errors`) but operated on raw DB documents where those fields don't exist
+- **Fix 1**: Updated `_compute_confidence` to use raw DB fields: `evidence_score`, `kosmo_proof_count`, `ia_errors`, `evidence_detail.missing_items`
+- **Fix 2**: Updated `_detect_discrepancy` to use `kosmo_proof_count` 
+- **Fix 3**: Added confidence auto-recalculation after `batch-rescrape` completes (fixes timing issue where confidence was calculated before Kosmo data was available)
+- **Result**: False positive discrepancies dropped from 3→0, confidence now accurately reflects evidence
+- Files: `journey_routes.py` (`_compute_confidence`, `_detect_discrepancy`, `batch_rescrape_journey`)
+
 ---
 
 ## 2026-04-09 — Discrepancy Detection

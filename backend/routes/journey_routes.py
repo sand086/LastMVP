@@ -1022,6 +1022,22 @@ async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_curre
         from evidence_scoring import evaluate_packages_by_ids
         await evaluate_packages_by_ids(db, scraped_ids, {journey_id})
 
+    # Recalculate confidence scores after Kosmo data is refreshed
+    all_packages = await db.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(5000)
+    for pkg in all_packages:
+        confidence = _compute_confidence(pkg)
+        discrepancy = _detect_discrepancy(pkg, confidence)
+        update_fields_conf = {"confidence": confidence, "discrepancy": discrepancy}
+        existing_review = pkg.get("manual_review", {})
+        if discrepancy["detected"] and not existing_review.get("reviewed_at"):
+            update_fields_conf["manual_review"] = {
+                "required": True, "status": "pending",
+                "reviewed_by": existing_review.get("reviewed_by"),
+                "reviewed_at": existing_review.get("reviewed_at"),
+                "decision": existing_review.get("decision"),
+            }
+        await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields_conf})
+
     return {
         "total": len(candidates),
         "recovered": recovered,
@@ -1043,18 +1059,29 @@ CARRIER_PROFILES = {
 
 
 def _compute_confidence(pkg: dict) -> dict:
-    """Compute confidence score for a package based on evidence factors."""
+    """Compute confidence score for a package based on evidence factors.
+    NOTE: This operates on RAW DB documents, not enriched ones.
+    Use DB field names: kosmo_proof_urls, kosmo_proof_count, evidence_score, ia_errors, evidence_detail."""
     proof_urls = pkg.get("kosmo_proof_urls") or []
-    ai_errors = pkg.get("ai_errors") or []
-    ai_score = pkg.get("ai_score")
-    photos_count = pkg.get("photos_count", 0) or len(proof_urls)
+    photos_count = pkg.get("kosmo_proof_count") or len(proof_urls)
 
-    # Evidence factor checks
-    has_foto_fachada = "Foto de fachada" not in ai_errors and photos_count > 0
-    has_foto_paquete = "Foto de paquete con guía" not in ai_errors and photos_count > 0
-    has_foto_receptor = "Foto de receptor" not in ai_errors and photos_count > 0
+    # Build error list from raw DB fields (not enriched ai_errors)
+    raw_ia_errors = pkg.get("ia_errors") or []
+    detail = pkg.get("evidence_detail") or {}
+    missing_items = detail.get("missing_items") or []
+    alerts = detail.get("alerts") or []
+    all_errors = raw_ia_errors + missing_items + alerts
+
+    # Use evidence_score (stored by AI/rules eval) — not the enriched ai_score
+    evidence_score = pkg.get("evidence_score") or pkg.get("ai_score") or 0
+
+    # Evidence factor checks — use raw error keys and human-readable error strings
+    error_text = " ".join(all_errors).lower()
+    has_foto_fachada = "fachada" not in error_text and "falta_fachada" not in error_text and photos_count > 0
+    has_foto_paquete = "guia" not in error_text and "guia_no_visible" not in error_text and photos_count > 0
+    has_foto_receptor = "receptor" not in error_text and "sin_foto_receptor" not in error_text and photos_count > 0
     has_motivo_excepcion = bool(pkg.get("failure_reason") or pkg.get("kosmo_driver_note"))
-    has_score_ia_positivo = (ai_score or 0) > 0
+    has_score_ia_positivo = evidence_score > 0
 
     factors = {
         "foto_fachada": has_foto_fachada,
@@ -1087,10 +1114,11 @@ def _compute_confidence(pkg: dict) -> dict:
 
 
 def _detect_discrepancy(pkg: dict, confidence: dict) -> dict:
-    """Detect discrepancy between tracking status and evidence."""
+    """Detect discrepancy between tracking status and evidence.
+    NOTE: This operates on RAW DB documents."""
     status = pkg.get("status", "")
     kosmo_status_raw = pkg.get("kosmo_status_raw", "")
-    photos_count = pkg.get("photos_count", 0) or len(pkg.get("kosmo_proof_urls") or [])
+    photos_count = pkg.get("kosmo_proof_count") or len(pkg.get("kosmo_proof_urls") or [])
     has_exception = bool(pkg.get("failure_reason") or pkg.get("kosmo_driver_note"))
 
     # Discrepancy: tracking says delivered but no evidence at all

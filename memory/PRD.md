@@ -92,6 +92,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Code Quality: Security fixes, useMemo, refactoring — Done 2026-04-07
 - [x] Discrepancy Detection: Confidence engine + GuiasTab UI — Done 2026-04-09
 - [x] AI Evaluation UX: Severity badges, ReviewModal, Background polling — Done 2026-04-09
+- [x] Bug fix: Confidence score using raw DB fields + auto-recalc after Kosmo rescrape — Done 2026-04-09
 - [ ] Split large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P1)
 - [ ] localStorage -> httpOnly cookies migration (P1, security hardening)
 - [ ] Mobile-optimized views for field agents (P2)
