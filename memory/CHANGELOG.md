@@ -1,97 +1,50 @@
-# LastMile OS - CHANGELOG
+# LastMile OS - Changelog
 
-## 2026-04-01 — Export Filters Bug Fixes
-- [x] Bug Fix: Reports Excel export (`generate-excel`) now passes `client_id` and `provider_id` filters from UI
-- [x] Bug Fix: Reports generate endpoint also filters by `client_id`/`provider_id`
-- [x] Bug Fix: System Logs CSV export now passes `errors_only` filter
-- [x] Updated `ReportRequest` model with optional `client_id` and `provider_id` fields
-- [x] Testing: iteration_26 — 100% backend (26/26), 100% frontend
+## 2026-04-09 — AI Evaluation UX Improvements (3 features)
 
-## 2026-04-01 — Deployment Fix
-- [x] WebSocket endpoint moved from `/ws/dashboard` to `/api/ws/dashboard` for correct K8s ingress routing
-- [x] Frontend WebSocket URL updated accordingly
-- [x] Production build verified: passes successfully
+### 1. Severity Badges in GuiasTab
+- Added `SeverityBadge` component showing "CRITICO" (red) and "ALERTA" (amber) labels
+- Badges appear in the Errores table column and in the expanded detail row per error
+- Backend enrichment updated to pass `ia_severity` and `ia_errors_raw` fields to frontend
+- Files: `GuiasTab.jsx`, `journey_routes.py` (enrichment fix)
 
-## 2026-04-07 — Liquidación del Servicio (Belgos/SOP Format)
-- [x] New endpoint: GET /api/admin/export-liquidacion with provider-specific multi-sheet Excel
-- [x] Sheet 1 "Formato": Template with 14 columns and example formulas
-- [x] Sheet 2+ "{Proveedor}": 28-column data with real Excel formulas (T-AB), group headers, freeze panes, side pivot table
-- [x] Sheet "Incidencias a cobro": Parsed from AI comments + incidents collection
-- [x] Sheet "Catalogo_Drivers": Unique drivers with provider mapping for name homologation
-- [x] Sheet "route_summary": Raw data with XLOOKUP formulas and totals rows
-- [x] Frontend: "Exportar Liquidación" button in Admin IA > Reporte de rutas
-- [x] Testing: iteration_29 — 21/21 backend, 100% frontend
+### 2. Quick Review Modal
+- Created `ReviewModal.jsx` with score slider, motivo dropdown, detalle textarea, AI incorrect toggle
+- Integrated into GuiasTab: Aprobar/Rechazar buttons now open the modal instead of inline actions
+- Modal resets state correctly when switching between packages (useEffect on open/pkg.id/action)
+- Files: `ReviewModal.jsx`, `GuiasTab.jsx`
 
-## 2026-04-06 — Review UX Fixes (Guías Tab)
-- [x] Bug 1: Review indicator now read-only with 3 states (○ pending, ✓ approved, ✗ rejected)
-- [x] Bug 2A: Scroll position preserved after approve/reject (no jump to top)
-- [x] Bug 2B: Auto-advance to next pending guide after approve/reject
-- [x] Bug 2C: KPI "Revisión manual" and filter counts update in real-time via optimistic updates
-- [x] Toast "Todas las guías han sido revisadas" when all guides reviewed
-- [x] Enter key support in reject note input
-- [x] Testing: iteration_28 — 19/19 backend, 100% frontend
-- [x] Replaced "Calidad" tab with new unified "Guías" tab in JourneyDetail
-- [x] Removed standalone "Paquetes" card from JourneyDetail
-- [x] KPI cards: Score promedio, Completos, Evaluados IA, Revisión manual
-- [x] AI Alert banner with grouped error types and driver name
-- [x] Segment filter pills: Todas, Con alerta, Sin evidencia, Pendiente revisión
-- [x] Expandable rows with 3-column detail (Evidencias Kosmo, Evaluación IA, Revisión manual)
-- [x] Approve/Reject buttons with note capture (coordinator/developer only)
-- [x] New PATCH /api/packages/{id}/review endpoint with role restrictions
-- [x] Package data enrichment (ai_score, ai_errors, ai_confidence, photos_count, kosmo_url)
-- [x] New "Proveedor" role: read-only access to Dashboard + Rutas, filtered by assigned_providers
-- [x] Proveedor user seed: proveedor@me.mx / LastMile2026
-- [x] Testing: iteration_27 — 17/17 backend, 100% frontend
+### 3. Background AI Evaluation with Polling
+- Added in-memory status tracking in `evidence_scoring.py` (`_ai_eval_status` dict)
+- New endpoint `GET /api/journeys/{journey_id}/ai-eval-status` returns progress info
+- Frontend polls every 3 seconds during evaluation, showing a progress banner (top-right)
+- Banner shows percentage, package count, and error count with animated progress bar
+- Auto-refreshes journey data on completion
+- Files: `evidence_scoring.py`, `journey_routes.py`, `api.js`, `GuiasTab.jsx`
 
-## 2026-04-01 — Code Quality Improvements (Round 2)
-- [x] Promise.all → Promise.allSettled in Dashboard.jsx, Journeys.jsx, Layout.jsx, SystemHealth.jsx
-- [x] Python complexity: admin_module_routes.py — extracted _calc_working_hours, _check_on_time, _build_report_row
-- [x] Python complexity: dependencies.py — extracted _extract_cp, _extract_state, _extract_colonia_municipio
-- [x] Lazy imports → top-level in system_routes.py (uuid, fastapi, urlparse)
-- [x] Test secrets: conftest.py with env vars (TEST_API_URL, TEST_DEV_PASSWORD, etc.)
-- [x] Developer role added to upload and from-cosmo endpoints
-- [x] Testing: iteration_25 — 100% backend (17/17), 100% frontend
+### Test Results
+- Backend: 14/14 tests passed (100%)
+- Frontend: All UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_34.json`
 
-## 2026-04-01 — Bug Fix: "Error al cargar" en Layout
-- [x] `Promise.all` → `Promise.allSettled` en Layout.jsx y Journeys.jsx (carga parcial resiliente)
-- [x] Rol `developer` agregado a endpoints upload y from-cosmo (antes: 403)
-- [x] CORS → `*` para deployment
-- [x] Eliminados fallbacks localhost en evidence_scoring y system_routes
-- [x] Fix `@/` alias en index.js + 43 componentes Shadcn UI (build de producción fallaba)
+---
 
-## 2026-03-31 — Code Quality Fixes
-- [x] XSS: Added DOMPurify sanitization to LumiChat.jsx (formatAIText) and Reports.jsx (AI narrative)
-- [x] Array index keys: Replaced 21 instances across 13 files with stable unique keys
-- [x] Python refactoring: evidence_scoring.py — extracted _score_delivered, _score_failed, _rules_fallback, _build_ai_result, _call_ai_vision
-- [x] Python refactoring: middleware.py — _match_action to _PATTERN_RULES table, _extract_entity to _ENTITY_KEYWORDS lookup, _log_request split to _track_error + _track_audit
-- [x] Lint fixes: Ambiguous variable names in system_routes.py
-- [x] Testing: iteration_24 — 100% backend (28/28), 100% frontend
+## 2026-04-09 — Discrepancy Detection
+- Confidence engine with 5 evidence factors
+- GuiasTab UI: 6 KPI cards, alert banner, discrepancy filter, confidence column, review actions
+- Discrepancy review: confirm_return / mark_valid decisions
 
-## 2026-03-31 — Webhooks + Refactoring + API Docs Update
-- [x] Webhooks Integration (Plug & Play): Full CRUD, test dispatch, HMAC signatures, delivery log, retry logic
-- [x] WebhooksTab UI in Settings page (create, toggle, test, delete, expand deliveries, regenerate secret)
-- [x] Fixed Settings TabsList: grid-cols-4 -> grid-cols-5 for 5 tabs
-- [x] Backend refactoring: Moved admin.py, lumi.py, system_routes.py (factory), kosmo router to routes/ directory
-- [x] server.py simplified from ~218 to 206 lines (all routing via routes/__init__.py)
-- [x] API Documentation updated: Added Webhooks API reference (8 endpoints) and Security section
-- [x] Testing: iteration_23 — 95% backend, 100% frontend pass rate
+## 2026-04-07 — Code Quality Report Fixes
+- Fixed dynamic import eval security issue
+- Added useMemo optimizations across React components
+- Refactored kosmo_sync.py
 
-## 2026-03-31 — Non-blocking AI + JourneyDetail Refactoring
-- [x] evaluate-IA non-blocking: AI runs in separate thread (ThreadPoolExecutor)
-- [x] API Documentation updated with security details
-- [x] JourneyDetail.jsx refactored: Extracted JourneyStartTab, JourneyIncidentsTab, JourneyCloseTab
+## 2026-04-07 — Pulse Feasibility Engine
+- PulseStrip, PulseCell, PulseBanner components
+- Real-time route feasibility monitoring
+- Traslado a 1er punto moved to individual journey start form
 
-## 2026-03-30 — Pre-production Infrastructure Hardening
-- [x] CORS wildcard -> specific domains
-- [x] HSTS, X-Content-Type-Options, X-Frame-Options headers
-- [x] bcrypt async with ThreadPoolExecutor
-- [x] JWT_SECRET from .env, auto-logout on 401
-- [x] Production MongoDB indexes (15+ compound)
-- [x] PUT /close schema fix, evaluate-ia alias endpoint
-
-## 2026-03-28 — Bug Fixes
-- [x] Restored Start/Incidents/Close workflow visibility in JourneyDetail
-- [x] Developer role permissions for journey operations
-
-## Earlier
-- Full MVP build: Auth, Layout Upload, Journey Management, Dashboard, Reports, Lumi, Quality, Admin IA
+## 2026-04-07 — Dynamic SLA Configuration
+- Per-provider SLA brackets
+- SLA/Pulse config edit permissions for Coordinators
+- Liquidacion del Servicio export (Belgos/SOP format)
