@@ -246,6 +246,10 @@ export const getPackagesQuality = (journeyId, params) => api.get(`/journeys/${jo
 export const saveTrainingSample = (data) => api.post('/training/samples', data);
 export const updatePackageReview = (journeyId, guide, data) => api.patch(`/journeys/${journeyId}/packages/${encodeURIComponent(guide)}/review`, data);
 
+// Discrepancy Detection
+export const evaluateConfidence = (journeyId) => api.post(`/journeys/${journeyId}/guides/evaluate-confidence`);
+export const reviewDiscrepancy = (journeyId, guideId, data) => api.patch(`/journeys/${journeyId}/guides/${encodeURIComponent(guideId)}/review`, data);
+
 export default api;
 
 // Webhooks

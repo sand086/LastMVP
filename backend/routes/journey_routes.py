@@ -1014,3 +1014,233 @@ async def batch_rescrape_journey(journey_id: str, user: dict = Depends(get_curre
         "errors": errors,
         "message": f"Re-sincronización completa: {recovered} paquetes recuperados de {len(candidates)}",
     }
+
+
+
+# ==================== DISCREPANCY DETECTION ====================
+
+CARRIER_PROFILES = {
+    "kosmo": {
+        "required_evidences": ["foto_fachada", "foto_paquete_guia", "foto_receptor"],
+        "min_confidence_for_auto_approve": 70,
+        "exception_required_on_failure": True,
+    }
+}
+
+
+def _compute_confidence(pkg: dict) -> dict:
+    """Compute confidence score for a package based on evidence factors."""
+    proof_urls = pkg.get("kosmo_proof_urls") or []
+    ai_errors = pkg.get("ai_errors") or []
+    ai_score = pkg.get("ai_score")
+    photos_count = pkg.get("photos_count", 0) or len(proof_urls)
+
+    # Evidence factor checks
+    has_foto_fachada = "Foto de fachada" not in ai_errors and photos_count > 0
+    has_foto_paquete = "Foto de paquete con guía" not in ai_errors and photos_count > 0
+    has_foto_receptor = "Foto de receptor" not in ai_errors and photos_count > 0
+    has_motivo_excepcion = bool(pkg.get("failure_reason") or pkg.get("kosmo_driver_note"))
+    has_score_ia_positivo = (ai_score or 0) > 0
+
+    factors = {
+        "foto_fachada": has_foto_fachada,
+        "foto_paquete_guia": has_foto_paquete,
+        "foto_receptor": has_foto_receptor,
+        "motivo_excepcion": has_motivo_excepcion,
+        "score_ia_positivo": has_score_ia_positivo,
+    }
+
+    score = 0
+    if has_foto_fachada:
+        score += 25
+    if has_foto_paquete:
+        score += 25
+    if has_foto_receptor:
+        score += 25
+    if has_motivo_excepcion:
+        score += 15
+    if has_score_ia_positivo:
+        score += 10
+
+    level = "high" if score >= 70 else ("medium" if score >= 30 else "low")
+
+    return {
+        "score": score,
+        "level": level,
+        "factors": factors,
+        "calculated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _detect_discrepancy(pkg: dict, confidence: dict) -> dict:
+    """Detect discrepancy between tracking status and evidence."""
+    status = pkg.get("status", "")
+    kosmo_status_raw = pkg.get("kosmo_status_raw", "")
+    photos_count = pkg.get("photos_count", 0) or len(pkg.get("kosmo_proof_urls") or [])
+    has_exception = bool(pkg.get("failure_reason") or pkg.get("kosmo_driver_note"))
+
+    # Discrepancy: tracking says delivered but no evidence at all
+    is_delivered = status == "delivered"
+    no_evidence = photos_count == 0 and not has_exception and confidence["score"] == 0
+
+    detected = is_delivered and no_evidence
+
+    if detected:
+        return {
+            "detected": True,
+            "type": "tracking_vs_evidence",
+            "tracking_says": kosmo_status_raw or "Entregado",
+            "evidence_says": "Sin evidencias",
+            "kosmo_internal_says": "Creado",
+            "recommended_status": "Devolución sin intento",
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return {
+        "detected": False,
+        "type": None,
+        "tracking_says": kosmo_status_raw or status,
+        "evidence_says": f"{photos_count} fotos" if photos_count > 0 else "Sin evidencias",
+        "kosmo_internal_says": None,
+        "recommended_status": None,
+        "detected_at": None,
+    }
+
+
+@router.post("/journeys/{journey_id}/guides/evaluate-confidence")
+async def evaluate_confidence(journey_id: str, user: dict = Depends(get_current_user)):
+    """Recalculate confidence scores and detect discrepancies for all guides in a journey."""
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    packages = await db.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(5000)
+
+    discrepancy_count = 0
+    total_confidence = 0
+    evaluated = 0
+
+    for pkg in packages:
+        confidence = _compute_confidence(pkg)
+        discrepancy = _detect_discrepancy(pkg, confidence)
+
+        update_fields = {
+            "confidence": confidence,
+            "discrepancy": discrepancy,
+        }
+
+        # Set manual_review.required based on confidence
+        existing_review = pkg.get("manual_review", {})
+        if discrepancy["detected"]:
+            discrepancy_count += 1
+            if not existing_review.get("reviewed_at"):
+                update_fields["manual_review"] = {
+                    "required": True,
+                    "status": "pending",
+                    "reviewed_by": existing_review.get("reviewed_by"),
+                    "reviewed_at": existing_review.get("reviewed_at"),
+                    "decision": existing_review.get("decision"),
+                }
+        elif confidence["score"] < 70:
+            if not existing_review.get("reviewed_at"):
+                update_fields["manual_review"] = {
+                    "required": True,
+                    "status": "pending",
+                    "reviewed_by": existing_review.get("reviewed_by"),
+                    "reviewed_at": existing_review.get("reviewed_at"),
+                    "decision": existing_review.get("decision"),
+                }
+
+        await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
+        total_confidence += confidence["score"]
+        evaluated += 1
+
+    avg_confidence = round(total_confidence / evaluated, 1) if evaluated > 0 else 0
+
+    return {
+        "evaluated": evaluated,
+        "discrepancies": discrepancy_count,
+        "avg_confidence": avg_confidence,
+        "message": f"Evaluación de confianza completa: {discrepancy_count} discrepancias detectadas en {evaluated} guías.",
+    }
+
+
+@router.patch("/journeys/{journey_id}/guides/{guide_id}/review")
+async def review_discrepancy(
+    journey_id: str,
+    guide_id: str,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Review a discrepancy: confirm_return or mark_valid."""
+    decision = body.get("decision")
+    if decision not in ("confirm_return", "mark_valid"):
+        raise HTTPException(status_code=400, detail="Decisión inválida. Use 'confirm_return' o 'mark_valid'.")
+
+    # Find package by guide_id (order_reference_id or tracking_number) within the journey
+    pkg = await db.packages.find_one(
+        {"journey_id": journey_id, "$or": [{"order_reference_id": guide_id}, {"tracking_number": guide_id}, {"id": guide_id}]},
+        {"_id": 0},
+    )
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Guía no encontrada")
+
+    now = datetime.now(timezone.utc).isoformat()
+    previous_status = pkg.get("status", "pending")
+    reviewer = user.get("name") or user.get("email", "unknown")
+
+    update_fields = {
+        "manual_review": {
+            "required": False,
+            "status": "reviewed",
+            "reviewed_by": reviewer,
+            "reviewed_at": now,
+            "decision": decision,
+            "previous_status": previous_status,
+        }
+    }
+
+    if decision == "confirm_return":
+        update_fields["status"] = "returned"
+        update_fields["manual_review"]["new_status"] = "returned"
+    else:
+        update_fields["manual_review"]["new_status"] = previous_status
+        # Clear discrepancy flag
+        update_fields["discrepancy"] = {
+            "detected": False,
+            "type": None,
+            "tracking_says": pkg.get("discrepancy", {}).get("tracking_says"),
+            "evidence_says": pkg.get("discrepancy", {}).get("evidence_says"),
+            "kosmo_internal_says": None,
+            "recommended_status": None,
+            "resolved_at": now,
+        }
+
+    await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
+
+    # Recalculate journey counts if status changed
+    if decision == "confirm_return":
+        delivered = await db.packages.count_documents({"journey_id": journey_id, "status": "delivered"})
+        failed = await db.packages.count_documents({"journey_id": journey_id, "status": {"$in": ["failed", "cancelled"]}})
+        returned = await db.packages.count_documents({"journey_id": journey_id, "status": "returned"})
+        await db.journeys.update_one(
+            {"id": journey_id},
+            {"$set": {"packages_delivered": delivered, "packages_failed": failed, "packages_returned": returned}},
+        )
+
+    # Log audit event
+    await log_audit_event(
+        db, user.get("id", "unknown"), user.get("role", "unknown"),
+        action="discrepancy_review",
+        entity_type="package",
+        entity_id=pkg["id"],
+        details=f"Decision: {decision}, Previous: {previous_status}, Guide: {guide_id}",
+    )
+
+    return {
+        "success": True,
+        "decision": decision,
+        "package_id": pkg["id"],
+        "new_status": update_fields.get("status", previous_status),
+        "reviewed_by": reviewer,
+    }
