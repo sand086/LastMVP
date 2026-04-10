@@ -1,5 +1,41 @@
 # LastMile OS - Changelog
 
+## 2026-04-10 — PDF Export Redesign (Multi-page)
+
+### Problem
+- Old PDF: Single html2canvas screenshot, compressing everything to one illegible page
+- Only captured the active tab, losing 5 of 6 sections
+
+### Solution
+- Created `/app/frontend/src/lib/pdfReportGenerator.js` (new 430-line module)
+- Uses jsPDF + jspdf-autotable for native PDF rendering (no DOM screenshots for tables)
+- Charts captured via html2canvas on individual chart elements only
+
+### PDF Structure (8 pages)
+1. **Cover**: Header bar + AI cards + 4 KPI blocks (24pt values) + Charts (combo + donut)
+2. **Proveedores**: Full table with autoTable (sortable, formatted)
+3. **Drivers**: Full table with SLA highlight
+4. **Incidencias**: Breakdown by type
+5. **Intentos**: Distribution bars + retry cause bars
+6. **Evidencias**: Score global, by type, by provider with progress bars
+7. **SLA**: Consolidated score, brackets, by-provider table, top drivers
+8. **Analisis IA**: Cards + paginated narrative text
+
+### Technical Details
+- Added `jspdf-autotable@5.0.7` dependency
+- Uses `applyPlugin(jsPDF)` for v5.x compatibility
+- Page numbers "Pagina X de Y" in footer
+- Color-coded KPI blocks matching dashboard
+- Minimum 9pt text for readability
+
+### Test Results
+- Backend: 10/10 tests passed (100%)
+- Frontend: All features verified (100%)
+- Bug found and fixed: `applyPlugin(jsPDF)` required for jspdf-autotable 5.x
+- Test report: `/app/test_reports/iteration_39.json`
+
+---
+
 ## 2026-04-10 — Code Quality Corrections Applied
 
 ### Security Fixes
