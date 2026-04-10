@@ -142,6 +142,7 @@ class IncidentBase(BaseModel):
     tracking_number: Optional[str] = None
     action_taken: Optional[str] = None
     imputability: Optional[str] = "Por definir"
+    source: Optional[str] = "incidencias"
 
 class IncidentCreate(IncidentBase):
     pass
@@ -149,6 +150,7 @@ class IncidentCreate(IncidentBase):
 class IncidentResponse(IncidentBase):
     id: str
     status: str  # open, resolved
+    source: Optional[str] = "incidencias"
     created_at: str
     resolved_at: Optional[str] = None
 

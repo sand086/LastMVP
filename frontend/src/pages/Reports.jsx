@@ -231,31 +231,19 @@ const ChartsSection = ({ reportData, journeyChartData }) => {
 };
 
 /* ─── AI Insights Cards ─── */
-const AiInsightsBar = ({ narrative, generating, stale, onRegenerate }) => {
-    if (!narrative && !generating) return null;
+const CARD_COLORS = {
+    alerta: { bg: '#FEF2F2', border: 'rgba(226,75,74,0.15)', text: '#E24B4A', icon: AlertTriangle },
+    tendencia: { bg: '#EFF6FF', border: 'rgba(37,99,235,0.15)', text: '#2563EB', icon: TrendingUp },
+    logro: { bg: '#F0FDF4', border: 'rgba(22,163,74,0.15)', text: '#16A34A', icon: CheckCircle2 },
+};
 
-    const parseInsights = (text) => {
-        if (!text) return [];
-        const lines = text.split('\n').filter(l => l.trim());
-        const categories = ['Insight IA', 'Alerta SLA', 'Tendencia', 'Anomalia'];
-        const insights = [];
-        let current = { category: 'Insight IA', text: '' };
-        for (const line of lines) {
-            const cleaned = line.replace(/\*\*/g, '').trim();
-            if (cleaned.length < 10) continue;
-            if (insights.length < 3) {
-                insights.push({ category: categories[insights.length % categories.length], text: cleaned.slice(0, 200) });
-            }
-        }
-        return insights.length > 0 ? insights : [{ category: 'Insight IA', text: text.slice(0, 300) }];
-    };
-
-    const insights = parseInsights(narrative);
+const AiInsightsBar = ({ narrative, cards, generating, stale, onRegenerate }) => {
+    if (!narrative && !cards?.length && !generating) return null;
 
     return (
-        <div data-testid="ai-insights-bar">
+        <div data-testid="ai-insights-bar" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {stale && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: T.radiusSm, background: T.amberLt, marginBottom: 8, fontSize: 12, color: T.amber }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: T.radiusSm, background: T.amberLt, fontSize: 12, color: T.amber }}>
                     <AlertTriangle size={14} />
                     Los filtros cambiaron desde la ultima generacion.
                     <button onClick={onRegenerate} style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 4, border: `1px solid ${T.amber}`, background: 'transparent', color: T.amber, fontSize: 11, fontWeight: 600, cursor: 'pointer' }} data-testid="regenerate-ai-btn">Regenerar IA</button>
@@ -266,14 +254,42 @@ const AiInsightsBar = ({ narrative, generating, stale, onRegenerate }) => {
                     <Loader2 size={16} className="animate-spin" /> Generando analisis inteligente...
                 </div>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(insights.length, 3)}, 1fr)`, gap: 12 }}>
-                    {insights.map((ins, i) => (
-                        <div key={`insight-${i}`} style={{ padding: '14px 16px', borderRadius: T.radius, background: T.purpleLt, border: `1px solid rgba(60,52,137,0.12)` }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: T.purple, display: 'block', marginBottom: 6 }}>{ins.category}</span>
-                            <p style={{ fontSize: 13, lineHeight: 1.5, color: T.textPri, margin: 0 }}>{ins.text}</p>
+                <>
+                    {/* Dynamic Cards */}
+                    {cards && cards.length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(cards.length, 3)}, 1fr)`, gap: 12 }}>
+                            {cards.map((card, i) => {
+                                const ct = CARD_COLORS[card.tipo] || CARD_COLORS.tendencia;
+                                const CardIcon = ct.icon;
+                                return (
+                                    <div key={`card-${i}`} style={{ padding: '16px 18px', borderRadius: T.radius, background: ct.bg, border: `1px solid ${ct.border}` }} data-testid={`ai-card-${card.tipo}`}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                                            <CardIcon size={14} color={ct.text} />
+                                            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: ct.text }}>{card.tipo}</span>
+                                            {card.metrica && <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 700, fontFamily: "'DM Mono', monospace", color: ct.text }}>{card.metrica}</span>}
+                                        </div>
+                                        <p style={{ fontSize: 13, fontWeight: 600, color: T.textPri, margin: '0 0 4px' }}>{card.titulo}</p>
+                                        <p style={{ fontSize: 12, lineHeight: 1.5, color: T.textSec, margin: 0 }}>{card.cuerpo}</p>
+                                        {card.variacion && card.variacion !== 'N/A' && (
+                                            <span style={{ display: 'inline-block', marginTop: 6, fontSize: 11, fontWeight: 600, color: card.variacion?.startsWith('+') ? T.green : T.coral, fontFamily: "'DM Mono', monospace" }}>{card.variacion}</span>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
-                    ))}
-                </div>
+                    )}
+                    {/* Markdown Report */}
+                    {narrative && (
+                        <div style={{ padding: '20px 24px', borderRadius: T.radius, background: T.surface, border: `1px solid ${T.borderSolid}` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                                <Sparkles size={16} color={T.purple} />
+                                <span style={{ fontSize: 14, fontWeight: 600, color: T.textPri }}>Reporte ejecutivo IA</span>
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: T.purpleLt, color: T.purple, fontWeight: 500 }}>Auto-generado</span>
+                            </div>
+                            <div style={{ fontSize: 13, lineHeight: 1.7, color: T.textSec }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(narrative.replace(/## /g, '<h3 style="font-size:15px;font-weight:700;color:#1A1916;margin:18px 0 8px">').replace(/\n/g, '<br/>').replace(/\*\*(.+?)\*\*/g, '<strong style="color:#1A1916">$1</strong>')) }} />
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );
@@ -652,6 +668,7 @@ const Reports = () => {
     const [attemptsData, setAttemptsData] = useState(null);
     const [slaData, setSlaData] = useState(null);
     const [aiNarrative, setAiNarrative] = useState(null);
+    const [aiCards, setAiCards] = useState([]);
     const [aiStale, setAiStale] = useState(false);
     const [journeyChartData, setJourneyChartData] = useState([]);
 
@@ -740,12 +757,14 @@ const Reports = () => {
         setAiStale(false);
         try {
             const res = await generateAiReport({
-                period, date_from: effectiveDates.from, date_to: effectiveDates.to,
-                client_id: clientId || undefined, provider_id: providerId || undefined, sections,
+                date_from: effectiveDates.from, date_to: effectiveDates.to,
+                client_id: clientId || undefined, provider_id: providerId || undefined,
             });
-            setAiNarrative(res.data.narrative);
+            setAiNarrative(res.data.narrative || '');
+            setAiCards(res.data.cards || []);
         } catch {
             setAiNarrative('Error al generar el reporte con IA.');
+            setAiCards([]);
         } finally {
             setGenerating(false);
         }
@@ -958,7 +977,7 @@ const Reports = () => {
             <div id="reports-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
                 {/* ─── AI INSIGHTS ─── */}
-                <AiInsightsBar narrative={aiNarrative} generating={generating} stale={aiStale} onRegenerate={handleGenerateAI} />
+                <AiInsightsBar narrative={aiNarrative} cards={aiCards} generating={generating} stale={aiStale} onRegenerate={handleGenerateAI} />
 
                 {/* ─── KPI STRIP ─── */}
                 {loading ? (

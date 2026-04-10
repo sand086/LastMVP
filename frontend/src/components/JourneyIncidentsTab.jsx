@@ -72,6 +72,7 @@ export const JourneyIncidentsTab = ({
                                 <tr>
                                     <IncSortHeader field="occurred_at">Hora</IncSortHeader>
                                     <IncSortHeader field="incident_type">Tipo</IncSortHeader>
+                                    <IncSortHeader field="tracking_number">No. Guia</IncSortHeader>
                                     <IncSortHeader field="severity">Severidad</IncSortHeader>
                                     <IncSortHeader field="imputability">Imputabilidad</IncSortHeader>
                                     <th>Descripcion</th>
@@ -86,7 +87,15 @@ export const JourneyIncidentsTab = ({
                                         <td className="font-mono text-sm">
                                             {formatTime(incident.occurred_at)}
                                         </td>
-                                        <td>{incident.incident_type}</td>
+                                        <td>
+                                            <div className="flex items-center gap-1.5">
+                                                {incident.incident_type}
+                                                {incident.source === 'guias' && (
+                                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase tracking-wide whitespace-nowrap" data-testid={`source-badge-${incident.id}`}>Desde Guias</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="font-mono text-xs text-slate-600">{incident.tracking_number || '—'}</td>
                                         <td>
                                             <span className={`status-badge ${getSeverityColor(incident.severity)}`}>
                                                 {incident.severity}

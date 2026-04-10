@@ -17,7 +17,7 @@ import { Checkbox } from './ui/checkbox';
 import {
     RefreshCw, Search, Loader2, ChevronDown, ChevronRight, Camera,
     ExternalLink, Check, X, AlertTriangle, Circle, CheckCircle2,
-    XCircle, Eye, ShieldAlert, ShieldCheck, BarChart3,
+    XCircle, Eye, ShieldAlert, ShieldCheck, BarChart3, FileWarning,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import EvidenceCarousel from './EvidenceCarousel';
@@ -150,7 +150,7 @@ const getErrorSeverity = (displayError, iaErrorsRaw, iaSeverity) => {
 };
 
 /* ─── Main component ─── */
-const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
+const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) => {
     const { hasRole } = useAuth();
     const canReview = hasRole(['coordinator', 'developer']);
     const isReadOnly = hasRole(['agent', 'proveedor']);
@@ -343,27 +343,30 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
             const isApproval = reviewData.action === 'approved';
             await reviewPackageWithNote(pkg.id, {
                 manually_reviewed: isApproval,
-                manually_reviewed_note: isApproval
-                    ? `${reviewData.reason_category}: ${reviewData.reason_detail || ''}`
-                    : `${reviewData.reason_category}: ${reviewData.reason_detail || ''}`,
+                manually_reviewed_note: reviewData.reason_detail
+                    ? `${reviewData.reason_category}: ${reviewData.reason_detail}`
+                    : reviewData.reason_category || (isApproval ? 'Aprobado por criterios' : 'Rechazado'),
                 adjusted_score: reviewData.adjusted_score,
                 ai_evaluation_incorrect: reviewData.ai_evaluation_incorrect,
+                delivery_type: reviewData.delivery_type,
+                criteria_evaluation: reviewData.criteria_evaluation,
+                discrepancies: reviewData.discrepancies,
             });
             setReviewOverrides(prev => ({
                 ...prev,
                 [pkg.id]: {
                     manually_reviewed: isApproval,
                     rejection_reason: isApproval ? null : `${reviewData.reason_category}: ${reviewData.reason_detail || ''}`,
-                    reviewed_by: 'Tú',
+                    reviewed_by: 'Tu',
                 },
             }));
-            toast.success(isApproval ? 'Guía aprobada' : 'Guía rechazada');
+            toast.success(isApproval ? 'Guia aprobada' : 'Guia rechazada');
             setReviewModalOpen(false);
             setReviewModalPkg(null);
             advanceToNext(pkg.id);
             onRefreshJourney?.();
         } catch {
-            toast.error('Error al guardar revisión');
+            toast.error('Error al guardar revision');
         } finally {
             setSavingReview(null);
         }
@@ -861,6 +864,17 @@ const GuiasTab = ({ journey, packages, onRefreshJourney }) => {
                                                                             </div>
                                                                         )}
                                                                     </>
+                                                                )}
+
+                                                                {/* Inline incident registration button */}
+                                                                {canReview && onRegisterIncident && (
+                                                                    <div className="mt-3 pt-3 border-t border-slate-200">
+                                                                        <Button size="sm" variant="outline" className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50 w-full justify-center"
+                                                                                onClick={() => onRegisterIncident(pkg)}
+                                                                                data-testid={`register-incident-btn-${pkg.id}`}>
+                                                                            <FileWarning className="w-3 h-3 mr-1" /> Registrar Incidencia
+                                                                        </Button>
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                         </div>

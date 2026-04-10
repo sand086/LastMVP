@@ -716,6 +716,21 @@ const JourneyDetail = () => {
         setSelectedPackages(newSelection);
     };
 
+    // Handler for inline incident registration from GuiasTab
+    const handleRegisterIncidentFromGuias = (pkg) => {
+        setIncidentForm({
+            occurred_at: new Date().toISOString().slice(0, 16),
+            incident_type: 'Evidencia Insuficiente',
+            description: `Incidencia registrada desde Guias para paquete ${pkg.tracking_number || pkg.order_reference_id || ''}`,
+            severity: 'Media',
+            tracking_number: pkg.tracking_number || pkg.order_reference_id || '',
+            action_taken: '',
+            source: 'guias',
+        });
+        setEditingIncident(null);
+        setShowIncidentModal(true);
+    };
+
     const fetchJourney = async () => {
         try {
             const res = await getJourney(id);
@@ -898,6 +913,7 @@ const JourneyDetail = () => {
                 await createIncident({
                     ...incidentForm,
                     journey_id: id,
+                    source: incidentForm.source || 'incidencias',
                 });
                 toast.success('Incidencia registrada');
             }
@@ -1223,7 +1239,7 @@ const JourneyDetail = () => {
 
                 {/* Tab: Guías */}
                 <TabsContent value="guias" className="space-y-6" data-testid="tab-guias-content">
-                    <GuiasTab journey={journey} packages={journey.packages || []} onRefreshJourney={fetchJourney} />
+                    <GuiasTab journey={journey} packages={journey.packages || []} onRefreshJourney={fetchJourney} onRegisterIncident={handleRegisterIncidentFromGuias} />
                 </TabsContent>
             </Tabs>
 

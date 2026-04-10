@@ -1267,18 +1267,17 @@ async def generate_ai_report(
     payload: dict,
     user: dict = Depends(get_current_user),
 ):
-    """Generate AI narrative report for the selected period and sections."""
-    period = payload.get("period", "7d")
+    """Generate AI narrative report v2.0 — structured JSON input, 2-block output (cards + markdown)."""
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
     client_id = payload.get("client_id")
     provider_id = payload.get("provider_id")
-    sections = payload.get("sections", ["providers", "drivers", "incidents", "quality"])
 
-    # Resolve dates from period if not provided
     if not date_from or not date_to:
-        from lumi import _resolve_period
-        date_from, date_to, _ = _resolve_period(period)
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        date_to = now.strftime("%Y-%m-%d")
+        date_from = (now - timedelta(days=6)).strftime("%Y-%m-%d")
 
     j_query = {"date": {"$gte": date_from, "$lte": date_to}}
     if client_id:
@@ -1289,65 +1288,140 @@ async def generate_ai_report(
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     if not journeys:
-        return {"narrative": "No hay datos de rutas para el período seleccionado.", "period": f"{date_from} — {date_to}"}
+        return {"narrative": "No hay datos de rutas para el periodo seleccionado.", "cards": [], "period": f"{date_from} — {date_to}"}
 
     journey_ids = [j["id"] for j in journeys]
     providers_map = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    clients_map = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
     incidents = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
 
+    # Build structured data for AI
     total_pkg = sum(j.get("packages_total", 0) for j in journeys)
     total_delivered = sum(j.get("packages_delivered", 0) for j in journeys)
     total_failed = sum(j.get("packages_failed", 0) for j in journeys)
     total_km = sum((j.get("close_data") or {}).get("km_traveled", 0) for j in journeys)
     delivery_rate = round(total_delivered / total_pkg * 100, 1) if total_pkg > 0 else 0
 
-    data_block = f"""PERÍODO: {date_from} a {date_to}
-RESUMEN: {len(journeys)} rutas, {total_pkg} paquetes, {total_delivered} entregados, {total_failed} fallidos
-TASA DE ENTREGA: {delivery_rate}%
-KM TOTALES: {total_km}
-INCIDENCIAS: {len(incidents)}
+    # Provider breakdown
+    prov_data = {}
+    for j in journeys:
+        pn = providers_map.get(j.get("provider_id", ""), "Desconocido")
+        if pn not in prov_data:
+            prov_data[pn] = {"routes": 0, "delivered": 0, "failed": 0, "total": 0, "km": 0, "days": set()}
+        prov_data[pn]["routes"] += 1
+        prov_data[pn]["delivered"] += j.get("packages_delivered", 0)
+        prov_data[pn]["failed"] += j.get("packages_failed", 0)
+        prov_data[pn]["total"] += j.get("packages_total", 0)
+        prov_data[pn]["km"] += (j.get("close_data") or {}).get("km_traveled", 0)
+        prov_data[pn]["days"].add(j.get("date", "")[:10])
 
-SECCIONES SOLICITADAS: {', '.join(sections)}"""
+    prov_summary = []
+    for pn, pd_val in prov_data.items():
+        r = round(pd_val["delivered"] / pd_val["total"] * 100, 1) if pd_val["total"] > 0 else 0
+        prov_summary.append({"name": pn, "routes": pd_val["routes"], "days": len(pd_val["days"]), "delivered": pd_val["delivered"], "failed": pd_val["failed"], "total": pd_val["total"], "rate": r, "km": pd_val["km"]})
 
-    if "providers" in sections:
-        prov_data = {}
-        for j in journeys:
-            pn = providers_map.get(j.get("provider_id", ""), "Desconocido")
-            if pn not in prov_data:
-                prov_data[pn] = {"routes": 0, "delivered": 0, "total": 0}
-            prov_data[pn]["routes"] += 1
-            prov_data[pn]["delivered"] += j.get("packages_delivered", 0)
-            prov_data[pn]["total"] += j.get("packages_total", 0)
-        data_block += "\n\nPROVEEDORES:\n"
-        for pn, pd in prov_data.items():
-            r = round(pd["delivered"] / pd["total"] * 100, 1) if pd["total"] > 0 else 0
-            data_block += f"- {pn}: {pd['routes']} rutas, {pd['delivered']}/{pd['total']} ({r}%)\n"
+    # Incidents breakdown
+    inc_types = {}
+    inc_severity = {"Alta": 0, "Media": 0, "Baja": 0}
+    for inc in incidents:
+        t = inc.get("incident_type", "Otro")
+        inc_types[t] = inc_types.get(t, 0) + 1
+        sev = inc.get("severity", "Media")
+        inc_severity[sev] = inc_severity.get(sev, 0) + 1
 
-    if "incidents" in sections:
-        inc_types = {}
-        for inc in incidents:
-            t = inc.get("incident_type", "Otro")
-            inc_types[t] = inc_types.get(t, 0) + 1
-        data_block += f"\nINCIDENCIAS POR TIPO: {inc_types}\n"
+    # SLA config
+    sla_config = None
+    try:
+        sla_doc = await db.config.find_one({"key": "sla_config"}, {"_id": 0})
+        if sla_doc:
+            sla_config = sla_doc.get("value", {})
+    except Exception:
+        pass
+
+    structured_input = {
+        "periodo": {"desde": date_from, "hasta": date_to},
+        "resumen": {
+            "total_rutas": len(journeys),
+            "total_paquetes": total_pkg,
+            "entregados": total_delivered,
+            "fallidos": total_failed,
+            "tasa_entrega": delivery_rate,
+            "km_totales": total_km,
+            "total_incidencias": len(incidents),
+        },
+        "proveedores": prov_summary,
+        "incidencias_por_tipo": inc_types,
+        "incidencias_por_severidad": inc_severity,
+        "sla_target": sla_config.get("target", 75) if sla_config else 75,
+    }
 
     llm_key = os.environ.get("EMERGENT_LLM_KEY")
     if not llm_key:
-        return {"narrative": "Clave de IA no configurada.", "period": f"{date_from} — {date_to}"}
+        return {"narrative": "Clave de IA no configurada.", "cards": [], "period": f"{date_from} — {date_to}"}
+
+    system_prompt = """Eres el motor de BI de LastMile OS — plataforma de gestion de entregas de ultima milla.
+Tu rol es generar un reporte ejecutivo accionable para coordinadores de operaciones logisticas.
+
+REGLAS ANTI-ALUCINACION:
+- Solo usa datos del JSON proporcionado. Si un campo no existe, escribe "Sin datos".
+- No inventes proveedores, drivers ni cifras.
+- Los porcentajes deben coincidir con los datos exactos.
+- No menciones tecnologias internas, APIs ni bases de datos.
+
+FORMATO DE RESPUESTA — OBLIGATORIO usar exactamente este formato:
+
+---CARDS---
+[
+  {"tipo": "alerta|tendencia|logro", "titulo": "Titulo corto (max 60 chars)", "cuerpo": "Detalle accionable en 1-2 lineas (max 140 chars)", "metrica": "Cifra clave", "variacion": "+X.X%|-X.X%|N/A"}
+]
+---CARDS---
+
+Genera exactamente 3 cards. Tipos:
+- alerta: Riesgo operativo o SLA en peligro (color rojo)
+- tendencia: Patron emergente importante (color azul)
+- logro: Meta cumplida o mejora notable (color verde)
+
+Despues de las cards, genera el reporte en Markdown con estas secciones:
+## Resumen Ejecutivo
+## Desempeno por Proveedor
+## Analisis de Incidencias
+## Cumplimiento SLA
+## Riesgos y Alertas
+## Recomendaciones
+
+Usa **negritas** para cifras clave. Maximo 600 palabras total."""
 
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
+        import json as json_module
         chat = LlmChat(
             api_key=llm_key,
             session_id=f"report-ai-{uuid.uuid4()}",
-            system_message="Eres un analista de operaciones logísticas de última milla. Genera un reporte ejecutivo narrativo en español con insights accionables. Usa datos duros. Máximo 500 palabras. Formato con **negritas** para datos clave.",
+            system_message=system_prompt,
         ).with_model("anthropic", "claude-sonnet-4-5-20250929")
 
-        msg = UserMessage(text=f"Genera un reporte ejecutivo para estos datos:\n\n{data_block}")
-        narrative = await chat.send_message(msg)
-        return {"narrative": narrative, "period": f"{date_from} — {date_to}"}
+        msg = UserMessage(text=f"Genera el reporte ejecutivo para estos datos:\n\n{json_module.dumps(structured_input, ensure_ascii=False, indent=2)}")
+        raw_response = await chat.send_message(msg)
+
+        # Parse cards from response
+        cards = []
+        narrative = raw_response
+        if "---CARDS---" in raw_response:
+            parts = raw_response.split("---CARDS---")
+            if len(parts) >= 3:
+                try:
+                    cards_json = parts[1].strip()
+                    cards = json_module.loads(cards_json)
+                except Exception:
+                    cards = []
+                narrative = parts[2].strip()
+            elif len(parts) == 2:
+                narrative = parts[1].strip()
+
+        return {"narrative": narrative, "cards": cards, "period": f"{date_from} — {date_to}"}
     except Exception as e:
         logger.error(f"AI report error: {e}")
-        return {"narrative": "Error al generar el reporte con IA. Intenta de nuevo.", "period": f"{date_from} — {date_to}"}
+        return {"narrative": "Error al generar el reporte con IA. Intenta de nuevo.", "cards": [], "period": f"{date_from} — {date_to}"}
 
 
 

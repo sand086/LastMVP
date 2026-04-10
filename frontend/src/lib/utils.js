@@ -216,6 +216,7 @@ export const INCIDENT_TYPES = [
     'Tiempo excesivo por entrega',
     'Driver sin movimiento',
     'Evidencia incorrecta',
+    'Evidencia Insuficiente',
     'Paquete dañado',
     'Destinatario ausente',
     'Dirección no encontrada',

@@ -381,6 +381,7 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
         "tracking_number": data.tracking_number,
         "action_taken": data.action_taken,
         "imputability": data.imputability or "Por definir",
+        "source": getattr(data, "source", None) or "incidencias",
         "status": "open",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user["id"],
