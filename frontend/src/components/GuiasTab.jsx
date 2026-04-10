@@ -12,142 +12,19 @@ import {
 } from '../lib/api';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
 import { Checkbox } from './ui/checkbox';
 import {
     RefreshCw, Search, Loader2, ChevronDown, ChevronRight, Camera,
-    ExternalLink, Check, X, AlertTriangle, Circle, CheckCircle2,
-    XCircle, Eye, ShieldAlert, ShieldCheck, BarChart3, FileWarning,
+    ExternalLink, Eye, ShieldAlert, Check, X, CheckCircle2, XCircle, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import EvidenceCarousel from './EvidenceCarousel';
 import ReviewModal from './ReviewModal';
-
-/* ─── Segment filters ─── */
-const SEGMENT_FILTERS = [
-    { key: 'all', label: 'Todas' },
-    { key: 'alert', label: 'Con alerta' },
-    { key: 'discrepancy', label: 'Discrepancia' },
-    { key: 'no_evidence', label: 'Sin evidencia' },
-    { key: 'pending_review', label: 'Pendiente revisión' },
-];
-
-/* ─── Score circle ─── */
-const ScoreCircle = ({ score }) => {
-    if (score == null) return <span className="text-xs text-slate-400">—</span>;
-    const color = score >= 90 ? 'text-emerald-600 border-emerald-400' :
-                  score >= 60 ? 'text-amber-600 border-amber-400' :
-                  'text-red-600 border-red-400';
-    return (
-        <span className={`inline-flex items-center justify-center w-9 h-9 rounded-full border-2 text-xs font-bold font-mono ${color}`}
-              data-testid="score-circle">
-            {score}
-        </span>
-    );
-};
-
-/* ─── Confidence bar ─── */
-const ConfidenceBar = ({ score }) => {
-    if (score == null) return <span className="text-xs text-slate-400">—</span>;
-    const color = score >= 70 ? '#10B981' : score >= 30 ? '#D97706' : '#EF4444';
-    const textCls = score >= 70 ? 'text-emerald-600' : score >= 30 ? 'text-amber-600' : 'text-red-600';
-    return (
-        <div className="flex items-center gap-2 min-w-[80px]" data-testid="confidence-bar">
-            <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden">
-                <div style={{ width: `${score}%`, background: color }} className="h-full rounded-full transition-all" />
-            </div>
-            <span className={`text-xs font-mono font-bold ${textCls}`}>{score}%</span>
-        </div>
-    );
-};
-
-/* ─── Status pill (with discrepancy support) ─── */
-const StatusPill = ({ status, discrepancy }) => {
-    if (discrepancy?.detected) {
-        return (
-            <span className="text-xs font-medium px-2.5 py-0.5 rounded-full border border-amber-400 bg-amber-50 text-amber-700 inline-flex items-center gap-1"
-                  data-testid="status-discrepancy">
-                <AlertTriangle className="w-3 h-3" /> Discrepancia
-            </span>
-        );
-    }
-    const map = {
-        delivered: { label: 'Exitosa', cls: 'bg-emerald-100 text-emerald-700' },
-        failed: { label: 'Fallida', cls: 'bg-red-100 text-red-700' },
-        returned: { label: 'Devuelta', cls: 'bg-slate-200 text-slate-700' },
-        pending: { label: 'Pendiente', cls: 'bg-slate-100 text-slate-500' },
-    };
-    const { label, cls } = map[status] || map.pending;
-    return <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${cls}`}>{label}</span>;
-};
-
-/* ─── Review indicator ─── */
-const ReviewIndicator = ({ pkg }) => {
-    if (pkg.manually_reviewed) {
-        return <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" data-testid={`review-approved-${pkg.id}`} />;
-    }
-    if (pkg.rejection_reason) {
-        return <XCircle className="w-4 h-4 text-red-500 mx-auto" data-testid={`review-rejected-${pkg.id}`} />;
-    }
-    if (pkg.manual_review?.decision === 'confirm_return') {
-        return <XCircle className="w-4 h-4 text-red-500 mx-auto" data-testid={`review-return-${pkg.id}`} />;
-    }
-    if (pkg.manual_review?.decision === 'mark_valid') {
-        return <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" data-testid={`review-valid-${pkg.id}`} />;
-    }
-    return <Circle className="w-4 h-4 text-slate-300 mx-auto" data-testid={`review-pending-${pkg.id}`} />;
-};
-
-/* ─── Severity badge ─── */
-const SeverityBadge = ({ level }) => {
-    if (level === 'critical') {
-        return (
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white uppercase tracking-wide"
-                  data-testid="severity-critical">
-                Crítico
-            </span>
-        );
-    }
-    if (level === 'warning') {
-        return (
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-white uppercase tracking-wide"
-                  data-testid="severity-warning">
-                Alerta
-            </span>
-        );
-    }
-    return null;
-};
-
-/* ─── Get max severity from ia_severity dict ─── */
-const getMaxSeverity = (iaSeverity) => {
-    if (!iaSeverity || typeof iaSeverity !== 'object') return null;
-    const vals = Object.values(iaSeverity);
-    if (vals.includes('critical')) return 'critical';
-    if (vals.includes('warning')) return 'warning';
-    return null;
-};
-
-/* ─── Map display error to severity using raw errors ─── */
-const getErrorSeverity = (displayError, iaErrorsRaw, iaSeverity) => {
-    if (!iaSeverity || !iaErrorsRaw) return null;
-    // Try direct match with raw error keys
-    for (const rawKey of iaErrorsRaw) {
-        if (iaSeverity[rawKey]) {
-            // Fuzzy match: check if the display error contains keywords from the raw key
-            const rawWords = rawKey.replace(/_/g, ' ').toLowerCase();
-            const displayWords = displayError.toLowerCase();
-            if (displayWords.includes(rawWords) || rawWords.includes(displayWords.slice(0, 10))) {
-                return iaSeverity[rawKey];
-            }
-        }
-    }
-    // Fallback: use max severity if there are raw errors
-    if (iaErrorsRaw.length > 0 && Object.keys(iaSeverity).length > 0) {
-        return getMaxSeverity(iaSeverity);
-    }
-    return null;
-};
+import {
+    ScoreCircle, ConfidenceBar, StatusPill, ReviewIndicator,
+    SeverityBadge, getMaxSeverity, KpiCard, SEGMENT_FILTERS,
+} from './guias/GuiasHelpers';
+import GuiasPackageDetail from './guias/GuiasPackageDetail';
 
 /* ─── Main component ─── */
 const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) => {
@@ -186,7 +63,6 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
 
     useEffect(() => { setReviewOverrides({}); setSelectedPkgs({}); }, [packages]);
 
-    // Polling for AI eval status
     const startPolling = useCallback(() => {
         if (pollingRef.current) return;
         pollingRef.current = setInterval(async () => {
@@ -212,10 +88,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
 
     useEffect(() => {
         return () => {
-            if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-                pollingRef.current = null;
-            }
+            if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
         };
     }, []);
 
@@ -226,7 +99,6 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
         });
     }, [packages, reviewOverrides]);
 
-    /* ─── KPIs including discrepancy metrics ─── */
     const kpis = useMemo(() => {
         const total = mergedPackages.length;
         const withScore = mergedPackages.filter(p => p.ai_score != null);
@@ -248,7 +120,6 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
         return Object.entries(errorMap).sort((a, b) => b[1] - a[1]);
     }, [mergedPackages]);
 
-    /* ─── Segment counts (memoized) ─── */
     const segmentCounts = useMemo(() => ({
         all: mergedPackages.length,
         alert: mergedPackages.filter(p => (p.ai_errors || []).length > 0).length,
@@ -264,16 +135,13 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
         if (segment === 'no_evidence') list = list.filter(p => (p.photos_count || 0) === 0 && !(p.kosmo_proof_urls?.length));
         if (segment === 'pending_review') list = list.filter(p => !p.manually_reviewed && !p.rejection_reason && !p.manual_review?.decision);
         list.sort((a, b) => {
-            // Discrepancies first
             const aDisc = a.discrepancy?.detected ? 1 : 0;
             const bDisc = b.discrepancy?.detected ? 1 : 0;
             if (bDisc !== aDisc) return bDisc - aDisc;
             const aErr = (a.ai_errors || []).length;
             const bErr = (b.ai_errors || []).length;
             if (bErr !== aErr) return bErr - aErr;
-            const aGuide = a.order_reference_id || a.tracking_number || '';
-            const bGuide = b.order_reference_id || b.tracking_number || '';
-            return aGuide.localeCompare(bGuide);
+            return (a.order_reference_id || a.tracking_number || '').localeCompare(b.order_reference_id || b.tracking_number || '');
         });
         return list;
     }, [mergedPackages, segment]);
@@ -464,10 +332,6 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
         }
     };
 
-    const togglePkg = (pkgId) => {
-        setSelectedPkgs(prev => ({ ...prev, [pkgId]: !prev[pkgId] }));
-    };
-
     const handleBulkSave = async () => {
         if (!bulkStatus || selectedIds.length === 0) return;
         setBulkSaving(true);
@@ -506,7 +370,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                 )}
             </div>
 
-            {/* KPI Cards — 6 cards */}
+            {/* KPI Cards */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard label="Score promedio" value={`${kpis.avgScore}%`} color={kpis.avgScore >= 90 ? 'emerald' : kpis.avgScore >= 60 ? 'amber' : 'red'} testId="kpi-avg-score" />
                 <KpiCard label="Completos" value={`${kpis.complete}/${kpis.totalScored}`} color="emerald" testId="kpi-complete" />
@@ -570,9 +434,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                             }`}
                             onClick={() => setSegment(f.key)}
                             data-testid={`segment-${f.key}`}>
-                            {f.label}
-                            {f.key !== 'all' && <span className="ml-1 opacity-70">({count})</span>}
-                            {f.key === 'all' && <span className="ml-1 opacity-70">({count})</span>}
+                            {f.label} <span className="ml-1 opacity-70">({count})</span>
                         </button>
                     );
                 })}
@@ -625,7 +487,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
 
                                                 {canReview && (
                                                     <td className="text-center" onClick={e => e.stopPropagation()}>
-                                                        <Checkbox checked={!!selectedPkgs[pkg.id]} onCheckedChange={() => togglePkg(pkg.id)} data-testid={`select-pkg-${pkg.id}`} />
+                                                        <Checkbox checked={!!selectedPkgs[pkg.id]} onCheckedChange={() => setSelectedPkgs(prev => ({ ...prev, [pkg.id]: !prev[pkg.id] }))} data-testid={`select-pkg-${pkg.id}`} />
                                                     </td>
                                                 )}
 
@@ -693,191 +555,30 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                                                 </td>
                                             </tr>
 
-                                            {/* ─── Expanded Detail Row ─── */}
+                                            {/* Expanded Detail Row */}
                                             {isExpanded && (
                                                 <tr data-testid={`guia-detail-${pkg.id}`}>
-                                                <td colSpan={canReview ? 12 : 11} className="bg-slate-50 p-0">
-                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
-                                                            {/* Col 1: Evidencias Kosmo */}
-                                                            <div className="space-y-2">
-                                                                <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Evidencias Kosmo</p>
-                                                                {proofUrls.length > 0 ? (
-                                                                    <div className="flex gap-2 flex-wrap">
-                                                                        {proofUrls.slice(0, 4).map((url, i) => (
-                                                                            <button key={`thumb-${i}`}
-                                                                                    className="w-16 h-16 rounded border border-slate-200 overflow-hidden hover:border-blue-400 transition-colors"
-                                                                                    onClick={() => openCarousel(pkg, i)}>
-                                                                                <img src={url} alt={`Foto ${i + 1}`} className="w-full h-full object-cover"
-                                                                                     onError={e => { e.target.src = ''; e.target.className = 'w-full h-full bg-slate-200'; }} />
-                                                                            </button>
-                                                                        ))}
-                                                                        {proofUrls.length > 4 && (
-                                                                            <button className="w-16 h-16 rounded border border-slate-200 bg-slate-100 flex items-center justify-center text-xs text-slate-500"
-                                                                                    onClick={() => openCarousel(pkg, 4)}>+{proofUrls.length - 4}</button>
-                                                                        )}
-                                                                    </div>
-                                                                ) : <p className="text-xs text-slate-400">Sin fotos disponibles</p>}
-                                                                {pkg.delivery_note && <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2">{pkg.delivery_note}</p>}
-                                                                {pkg.kosmo_driver_note && !pkg.delivery_note && <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2">{pkg.kosmo_driver_note}</p>}
-                                                                {(pkg.failure_reason || pkg.failure_reason_note) && (
-                                                                    <div className="bg-red-50 border border-red-200 rounded p-2 space-y-1">
-                                                                        {pkg.failure_reason && <p className="text-xs font-medium text-red-700">Motivo: {pkg.failure_reason.replace(/_/g, ' ')}</p>}
-                                                                        {pkg.failure_reason_note && <p className="text-xs text-red-600 italic">"{pkg.failure_reason_note}"</p>}
-                                                                    </div>
-                                                                )}
-                                                                <div className="text-xs text-slate-400 flex items-center gap-2">
-                                                                    {pkg.kosmo_finished_at && <span>Entrega: {new Date(pkg.kosmo_finished_at).toLocaleString('es-MX', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</span>}
-                                                                    <span>{pkg.photos_count || proofUrls.length} fotos en Kosmo</span>
-                                                                </div>
-                                                            </div>
-
-                                                            {/* Col 2: Discrepancy / Evaluación IA */}
-                                                            <div className="space-y-2">
-                                                                {hasDiscrepancy ? (
-                                                                    <>
-                                                                        <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Discrepancia detectada</p>
-                                                                        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2">
-                                                                            <DiscRow label="Tracking público" value={pkg.discrepancy.tracking_says} />
-                                                                            <DiscRow label="Estatus interno Kosmo" value={pkg.discrepancy.kosmo_internal_says || 'Desconocido'} danger />
-                                                                            <DiscRow label="Evidencias Kosmo" value={`${pkg.photos_count || 0} fotos`} danger={!pkg.photos_count} />
-                                                                            <DiscRow label="Motivo excepción" value={pkg.failure_reason || 'Ninguno'} danger={!pkg.failure_reason} />
-                                                                            <DiscRow label="Score confianza" value={`${pkg.confidence?.score ?? 0}%`} danger={(pkg.confidence?.score ?? 0) < 30} />
-                                                                        </div>
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Evaluación IA</p>
-                                                                        {hasErrors ? (
-                                                                            <div className="bg-red-50 border border-red-200 rounded p-3 space-y-1">
-                                                                                {pkg.ai_errors.map((err, i) => (
-                                                                                    <div key={`err-${i}`} className="flex items-center gap-1.5">
-                                                                                        <X className="w-3 h-3 shrink-0 text-red-600" />
-                                                                                        <span className="text-xs text-red-700 flex-1">{err}</span>
-                                                                                        <SeverityBadge level={getErrorSeverity(err, pkg.ia_errors_raw, pkg.ia_severity)} />
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        ) : pkg.ai_score != null ? (
-                                                                            <div className="bg-emerald-50 border border-emerald-200 rounded p-3">
-                                                                                <p className="text-xs text-emerald-700 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> Sin discrepancias — tracking y evidencias coinciden</p>
-                                                                            </div>
-                                                                        ) : <p className="text-xs text-slate-400">No evaluado por IA</p>}
-                                                                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
-                                                                            {pkg.ai_score != null && <span>Score: <strong className="font-mono">{pkg.ai_score}</strong></span>}
-                                                                            {pkg.ai_confidence != null && <span>Confianza: <strong className="font-mono">{Math.round(pkg.ai_confidence * 100)}%</strong></span>}
-                                                                        </div>
-                                                                    </>
-                                                                )}
-                                                                {pkg.evidence_detail?.ai_observations && (
-                                                                    <p className="text-xs text-slate-500 bg-white border rounded p-2">{pkg.evidence_detail.ai_observations}</p>
-                                                                )}
-                                                            </div>
-
-                                                            {/* Col 3: Revisión Manual */}
-                                                            <div className="space-y-2">
-                                                                <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Revisión manual</p>
-
-                                                                {/* Discrepancy review (new) */}
-                                                                {hasDiscrepancy && !reviewDecision && canReview && (
-                                                                    <div className="border-l-[3px] border-red-500 rounded-r-lg bg-red-50 p-3 space-y-3">
-                                                                        <p className="text-xs font-semibold text-red-700">
-                                                                            Estatus recomendado: {pkg.discrepancy.recommended_status}
-                                                                        </p>
-                                                                        <p className="text-[11px] text-red-600">
-                                                                            El tracking público indica "Entregado" pero no existen evidencias fotográficas ni motivo de excepción registrado.
-                                                                        </p>
-                                                                        <div className="flex gap-2">
-                                                                            <Button size="sm" className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
-                                                                                    onClick={() => handleDiscrepancyReview(pkg, 'confirm_return')}
-                                                                                    disabled={savingReview === pkg.id}
-                                                                                    data-testid={`confirm-return-${pkg.id}`}>
-                                                                                {savingReview === pkg.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-                                                                                Confirmar devolución
-                                                                            </Button>
-                                                                            <Button size="sm" variant="outline" className="h-7 text-xs"
-                                                                                    onClick={() => handleDiscrepancyReview(pkg, 'mark_valid')}
-                                                                                    disabled={savingReview === pkg.id}
-                                                                                    data-testid={`mark-valid-${pkg.id}`}>
-                                                                                Marcar como válido
-                                                                            </Button>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-
-                                                                {/* Discrepancy already reviewed */}
-                                                                {reviewDecision && (
-                                                                    <div className={`rounded p-3 border ${reviewDecision === 'confirm_return' ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
-                                                                        <p className={`text-xs font-medium ${reviewDecision === 'confirm_return' ? 'text-red-700' : 'text-emerald-700'}`}>
-                                                                            {reviewDecision === 'confirm_return' ? 'Devolución confirmada' : 'Marcada como válida'}
-                                                                        </p>
-                                                                        <p className="text-[10px] text-slate-500 mt-0.5">
-                                                                            Por: {pkg.manual_review.reviewed_by} — {pkg.manual_review.reviewed_at ? new Date(pkg.manual_review.reviewed_at).toLocaleString('es-MX') : ''}
-                                                                        </p>
-                                                                    </div>
-                                                                )}
-
-                                                                {/* Standard review (non-discrepancy) */}
-                                                                {!hasDiscrepancy && !reviewDecision && (
-                                                                    <>
-                                                                        {pkg.manually_reviewed && (
-                                                                            <div className="bg-emerald-50 border border-emerald-200 rounded p-3">
-                                                                                <p className="text-xs text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Entrega verificada</p>
-                                                                                <p className="text-[10px] text-slate-500 mt-0.5">Revisado por: {pkg.reviewed_by}</p>
-                                                                            </div>
-                                                                        )}
-                                                                        {pkg.rejection_reason && !pkg.manually_reviewed && (
-                                                                            <div className="bg-red-50 border border-red-200 rounded p-3">
-                                                                                <p className="text-xs text-red-700">Rechazado: {pkg.rejection_reason}</p>
-                                                                            </div>
-                                                                        )}
-                                                                        {canReview && !pkg.manually_reviewed && !pkg.rejection_reason && (
-                                                                            <div className="space-y-2 mt-2">
-                                                                                {rejectingPkg === pkg.id ? (
-                                                                                    <div className="space-y-2">
-                                                                                        <Input placeholder="Motivo de rechazo..." value={rejectNote}
-                                                                                            onChange={e => setRejectNote(e.target.value)} className="text-xs h-8"
-                                                                                            data-testid={`reject-note-${pkg.id}`}
-                                                                                            onKeyDown={e => { if (e.key === 'Enter') handleReject(pkg); }} />
-                                                                                        <div className="flex gap-2">
-                                                                                            <Button size="sm" variant="destructive" className="h-7 text-xs"
-                                                                                                    onClick={() => handleReject(pkg)} disabled={savingReview === pkg.id}
-                                                                                                    data-testid={`confirm-reject-${pkg.id}`}>
-                                                                                                {savingReview === pkg.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}Confirmar
-                                                                                            </Button>
-                                                                                            <Button size="sm" variant="ghost" className="h-7 text-xs"
-                                                                                                    onClick={() => { setRejectingPkg(null); setRejectNote(''); }}>Cancelar</Button>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                ) : (
-                                                                                    <div className="flex gap-2">
-                                                                                        <Button size="sm" variant="outline" className="h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                                                                                                onClick={() => openReviewModal(pkg, 'approve')} disabled={savingReview === pkg.id}
-                                                                                                data-testid={`approve-btn-${pkg.id}`}>
-                                                                                            <Check className="w-3 h-3 mr-1" />Aprobar
-                                                                                        </Button>
-                                                                                        <Button size="sm" variant="outline" className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-50"
-                                                                                                onClick={() => openReviewModal(pkg, 'reject')} data-testid={`reject-btn-${pkg.id}`}>
-                                                                                            <X className="w-3 h-3 mr-1" /> Rechazar
-                                                                                        </Button>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        )}
-                                                                    </>
-                                                                )}
-
-                                                                {/* Inline incident registration button */}
-                                                                {canReview && onRegisterIncident && (
-                                                                    <div className="mt-3 pt-3 border-t border-slate-200">
-                                                                        <Button size="sm" variant="outline" className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50 w-full justify-center"
-                                                                                onClick={() => onRegisterIncident(pkg)}
-                                                                                data-testid={`register-incident-btn-${pkg.id}`}>
-                                                                            <FileWarning className="w-3 h-3 mr-1" /> Registrar Incidencia
-                                                                        </Button>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
+                                                    <td colSpan={canReview ? 12 : 11} className="bg-slate-50 p-0">
+                                                        <GuiasPackageDetail
+                                                            pkg={pkg}
+                                                            proofUrls={proofUrls}
+                                                            hasErrors={hasErrors}
+                                                            hasDiscrepancy={hasDiscrepancy}
+                                                            reviewDecision={reviewDecision}
+                                                            canReview={canReview}
+                                                            isReadOnly={isReadOnly}
+                                                            savingReview={savingReview}
+                                                            rejectingPkg={rejectingPkg}
+                                                            rejectNote={rejectNote}
+                                                            setRejectNote={setRejectNote}
+                                                            setRejectingPkg={setRejectingPkg}
+                                                            onApprove={handleApprove}
+                                                            onReject={handleReject}
+                                                            onDiscrepancyReview={handleDiscrepancyReview}
+                                                            onRegisterIncident={onRegisterIncident}
+                                                            onOpenReviewModal={openReviewModal}
+                                                            openCarousel={openCarousel}
+                                                        />
                                                     </td>
                                                 </tr>
                                             )}
@@ -902,15 +603,9 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                      data-testid="ai-eval-progress-banner">
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                            {(aiEvalProgress.status === 'running' || aiEvalProgress.status === 'starting') && (
-                                <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
-                            )}
-                            {aiEvalProgress.status === 'completed' && (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            )}
-                            {aiEvalProgress.status === 'error' && (
-                                <XCircle className="w-4 h-4 text-red-600" />
-                            )}
+                            {(aiEvalProgress.status === 'running' || aiEvalProgress.status === 'starting') && <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />}
+                            {aiEvalProgress.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+                            {aiEvalProgress.status === 'error' && <XCircle className="w-4 h-4 text-red-600" />}
                             <span className="text-sm font-semibold text-slate-800">
                                 {aiEvalProgress.status === 'starting' && 'Iniciando evaluación IA...'}
                                 {aiEvalProgress.status === 'running' && 'Evaluación IA en progreso'}
@@ -985,29 +680,5 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
         </div>
     );
 };
-
-/* ─── Sub-components ─── */
-
-function KpiCard({ label, value, color, accent, testId }) {
-    const colorMap = { emerald: 'text-emerald-600', amber: 'text-amber-600', red: 'text-red-600', blue: 'text-blue-600', violet: 'text-violet-600' };
-    const accentMap = { red: 'border-t-[3px] border-red-500' };
-    return (
-        <Card className={accent ? accentMap[accent] : ''}>
-            <CardContent className="p-4 text-center">
-                <p className="text-xs text-slate-500 uppercase tracking-wider">{label}</p>
-                <p className={`text-2xl font-mono font-bold ${colorMap[color] || 'text-slate-800'}`} data-testid={testId}>{value}</p>
-            </CardContent>
-        </Card>
-    );
-}
-
-function DiscRow({ label, value, danger }) {
-    return (
-        <div className="flex items-center justify-between text-xs py-1 border-b border-amber-200 last:border-0">
-            <span className="text-amber-700/70">{label}</span>
-            <span className={`font-medium ${danger ? 'text-red-700' : 'text-amber-900'}`}>{value}</span>
-        </div>
-    );
-}
 
 export default GuiasTab;

@@ -22,10 +22,10 @@ import time
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 # Test credentials
-COORDINATOR_EMAIL = "yael@me.mx"
-COORDINATOR_PASSWORD = "LastMile2026"
-DEVELOPER_EMAIL = "dev@me.mx"
-DEVELOPER_PASSWORD = "LastMile2026"
+COORDINATOR_EMAIL = os.environ.get("TEST_COORD_EMAIL", "yael@me.mx")
+COORDINATOR_PASSWORD = os.environ.get("TEST_COORD_PASSWORD", "LastMile2026")
+DEVELOPER_EMAIL = os.environ.get("TEST_DEV_EMAIL", "dev@me.mx")
+DEVELOPER_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 # Test data
 JOURNEY_ID = "86a2ba7f-eecd-4533-a542-57436571ea5d"

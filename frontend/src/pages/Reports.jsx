@@ -230,6 +230,15 @@ const ChartsSection = ({ reportData, journeyChartData }) => {
     );
 };
 
+/* ─── Safe markdown-to-HTML renderer (sanitized via DOMPurify) ─── */
+const renderMarkdown = (text) => {
+    const html = text
+        .replace(/## /g, '<h3 style="font-size:15px;font-weight:700;color:#1A1916;margin:18px 0 8px">')
+        .replace(/\n/g, '<br/>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#1A1916">$1</strong>');
+    return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['h3', 'br', 'strong', 'p', 'em', 'ul', 'li', 'ol'], ALLOWED_ATTR: ['style'] });
+};
+
 /* ─── AI Insights Cards ─── */
 const CARD_COLORS = {
     alerta: { bg: '#FEF2F2', border: 'rgba(226,75,74,0.15)', text: '#E24B4A', icon: AlertTriangle },
@@ -286,7 +295,7 @@ const AiInsightsBar = ({ narrative, cards, generating, stale, onRegenerate }) =>
                                 <span style={{ fontSize: 14, fontWeight: 600, color: T.textPri }}>Reporte ejecutivo IA</span>
                                 <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: T.purpleLt, color: T.purple, fontWeight: 500 }}>Auto-generado</span>
                             </div>
-                            <div style={{ fontSize: 13, lineHeight: 1.7, color: T.textSec }} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(narrative.replace(/## /g, '<h3 style="font-size:15px;font-weight:700;color:#1A1916;margin:18px 0 8px">').replace(/\n/g, '<br/>').replace(/\*\*(.+?)\*\*/g, '<strong style="color:#1A1916">$1</strong>')) }} />
+                            <div style={{ fontSize: 13, lineHeight: 1.7, color: T.textSec }} dangerouslySetInnerHTML={{ __html: renderMarkdown(narrative) }} />
                         </div>
                     )}
                 </>

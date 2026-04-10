@@ -618,6 +618,7 @@ const JourneyDetail = () => {
         api.get('/admin/config').then(res => {
             setPulseConfig(res.data?.pulse_config || null);
         }).catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchJourney/fetchImages are stable, only re-run on id change
     }, [id]);
 
     const fetchImages = async () => {

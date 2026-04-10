@@ -849,14 +849,14 @@ async def evaluate_all_evidence(journey_id: str, user: dict = Depends(get_curren
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
 
-    async def _run_ai_eval():
+    async def _background_ai_evaluation():
         try:
             await evaluate_packages_for_journey(db, journey_id, use_ai=True)
             logger.info(f"AI evidence evaluation completed for journey {journey_id}")
         except Exception as e:
             logger.error(f"AI evidence evaluation failed for journey {journey_id}: {e}")
 
-    asyncio.create_task(_run_ai_eval())
+    asyncio.create_task(_background_ai_evaluation())
 
     packages = await db.packages.find(
         {"journey_id": journey_id, "evidence_score": {"$ne": None}},

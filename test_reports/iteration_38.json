@@ -1,0 +1,114 @@
+{
+  "summary": "Iteration 38 - Code Quality Refactoring Regression Tests PASSED. All 15 backend tests passed (100%). Frontend components verified working after GuiasTab split into 3 files.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Dashboard",
+        "issues": ["WebSocket connection warning on load - not critical, existing issue from previous iterations"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration38_code_quality.py",
+    "/app/test_reports/pytest/pytest_results_iter38.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GuiasTab.jsx split into 3 modular files working correctly - imports from ./guias/GuiasHelpers and ./guias/GuiasPackageDetail verified",
+    "Backend evidence_scoring.py refactoring (_call_ai_vision split into helpers) working - AI evaluation endpoints responding correctly",
+    "Backend liquidacion_export.py refactoring (extracted helper functions) - no issues detected",
+    "PulseStrip key fix verified - component renders without React key warnings",
+    "Reports.jsx DOMPurify ALLOWED_TAGS restriction working - AI report generation functional"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration38_code_quality.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 tests passed)",
+    "frontend": "100% (All components verified)"
+  },
+  "test_credentials": {
+    "coordinator": "yael@me.mx / LastMile2026",
+    "developer": "dev@me.mx / LastMile2026"
+  },
+  "seed_data_creation": "None - used existing journey data from 2026-04-09",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Code quality refactoring verified. GuiasTab split into 3 files (GuiasTab.jsx 684L, GuiasHelpers.jsx 149L, GuiasPackageDetail.jsx 214L) all working. P1 inline incident, P2 AI reports, P3 Cubbo ReviewModal features all functional. Backend refactoring in evidence_scoring.py and liquidacion_export.py transparent to users.",
+  "features_verified": {
+    "guias_tab_split": {
+      "status": "PASSED",
+      "description": "GuiasTab component split into 3 modular files working correctly",
+      "details": {
+        "main_component": "GuiasTab.jsx (684 lines) - renders KPI cards, segment filters, package table",
+        "helpers": "GuiasHelpers.jsx (149 lines) - ScoreCircle, ConfidenceBar, StatusPill, ReviewIndicator, SeverityBadge, KpiCard, DiscRow, SEGMENT_FILTERS",
+        "package_detail": "GuiasPackageDetail.jsx (214 lines) - expanded row detail with evidence photos, AI evaluation, manual review buttons",
+        "kpi_cards_verified": ["Score promedio: 100%", "Completos: 31/31", "Evaluados IA: 31/31", "Revisión manual: 2/31", "Discrepancias: 0", "Confianza prom: 95%"]
+      }
+    },
+    "p1_inline_incident": {
+      "status": "PASSED",
+      "description": "Inline incident registration from Guías tab working",
+      "details": {
+        "button_visible": "Registrar Incidencia button in expanded package row",
+        "incident_created": "Verified incident with source='guias' in Incidencias tab"
+      }
+    },
+    "p2_ai_reports": {
+      "status": "PASSED",
+      "description": "AI Reports Generation with DOMPurify ALLOWED_TAGS working",
+      "details": {
+        "button_visible": "Generar IA button on Reports page",
+        "api_working": "POST /api/reports/generate-ai returns narrative and cards"
+      }
+    },
+    "p3_review_modal": {
+      "status": "PASSED",
+      "description": "Cubbo Standard Evidence Evaluation in ReviewModal working",
+      "details": {
+        "delivery_types": ["A — Entrega Exitosa", "B — Entrega a Terceros", "C — Entrega Fallida"],
+        "criteria_cards": ["Foto de fachada (CRÍTICO)", "Paquete con guía (CRÍTICO)", "Foto de receptor", "Nota del driver", "Timestamp visible"],
+        "score_display": "Score calculado por criterios with original AI score"
+      }
+    },
+    "backend_refactoring": {
+      "status": "PASSED",
+      "description": "Backend code quality refactoring transparent to users",
+      "details": {
+        "evidence_scoring": "_call_ai_vision split into _get_system_prompt, _get_training_context, _build_user_context, _log_ai_token_usage",
+        "liquidacion_export": "Extracted _write_provider_data_row, _write_provider_pivot_table, _write_summary_header, _write_route_data_row, _fetch_incidents_for_export, _resolve_provider_sla",
+        "journey_routes": "_run_ai_eval renamed to _background_ai_evaluation"
+      }
+    },
+    "pulse_strip_key_fix": {
+      "status": "PASSED",
+      "description": "PulseStrip using r.label as key instead of array index",
+      "details": {
+        "component_renders": "Pulse Monitor visible on Rutas page showing active journeys"
+      }
+    }
+  },
+  "api_endpoints_tested": [
+    "GET /api/health - Health check",
+    "POST /api/auth/login - Authentication (coordinator and developer)",
+    "GET /api/journeys - List journeys with pagination",
+    "GET /api/journeys/{id} - Journey detail with packages",
+    "POST /api/reports/evaluate-journey/{id} - Evidence evaluation",
+    "GET /api/journeys/{id}/ai-eval-status - AI evaluation status",
+    "POST /api/reports/generate - Report generation",
+    "POST /api/reports/generate-ai - AI report generation",
+    "GET /api/reports/quality - Quality report",
+    "GET /api/reports/sla - SLA report",
+    "GET /api/incidents - List incidents",
+    "POST /api/incidents - Create incident with source='guias'",
+    "DELETE /api/incidents/{id} - Delete incident",
+    "PATCH /api/packages/{id}/review - Package review",
+    "POST /api/journeys/{id}/guides/evaluate-confidence - Confidence evaluation"
+  ]
+}

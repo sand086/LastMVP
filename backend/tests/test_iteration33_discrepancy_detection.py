@@ -9,8 +9,8 @@ import os
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_EMAIL = os.environ.get("TEST_DEV_EMAIL", "dev@me.mx")
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 # Test journey with packages
 TEST_JOURNEY_ID = "0c628824-b509-40a6-a7fd-b9b210b3eacd"

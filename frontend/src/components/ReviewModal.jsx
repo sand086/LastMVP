@@ -159,6 +159,7 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
             setReasonDetail('');
             setShowRejectPanel(false);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally depends on pkg.id only, not the full object
     }, [open, pkg?.id]);
 
     const calculatedScore = useMemo(() => calculateScore(criteriaStates, criteria.items), [criteriaStates, criteria.items]);

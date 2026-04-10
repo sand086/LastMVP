@@ -100,105 +100,53 @@ def _build_formato_sheet(wb):
     _auto_width(ws)
 
 
-# ═══════════════════════════════════════════════════
-# Sheet 2: Provider sheet (main)
-# ═══════════════════════════════════════════════════
-def _build_provider_sheet(wb, provider_name, rows_data, sla_packages=40):
-    ws = wb.create_sheet(provider_name[:31])  # Excel sheet name limit
+def _write_provider_data_row(ws, r: int, row: dict, sla_packages: int, is_alt: bool):
+    """Write a single data row in the provider sheet (columns A-AB)."""
+    delivered = row.get("completados", 0) or 0
+    total_pkgs = row.get("total_paquetes", 0) or 0
+    cancelled = row.get("cancelados", 0) or 0
+    failed = max(0, total_pkgs - delivered - cancelled)
+    fecha_str = str(row.get("fecha", ""))[:10]
 
-    # ── Row 1: Group headers ──
-    # Provider name (A-M)
-    cell = ws.merge_cells("A1:M1")
-    _write_header_cell(ws, 1, 1, provider_name, _DARK_FILL)
-    # Detalle Paq M&E (N-S)
-    ws.merge_cells("N1:S1")
-    _write_header_cell(ws, 1, 14, "Detalle Paq M&E", _DARK_FILL)
-    # Diferencias (T-V)
-    ws.merge_cells("T1:V1")
-    _write_header_cell(ws, 1, 20, "Diferencias Paquetes M&E", _DARK_FILL)
-    # Montos (W-AB)
-    ws.merge_cells("W1:AB1")
-    _write_header_cell(ws, 1, 23, "Montos por Facturar", _DARK_FILL)
+    # A-M: Provider data columns
+    _write_data_cell(ws, r, 1, fecha_str, is_alt=is_alt)
+    _write_data_cell(ws, r, 2, row.get("driver", ""), is_alt=is_alt)
+    _write_data_cell(ws, r, 3, row.get("estado", ""), is_alt=is_alt)
+    _write_data_cell(ws, r, 4, row.get("tipo_servicio", ""), is_alt=is_alt)
+    _write_data_cell(ws, r, 5, row.get("placas", ""), is_alt=is_alt)
+    _write_data_cell(ws, r, 6, row.get("order_id", ""), is_alt=is_alt)
+    _write_data_cell(ws, r, 7, total_pkgs, is_alt=is_alt)
+    _write_data_cell(ws, r, 8, delivered, is_alt=is_alt)
+    _write_data_cell(ws, r, 9, failed, is_alt=is_alt)
+    _write_data_cell(ws, r, 10, cancelled, is_alt=is_alt)
+    _write_data_cell(ws, r, 11, f"=G{r}", is_formula=True)
+    _write_data_cell(ws, r, 12, row.get("tipo_unidad", ""), is_alt=is_alt)
+    _write_data_cell(ws, r, 13, row.get("costo", 0) or 0, is_alt=is_alt, fmt='$#,##0.00')
 
-    # ── Row 2: Column headers ──
-    col_headers = [
-        "Fecha", "Nombre del Operador", "Sitio de Carga", "Tipo de Servicio",
-        "Placas", "Ruta Cubbo", "Paquetes a ruta", "Entregas",
-        "Entregas Fallidas", "Devuelto s/ Visita-Intento", "Recolectado",
-        "Tipo de unidad", "Importe",
-        # M&E columns
-        "Paquetes Cargados", "Completados", "Cancelados", "Pendientes",
-        "Completados c/ Evidencia", "Completados s/ Evidencia",
-        # Differences
-        "Dif. Carga", "Dif. Entrega", "Pend./Cancel.",
-        # Montos
-        "Procedentes a Cobro", "Costo x Pq", "Incidencias", "Total",
-        "% Efectividad", f"% Efect. SLA {sla_packages}",
-    ]
-    for c, h in enumerate(col_headers, 1):
-        fill = _FORMULA_FILL if c >= 20 else _MED_FILL
-        font = _BOLD_FONT if c >= 20 else _WHITE_FONT
-        _write_header_cell(ws, 2, c, h, fill, font)
+    # N-S: M&E data
+    _write_data_cell(ws, r, 14, total_pkgs, is_alt=is_alt)
+    _write_data_cell(ws, r, 15, delivered, is_alt=is_alt)
+    _write_data_cell(ws, r, 16, cancelled, is_alt=is_alt)
+    _write_data_cell(ws, r, 17, row.get("pendientes", 0) or 0, is_alt=is_alt)
+    _write_data_cell(ws, r, 18, row.get("con_evidencia", 0) or 0, is_alt=is_alt)
+    _write_data_cell(ws, r, 19, row.get("sin_evidencia", 0) or 0, is_alt=is_alt)
 
-    # ── Data rows grouped by driver ──
-    # Sort by driver, then date
-    sorted_rows = sorted(rows_data, key=lambda r: (r.get("driver", ""), r.get("fecha", "")))
+    # T-V: Differences (formulas)
+    _write_data_cell(ws, r, 20, f"=G{r}-N{r}", is_formula=True)
+    _write_data_cell(ws, r, 21, f"=(H{r}+I{r})-O{r}", is_formula=True)
+    _write_data_cell(ws, r, 22, f"=P{r}+Q{r}", is_formula=True)
 
-    current_driver = None
-    data_row = 3
-    for row in sorted_rows:
-        # Insert separator between drivers
-        if current_driver is not None and row.get("driver") != current_driver:
-            data_row += 1  # empty row
-        current_driver = row.get("driver", "")
+    # W-AB: Montos (formulas)
+    _write_data_cell(ws, r, 23, f"=V{r}", is_formula=True)
+    _write_data_cell(ws, r, 24, f"=IFERROR(M{r}/{sla_packages},0)", is_formula=True, fmt='$#,##0.00')
+    _write_data_cell(ws, r, 25, "", is_formula=True, fmt='$#,##0.00')
+    _write_data_cell(ws, r, 26, f"=M{r}-Y{r}", is_formula=True, fmt='$#,##0.00')
+    _write_data_cell(ws, r, 27, f"=IFERROR(O{r}/N{r},0)", is_formula=True, fmt='0%')
+    _write_data_cell(ws, r, 28, f"=IFERROR(O{r}/{sla_packages},0)", is_formula=True, fmt='0%')
 
-        r = data_row
-        is_alt = (r % 2 == 0)
-        delivered = row.get("completados", 0) or 0
-        total_pkgs = row.get("total_paquetes", 0) or 0
-        cancelled = row.get("cancelados", 0) or 0
-        failed = max(0, total_pkgs - delivered - cancelled)
 
-        # A-M: Provider data columns
-        fecha_str = str(row.get("fecha", ""))[:10]  # Truncate to YYYY-MM-DD
-        _write_data_cell(ws, r, 1, fecha_str, is_alt=is_alt)
-        _write_data_cell(ws, r, 2, row.get("driver", ""), is_alt=is_alt)
-        _write_data_cell(ws, r, 3, row.get("estado", ""), is_alt=is_alt)
-        _write_data_cell(ws, r, 4, row.get("tipo_servicio", ""), is_alt=is_alt)
-        _write_data_cell(ws, r, 5, row.get("placas", ""), is_alt=is_alt)
-        _write_data_cell(ws, r, 6, row.get("order_id", ""), is_alt=is_alt)
-        _write_data_cell(ws, r, 7, total_pkgs, is_alt=is_alt)
-        _write_data_cell(ws, r, 8, delivered, is_alt=is_alt)
-        _write_data_cell(ws, r, 9, failed, is_alt=is_alt)
-        _write_data_cell(ws, r, 10, cancelled, is_alt=is_alt)
-        _write_data_cell(ws, r, 11, f"=G{r}", is_formula=True)  # Recolectado = Paquetes a ruta
-        _write_data_cell(ws, r, 12, row.get("tipo_unidad", ""), is_alt=is_alt)
-        _write_data_cell(ws, r, 13, row.get("costo", 0) or 0, is_alt=is_alt, fmt='$#,##0.00')
-
-        # N-S: M&E data
-        _write_data_cell(ws, r, 14, total_pkgs, is_alt=is_alt)
-        _write_data_cell(ws, r, 15, delivered, is_alt=is_alt)
-        _write_data_cell(ws, r, 16, cancelled, is_alt=is_alt)
-        _write_data_cell(ws, r, 17, row.get("pendientes", 0) or 0, is_alt=is_alt)
-        _write_data_cell(ws, r, 18, row.get("con_evidencia", 0) or 0, is_alt=is_alt)
-        _write_data_cell(ws, r, 19, row.get("sin_evidencia", 0) or 0, is_alt=is_alt)
-
-        # T-V: Differences (formulas)
-        _write_data_cell(ws, r, 20, f"=G{r}-N{r}", is_formula=True)
-        _write_data_cell(ws, r, 21, f"=(H{r}+I{r})-O{r}", is_formula=True)
-        _write_data_cell(ws, r, 22, f"=P{r}+Q{r}", is_formula=True)
-
-        # W-AB: Montos (formulas)
-        _write_data_cell(ws, r, 23, f"=V{r}", is_formula=True)  # Procedentes a Cobro
-        _write_data_cell(ws, r, 24, f"=IFERROR(M{r}/{sla_packages},0)", is_formula=True, fmt='$#,##0.00')
-        _write_data_cell(ws, r, 25, "", is_formula=True, fmt='$#,##0.00')  # Incidencias (manual)
-        _write_data_cell(ws, r, 26, f"=M{r}-Y{r}", is_formula=True, fmt='$#,##0.00')
-        _write_data_cell(ws, r, 27, f"=IFERROR(O{r}/N{r},0)", is_formula=True, fmt='0%')
-        _write_data_cell(ws, r, 28, f"=IFERROR(O{r}/{sla_packages},0)", is_formula=True, fmt='0%')
-
-        data_row += 1
-
-    # ── Side table: pivot by driver (col AD+) ──
+def _write_provider_pivot_table(ws, sorted_rows):
+    """Write the side pivot table by driver (columns AD+)."""
     _write_header_cell(ws, 2, 30, "Team")
     _write_header_cell(ws, 2, 31, "Driver")
     _write_header_cell(ws, 2, 32, "Fecha")
@@ -222,7 +170,52 @@ def _build_provider_sheet(wb, provider_name, rows_data, sla_packages=40):
         _write_data_cell(ws, pivot_row, 38, row.get("sin_evidencia", 0))
         pivot_row += 1
 
-    # Freeze panes
+
+# ═══════════════════════════════════════════════════
+# Sheet 2: Provider sheet (main)
+# ═══════════════════════════════════════════════════
+def _build_provider_sheet(wb, provider_name, rows_data, sla_packages=40):
+    ws = wb.create_sheet(provider_name[:31])
+
+    # ── Row 1: Group headers ──
+    ws.merge_cells("A1:M1")
+    _write_header_cell(ws, 1, 1, provider_name, _DARK_FILL)
+    ws.merge_cells("N1:S1")
+    _write_header_cell(ws, 1, 14, "Detalle Paq M&E", _DARK_FILL)
+    ws.merge_cells("T1:V1")
+    _write_header_cell(ws, 1, 20, "Diferencias Paquetes M&E", _DARK_FILL)
+    ws.merge_cells("W1:AB1")
+    _write_header_cell(ws, 1, 23, "Montos por Facturar", _DARK_FILL)
+
+    # ── Row 2: Column headers ──
+    col_headers = [
+        "Fecha", "Nombre del Operador", "Sitio de Carga", "Tipo de Servicio",
+        "Placas", "Ruta Cubbo", "Paquetes a ruta", "Entregas",
+        "Entregas Fallidas", "Devuelto s/ Visita-Intento", "Recolectado",
+        "Tipo de unidad", "Importe",
+        "Paquetes Cargados", "Completados", "Cancelados", "Pendientes",
+        "Completados c/ Evidencia", "Completados s/ Evidencia",
+        "Dif. Carga", "Dif. Entrega", "Pend./Cancel.",
+        "Procedentes a Cobro", "Costo x Pq", "Incidencias", "Total",
+        "% Efectividad", f"% Efect. SLA {sla_packages}",
+    ]
+    for c, h in enumerate(col_headers, 1):
+        fill = _FORMULA_FILL if c >= 20 else _MED_FILL
+        font = _BOLD_FONT if c >= 20 else _WHITE_FONT
+        _write_header_cell(ws, 2, c, h, fill, font)
+
+    # ── Data rows grouped by driver ──
+    sorted_rows = sorted(rows_data, key=lambda r: (r.get("driver", ""), r.get("fecha", "")))
+    current_driver = None
+    data_row = 3
+    for row in sorted_rows:
+        if current_driver is not None and row.get("driver") != current_driver:
+            data_row += 1
+        current_driver = row.get("driver", "")
+        _write_provider_data_row(ws, data_row, row, sla_packages, is_alt=(data_row % 2 == 0))
+        data_row += 1
+
+    _write_provider_pivot_table(ws, sorted_rows)
     ws.freeze_panes = "B3"
     _auto_width(ws)
 
@@ -251,7 +244,7 @@ def _build_incidencias_sheet(wb, incidents_data, comments_data):
         comments = cd.get("comentarios", "")
         if not comments or comments == "Sin incidencias":
             continue
-        lines = [l.strip() for l in comments.split("\n") if l.strip()]
+        lines = [part.strip() for part in comments.split("\n") if part.strip()]
         for line in lines:
             # Lines that look like tracking numbers (not descriptions)
             if len(line) < 30 and not line.startswith("No se") and not line.startswith("Sin"):
@@ -296,41 +289,41 @@ def _build_catalogo_sheet(wb, all_rows):
 # ═══════════════════════════════════════════════════
 # Sheet 5: route_summary (raw data)
 # ═══════════════════════════════════════════════════
-def _build_route_summary_sheet(wb, all_rows):
-    ws = wb.create_sheet("route_summary")
+_ROUTE_SUMMARY_COLS = [
+    ("order_id", "ORDER ID"), ("fecha", "Fecha"), ("driver", "Driver"), ("team", "Team"),
+    ("tipo_unidad", "Tipo de unidad"), ("estado", "Estado"), ("tipo_servicio", "Tipo de servicio"),
+    ("proveedor", "Proveedor"), ("costo", "Costo"), ("pv", "PV"),
+    ("horario_asistencia", "Horario de asistencia"), ("hora_entrada", "Hora de entrada"),
+    ("hora_salida", "Hora de salida"), ("tolerancia", "Tolerancia"),
+    ("asistencia_en_tiempo", "Asistencia en tiempo"),
+    ("horas_laboradas", "Horas laboradas"), ("distancia_km", "Distancia (KM)"),
+    ("km_excedente", "KM excedente"), ("tipo_tarifa", "Tipo de tarifa"),
+    ("costo_km_adicional", "Costo por KM adicional"), ("backup_activado", "Backup?"),
+    ("hora_inicio_backup", "Hora inicio backup"), ("horas_laboradas_backup", "Hrs backup"),
+    ("total_paquetes", "Total de paquetes"), ("completados", "Completados"),
+    ("cancelados", "Cancelados"), ("pendientes", "Pendientes"),
+    ("con_evidencia", "Completados con evidencia"), ("sin_evidencia", "Completados sin evidencia"),
+    ("score_ia", "Score IA"), ("comentarios", "Comentarios"), ("driver_courier", "Driver Courier"),
+]
 
-    all_cols = [
-        ("order_id", "ORDER ID"), ("fecha", "Fecha"), ("driver", "Driver"), ("team", "Team"),
-        ("tipo_unidad", "Tipo de unidad"), ("estado", "Estado"), ("tipo_servicio", "Tipo de servicio"),
-        ("proveedor", "Proveedor"), ("costo", "Costo"), ("pv", "PV"),
-        ("horario_asistencia", "Horario de asistencia"), ("hora_entrada", "Hora de entrada"),
-        ("hora_salida", "Hora de salida"), ("tolerancia", "Tolerancia"),
-        ("asistencia_en_tiempo", "Asistencia en tiempo"),
-        ("horas_laboradas", "Horas laboradas"), ("distancia_km", "Distancia (KM)"),
-        ("km_excedente", "KM excedente"), ("tipo_tarifa", "Tipo de tarifa"),
-        ("costo_km_adicional", "Costo por KM adicional"), ("backup_activado", "Backup?"),
-        ("hora_inicio_backup", "Hora inicio backup"), ("horas_laboradas_backup", "Hrs backup"),
-        ("total_paquetes", "Total de paquetes"), ("completados", "Completados"),
-        ("cancelados", "Cancelados"), ("pendientes", "Pendientes"),
-        ("con_evidencia", "Completados con evidencia"), ("sin_evidencia", "Completados sin evidencia"),
-        ("score_ia", "Score IA"), ("comentarios", "Comentarios"), ("driver_courier", "Driver Courier"),
-    ]
+_CURRENCY_KEYS = {"costo", "pv", "costo_km_adicional"}
 
-    # Row 1-2: Totals summary
-    total_rutas = len(all_rows)
-    total_dias = len(set(r.get("fecha", "") for r in all_rows))
-    total_pkgs = sum(r.get("total_paquetes", 0) or 0 for r in all_rows)
-    total_completados = sum(r.get("completados", 0) or 0 for r in all_rows)
-    total_con_ev = sum(r.get("con_evidencia", 0) or 0 for r in all_rows)
-    total_costo = sum(r.get("costo", 0) or 0 for r in all_rows)
 
+def _write_summary_header(ws, all_rows):
+    """Write rows 1-2: totals summary bar."""
     summary_labels = ["Total rutas", "Días operados", "Total paquetes", "Completados", "Con evidencia", "Costo total"]
-    summary_values = [total_rutas, total_dias, total_pkgs, total_completados, total_con_ev, total_costo]
+    summary_values = [
+        len(all_rows),
+        len(set(r.get("fecha", "") for r in all_rows)),
+        sum(r.get("total_paquetes", 0) or 0 for r in all_rows),
+        sum(r.get("completados", 0) or 0 for r in all_rows),
+        sum(r.get("con_evidencia", 0) or 0 for r in all_rows),
+        sum(r.get("costo", 0) or 0 for r in all_rows),
+    ]
     for c, label in enumerate(summary_labels, 1):
         cell = ws.cell(row=1, column=c, value=label)
-        cell.font = _BOLD_FONT
-        cell.fill = _DARK_FILL
         cell.font = _WHITE_FONT
+        cell.fill = _DARK_FILL
         cell.border = _THIN
     for c, val in enumerate(summary_values, 1):
         cell = ws.cell(row=2, column=c, value=val)
@@ -339,29 +332,34 @@ def _build_route_summary_sheet(wb, all_rows):
         if c == 6:
             cell.number_format = '$#,##0.00'
 
-    # Row 3: empty separator
+
+def _write_route_data_row(ws, row_idx: int, row: dict):
+    """Write a single data row in route_summary sheet."""
+    for c, (key, _) in enumerate(_ROUTE_SUMMARY_COLS, 1):
+        if key == "driver_courier":
+            val = f"=IFERROR(XLOOKUP(C{row_idx},Catalogo_Drivers!A:A,Catalogo_Drivers!C:C),\"\")"
+            _write_data_cell(ws, row_idx, c, val, is_formula=True)
+        else:
+            val = row.get(key)
+            if val is None:
+                val = ""
+            elif isinstance(val, bool):
+                val = "Si" if val else "No"
+            fmt = '$#,##0.00' if key in _CURRENCY_KEYS else None
+            _write_data_cell(ws, row_idx, c, val, is_alt=(row_idx % 2 == 0), fmt=fmt)
+
+
+def _build_route_summary_sheet(wb, all_rows):
+    ws = wb.create_sheet("route_summary")
+    _write_summary_header(ws, all_rows)
+
     # Row 4: Headers
-    for c, (key, label) in enumerate(all_cols, 1):
+    for c, (key, label) in enumerate(_ROUTE_SUMMARY_COLS, 1):
         _write_header_cell(ws, 4, c, label, _MED_FILL)
 
     # Row 5+: Data
     for row_idx, row in enumerate(all_rows, 5):
-        for c, (key, _) in enumerate(all_cols, 1):
-            if key == "driver_courier":
-                # XLOOKUP formula
-                val = f"=IFERROR(XLOOKUP(C{row_idx},Catalogo_Drivers!A:A,Catalogo_Drivers!C:C),\"\")"
-                _write_data_cell(ws, row_idx, c, val, is_formula=True)
-            else:
-                val = row.get(key)
-                if val is None:
-                    val = ""
-                elif isinstance(val, bool):
-                    val = "Si" if val else "No"
-                is_alt = (row_idx % 2 == 0)
-                fmt = None
-                if key in ("costo", "pv", "costo_km_adicional"):
-                    fmt = '$#,##0.00'
-                _write_data_cell(ws, row_idx, c, val, is_alt=is_alt, fmt=fmt)
+        _write_route_data_row(ws, row_idx, row)
 
     ws.freeze_panes = "A5"
     _auto_width(ws)
@@ -370,27 +368,16 @@ def _build_route_summary_sheet(wb, all_rows):
 # ═══════════════════════════════════════════════════
 # Main generator
 # ═══════════════════════════════════════════════════
-async def generate_liquidacion_excel(db, all_rows, date_from, date_to, sla_config=None):
-    """Generate the full Liquidación Excel workbook."""
-
-    if sla_config is None:
-        sla_config = {"default_sla": DEFAULT_SLA_PACKAGES, "by_provider": {}}
-
-    default_sla = sla_config.get("default_sla", DEFAULT_SLA_PACKAGES)
-    by_provider_sla = sla_config.get("by_provider", {})
-
-    # Fetch incidents for the period
+async def _fetch_incidents_for_export(db, all_rows):
+    """Fetch and format incidents for the liquidacion export."""
     journey_ids = [r.get("journey_id") for r in all_rows if r.get("journey_id")]
-    incidents_raw = []
-    if journey_ids:
-        incidents_raw = await db.incidents.find(
-            {"journey_id": {"$in": journey_ids}},
-            {"_id": 0}
-        ).to_list(5000)
-
+    if not journey_ids:
+        return []
+    incidents_raw = await db.incidents.find(
+        {"journey_id": {"$in": journey_ids}}, {"_id": 0}
+    ).to_list(5000)
     incidents_data = []
     for inc in incidents_raw:
-        # Find the matching row
         matching_row = next((r for r in all_rows if r.get("journey_id") == inc.get("journey_id")), {})
         incidents_data.append({
             "route_id": matching_row.get("order_id", ""),
@@ -398,33 +385,41 @@ async def generate_liquidacion_excel(db, all_rows, date_from, date_to, sla_confi
             "guide": inc.get("tracking_number", inc.get("description", "")),
             "amount": inc.get("amount", inc.get("cost", "")),
         })
+    return incidents_data
 
-    # Build AI comments for incidencias parsing
+
+def _resolve_provider_sla(prov_name: str, rows: list, by_provider_sla: dict, default_sla: int) -> int:
+    """Resolve the SLA for a provider, checking name and ID."""
+    if prov_name in by_provider_sla:
+        return by_provider_sla[prov_name]
+    sample_row = rows[0] if rows else {}
+    prov_id = sample_row.get("provider_id", "")
+    if prov_id and prov_id in by_provider_sla:
+        return by_provider_sla[prov_id]
+    return default_sla
+
+
+async def generate_liquidacion_excel(db, all_rows, date_from, date_to, sla_config=None):
+    """Generate the full Liquidación Excel workbook."""
+    if sla_config is None:
+        sla_config = {"default_sla": DEFAULT_SLA_PACKAGES, "by_provider": {}}
+
+    default_sla = sla_config.get("default_sla", DEFAULT_SLA_PACKAGES)
+    by_provider_sla = sla_config.get("by_provider", {})
+
+    incidents_data = await _fetch_incidents_for_export(db, all_rows)
     comments_data = [r for r in all_rows if r.get("comentarios") and r.get("comentarios") != "Sin incidencias"]
 
-    # Group by provider
     by_provider = {}
     for row in all_rows:
-        prov = row.get("proveedor", "Sin proveedor")
-        by_provider.setdefault(prov, []).append(row)
+        by_provider.setdefault(row.get("proveedor", "Sin proveedor"), []).append(row)
 
-    # Build workbook
     wb = Workbook()
-    wb.remove(wb.active)  # Remove default sheet
+    wb.remove(wb.active)
 
     _build_formato_sheet(wb)
-
     for prov_name in sorted(by_provider.keys()):
-        # Resolve SLA: check by provider name first, then by provider ID, fallback to default
-        prov_sla = default_sla
-        if prov_name in by_provider_sla:
-            prov_sla = by_provider_sla[prov_name]
-        else:
-            # Check if any row has a provider_id that matches a key in by_provider_sla
-            sample_row = by_provider[prov_name][0] if by_provider[prov_name] else {}
-            prov_id = sample_row.get("provider_id", "")
-            if prov_id and prov_id in by_provider_sla:
-                prov_sla = by_provider_sla[prov_id]
+        prov_sla = _resolve_provider_sla(prov_name, by_provider[prov_name], by_provider_sla, default_sla)
         _build_provider_sheet(wb, prov_name, by_provider[prov_name], sla_packages=prov_sla)
 
     _build_incidencias_sheet(wb, incidents_data, comments_data)

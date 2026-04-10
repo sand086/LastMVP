@@ -27,7 +27,7 @@ function formatAIText(text) {
         .replace(/`([^`]+)`/g, '<code style="background:#F0EFEC;padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
         .replace(/\n/g, '<br>')
         .replace(/(\d+\.?\d*%)/g, '<strong style="color:#1A1916">$1</strong>');
-    return DOMPurify.sanitize(html);
+    return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['strong', 'code', 'br', 'em', 'p'], ALLOWED_ATTR: ['style'] });
 }
 
 const WELCOME_MSG = {

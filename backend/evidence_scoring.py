@@ -277,16 +277,8 @@ async def evaluate_single_package_ai(
         return _rules_fallback(package, has_incident, str(e))
 
 
-async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver_note: str) -> Optional[dict]:
-    """Send images to AI Vision and return parsed result.
-    Reads custom system_prompt from quality criteria config if available."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
-    if not api_key:
-        raise ValueError("EMERGENT_LLM_KEY not configured")
-
-    # Read custom system prompt from quality criteria config
+async def _get_system_prompt() -> str:
+    """Read custom system prompt from quality criteria config, falling back to default."""
     base_prompt = CUBBO_SYSTEM_PROMPT
     try:
         db = _get_db()
@@ -298,20 +290,13 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
                 logger.info(f"Using custom system prompt from quality criteria config ({len(base_prompt)} chars)")
     except Exception as e:
         logger.warning(f"Could not read custom system prompt: {e}")
+    return base_prompt + AI_RESPONSE_FORMAT
 
-    # Always append JSON response format to ensure structured output
-    system_prompt = base_prompt + AI_RESPONSE_FORMAT
 
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=f"evidence-eval-{uuid.uuid4().hex[:8]}",
-        system_message=system_prompt,
-    )
-    chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-    # Include supervised training examples as few-shot context
-    training_context = ""
+async def _get_training_context() -> str:
+    """Fetch recent incorrect AI evaluations as few-shot calibration examples."""
     try:
+        db = _get_db()
         thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         recent_samples = await db.training_samples.find(
             {"labeled_at": {"$gte": thirty_days_ago}, "ai_evaluation_incorrect": True},
@@ -320,30 +305,30 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
         ).sort("labeled_at", -1).to_list(5)
 
         if recent_samples:
-            examples = []
-            for s in recent_samples:
-                ex = f"- Guía {s.get('tracking_number','?')}: IA dio {s.get('original_ai_score',0)}, revisión humana: {s.get('decision','?')} (score ajustado: {s.get('adjusted_score','N/A')}). Nota: {s.get('reviewer_note','')}"
-                examples.append(ex)
-            training_context = "\n\nCALIBRACIÓN POR REVISIÓN HUMANA (ejemplos recientes donde la IA se equivocó):\n" + "\n".join(examples) + "\nConsidera estos casos al evaluar para calibrar mejor tu criterio.\n"
+            examples = [
+                f"- Guía {s.get('tracking_number','?')}: IA dio {s.get('original_ai_score',0)}, revisión humana: {s.get('decision','?')} (score ajustado: {s.get('adjusted_score','N/A')}). Nota: {s.get('reviewer_note','')}"
+                for s in recent_samples
+            ]
+            return "\n\nCALIBRACIÓN POR REVISIÓN HUMANA (ejemplos recientes donde la IA se equivocó):\n" + "\n".join(examples) + "\nConsidera estos casos al evaluar para calibrar mejor tu criterio.\n"
     except Exception as e:
         logger.debug(f"Training samples fetch skipped: {e}")
+    return ""
 
-    file_contents = [ImageContent(image_base64=img) for img in valid_images]
-    context = (
-        f"Paquete: {tracking}\n"
-        f"Estatus: {'Entregado' if status == 'delivered' else 'Fallido'}\n"
-    )
+
+def _build_user_context(tracking: str, status: str, driver_note: str, image_count: int, training_context: str) -> str:
+    """Build the user message context string for AI evaluation."""
+    context = f"Paquete: {tracking}\nEstatus: {'Entregado' if status == 'delivered' else 'Fallido'}\n"
     if driver_note:
         context += f"Nota del driver: {driver_note}\n"
-    context += f"Total de fotos: {len(valid_images)}\n"
+    context += f"Total de fotos: {image_count}\n"
     if training_context:
         context += training_context
     context += "\nAnaliza las fotos de evidencia adjuntas y responde en JSON."
+    return context
 
-    user_msg = UserMessage(text=context, file_contents=file_contents)
-    response_text = await chat.send_message(user_msg)
 
-    # Log token usage (non-blocking)
+async def _log_ai_token_usage(tracking: str, context: str, response_text: str, system_prompt: str) -> None:
+    """Log AI token usage (non-blocking, swallows errors)."""
     try:
         from token_logger import log_token_usage
         await log_token_usage(
@@ -357,6 +342,32 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
         )
     except Exception as log_err:
         logger.debug(f"Token log skipped: {log_err}")
+
+
+async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver_note: str) -> Optional[dict]:
+    """Send images to AI Vision and return parsed result."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise ValueError("EMERGENT_LLM_KEY not configured")
+
+    system_prompt = await _get_system_prompt()
+    training_context = await _get_training_context()
+
+    chat = LlmChat(
+        api_key=api_key,
+        session_id=f"evidence-eval-{uuid.uuid4().hex[:8]}",
+        system_message=system_prompt,
+    )
+    chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    context = _build_user_context(tracking, status, driver_note, len(valid_images), training_context)
+    file_contents = [ImageContent(image_base64=img) for img in valid_images]
+    user_msg = UserMessage(text=context, file_contents=file_contents)
+    response_text = await chat.send_message(user_msg)
+
+    await _log_ai_token_usage(tracking, context, response_text, system_prompt)
 
     return _parse_ai_response(response_text)
 

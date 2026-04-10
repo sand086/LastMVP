@@ -10,9 +10,9 @@ from io import BytesIO
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-DEVELOPER_CREDS = {"email": "dev@me.mx", "password": "LastMile2026"}
-AGENT_CREDS = {"email": "agente@me.mx", "password": "LastMile2026"}
-PROVEEDOR_CREDS = {"email": "proveedor@me.mx", "password": "LastMile2026"}
+DEVELOPER_CREDS = {"email": os.environ.get("TEST_DEV_EMAIL", "dev@me.mx"), "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+AGENT_CREDS = {"email": os.environ.get("TEST_AGENT_EMAIL", "agente@me.mx"), "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+PROVEEDOR_CREDS = {"email": "proveedor@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
 
 # Date range that should have data
 DATE_FROM = "2026-01-01"

@@ -62,7 +62,7 @@ export default function PulseStrip({ journeys, pulseConfig }) {
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center' }}>
                 {results.map((r, i) => (
                     <div
-                        key={i}
+                        key={r.label || `pulse-${i}`}
                         style={{
                             width: 14, height: 14, borderRadius: 3,
                             background: PULSE_COLORS[r.status],
