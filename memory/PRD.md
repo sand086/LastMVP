@@ -97,6 +97,9 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Connected Quality Criteria system_prompt to AI evaluation engine — Done 2026-04-09
 - [x] Supervised Training generates training_samples on manual review — Done 2026-04-09
 - [x] Reports module redesign: KPI cards, charts, chip filters, PDF export — Done 2026-04-10
+- [x] P1: Inline Incident Registration from Guías Tab — Done 2026-04-10
+- [x] P2: AI Reports Generation v2.0 with Dynamic Cards — Done 2026-04-10
+- [x] P3: Cubbo Standard Evidence Evaluation (ReviewModal) — Done 2026-04-10
 - [ ] Split large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P1)
 - [ ] localStorage -> httpOnly cookies migration (P1, security hardening)
 - [ ] Mobile-optimized views for field agents (P2)

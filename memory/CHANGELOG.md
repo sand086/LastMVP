@@ -1,5 +1,34 @@
 # LastMile OS - Changelog
 
+## 2026-04-10 — P1, P2, P3 Features Verified (3 features)
+
+### P1: Inline Incident Registration from Guías Tab
+- "Registrar Incidencia" button in expanded package row (GuiasTab.jsx line 870-878)
+- Opens incident modal pre-populated: type=Evidencia Insuficiente, source=guias, tracking_number auto-filled
+- Backend `IncidentCreate` model supports `source` field (models.py)
+- Files: `GuiasTab.jsx`, `JourneyDetail.jsx` (handleRegisterIncidentFromGuias), `models.py`
+
+### P2: AI Reports Generation v2.0 with Dynamic Cards
+- POST /api/reports/generate-ai returns {narrative, cards[], period}
+- Cards: 3 structured items (tipo: alerta/tendencia/logro, titulo, cuerpo, metrica, variacion)
+- Frontend renders color-coded cards (red/blue/green) + markdown narrative
+- Stale indicator when filters change post-generation
+- Files: `Reports.jsx` (AiInsightsBar), `analytics_routes.py` (generate_ai_report)
+
+### P3: Cubbo Standard Evidence Evaluation (ReviewModal)
+- ReviewModal with delivery type selector (A/B/C), criteria cards with pass/fail toggles
+- Weighted score calculation with critical failure cap (50pts max)
+- 9 predefined rejection reasons + manual override
+- Discrepancy tracking (AI vs Manual decisions)
+- Files: `ReviewModal.jsx`
+
+### Test Results
+- Backend: 11/11 tests passed (100%)
+- Frontend: 3/3 features verified (100%)
+- Test report: `/app/test_reports/iteration_37.json`
+
+---
+
 ## 2026-04-09 — AI Evaluation UX Improvements (3 features)
 
 ### 1. Severity Badges in GuiasTab
