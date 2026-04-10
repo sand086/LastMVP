@@ -795,52 +795,29 @@ const Reports = () => {
     const handleExportPDF = async () => {
         setExportingPdf(true);
         try {
-            const { default: jsPDF } = await import('jspdf');
-            const { default: html2canvas } = await import('html2canvas');
-            const el = document.getElementById('reports-content');
-            if (!el) throw new Error('No content');
-            const canvas = await html2canvas(el, { scale: 1.5, useCORS: true, logging: false });
-            const imgData = canvas.toDataURL('image/jpeg', 0.8);
-            const pdf = new jsPDF('l', 'mm', 'a4');
-            const pdfW = pdf.internal.pageSize.getWidth();
-            const pdfH = pdf.internal.pageSize.getHeight();
-
-            // Header
-            pdf.setFontSize(16);
-            pdf.text('LastMile OS — Reporte Operativo', 14, 15);
-            pdf.setFontSize(10);
-            pdf.text(`Periodo: ${effectiveDates.from} a ${effectiveDates.to}`, 14, 22);
+            const { generateMultiPagePDF } = await import('../lib/pdfReportGenerator');
             const filters = [];
             if (clientId) filters.push(`Cliente: ${selectedClientName}`);
             if (providerId) filters.push(`Proveedor: ${selectedProviderName}`);
-            pdf.text(`Filtros: ${filters.length ? filters.join(', ') : 'Todos'}`, 14, 28);
-            pdf.text(`Generado: ${new Date().toLocaleString('es-MX')} por ${user?.name || user?.email}`, 14, 34);
 
-            const imgW = pdfW - 28;
-            const imgH = (canvas.height * imgW) / canvas.width;
-            let yPos = 40;
-            if (yPos + imgH > pdfH - 10) {
-                const maxH = pdfH - yPos - 10;
-                pdf.addImage(imgData, 'JPEG', 14, yPos, imgW, maxH);
-            } else {
-                pdf.addImage(imgData, 'JPEG', 14, yPos, imgW, imgH);
-            }
-
-            // AI section
-            if (aiNarrative) {
-                pdf.addPage();
-                pdf.setFontSize(14);
-                pdf.text('Analisis inteligente (generado por IA)', 14, 15);
-                pdf.setFontSize(8);
-                pdf.text('Este analisis fue generado automaticamente y debe validarse operativamente.', 14, 21);
-                pdf.setFontSize(10);
-                const splitText = pdf.splitTextToSize(aiNarrative.replace(/\*\*/g, ''), pdfW - 28);
-                pdf.text(splitText, 14, 28);
-            }
-
-            pdf.save(`reporte_${effectiveDates.from}_${effectiveDates.to}.pdf`);
-            toast.success('Reporte PDF exportado');
+            await generateMultiPagePDF({
+                reportData,
+                prevReportData: prevReportData,
+                qualityData,
+                attemptsData,
+                slaData,
+                aiNarrative,
+                aiCards,
+                meta: {
+                    dateFrom: effectiveDates.from,
+                    dateTo: effectiveDates.to,
+                    filters,
+                    userName: user?.name || user?.email || 'Sistema',
+                },
+            });
+            toast.success('Reporte PDF exportado (multi-pagina)');
         } catch (e) {
+            console.error('PDF generation error:', e);
             toast.error('Error al generar PDF');
         }
         setExportingPdf(false);
