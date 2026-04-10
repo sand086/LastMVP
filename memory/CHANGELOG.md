@@ -62,6 +62,48 @@
 - Backend: 14/15 tests passed (93%, 1 skipped due to ID format)
 - Test report: `/app/test_reports/iteration_35.json`
 
+## 2026-04-10 — Reports Module Complete Redesign
+
+### Filter Bar
+- Horizontal chip-based filter bar with "Hoy" as default period
+- Period options: Hoy, 7 días, 15 días, Mes actual, Mes anterior, Semana anterior, Personalizado
+- Client and Provider dropdown filters with chip UI
+- Date range display chip showing active period
+- Mobile responsive with collapsible filter panel
+
+### KPI Cards Strip (4 metrics)
+- Tasa de entrega, Tasa de visita, Calidad evidencias, SLA vs Target
+- Delta vs previous period (green up / red down arrows with pp units)
+- Health bar at bottom of each card (green ≥90%, amber ≥75%, red <75%)
+
+### Charts Section
+- **Combo chart**: Orders assigned (bars) vs Avg delivery time (line) per day using Recharts
+- **Donut chart**: Incident breakdown by type with legend and percentages
+- Backend `daily_stats` endpoint added to `generate_report` with date normalization
+
+### AI Insights On-Demand
+- Decoupled from report generation (report loads in <1 sec vs 23 sec)
+- "Generar IA" button triggers separate API call
+- Stale indicator when filters change after generation
+- Insight cards with lavender background
+
+### Tables
+- **Providers**: Rate bars, SLA badges (On target/At risk/Breach), activity dots
+- **Drivers**: Rate bars, amber background for SLA <60%, strike policy note
+- **Incidents**: Type + count, imputability note
+- **Attempts**: Distribution bars + retry causes
+- **Quality**: Score globe, completas/incompletas, by type chips, by provider bars
+- **SLA**: Consolidated view, editable brackets, provider/driver breakdown
+
+### Exports
+- **Excel**: Enhanced with filtered data
+- **PDF**: New client-side generation using jsPDF + html2canvas, includes header with metadata + AI insights page
+
+### Test Results
+- Backend: 9/9 passed (100%)
+- Frontend: 13/13 features verified (100%)
+- Test report: `/app/test_reports/iteration_36.json`
+
 ---
 
 ## 2026-04-09 — Discrepancy Detection
