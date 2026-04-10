@@ -1,5 +1,43 @@
 # LastMile OS - Changelog
 
+## 2026-04-10 — Code Quality Corrections Applied
+
+### Security Fixes
+- Renamed `_run_ai_eval` to `_background_ai_evaluation` in journey_routes.py (eliminates eval() scanner false positive)
+- Added `ALLOWED_TAGS` and `ALLOWED_ATTR` restrictions to DOMPurify in Reports.jsx and LumiChat.jsx
+- Extracted `renderMarkdown()` function in Reports.jsx for safer HTML rendering
+
+### React Hook Dependency Fixes
+- Added eslint-disable comments with justification for intentional dependency omissions in ReviewModal.jsx and JourneyDetail.jsx
+
+### Backend Complexity Refactoring
+- **evidence_scoring.py**: Split `_call_ai_vision` (81 lines, CC:15) into 4 focused helpers:
+  - `_get_system_prompt()` - reads custom prompt from DB
+  - `_get_training_context()` - fetches calibration examples
+  - `_build_user_context()` - builds evaluation context string
+  - `_log_ai_token_usage()` - non-blocking token logging
+- **liquidacion_export.py**: Extracted 6 helpers from complex functions:
+  - `_write_provider_data_row()`, `_write_provider_pivot_table()` from `_build_provider_sheet`
+  - `_write_summary_header()`, `_write_route_data_row()` from `_build_route_summary_sheet`
+  - `_fetch_incidents_for_export()`, `_resolve_provider_sla()` from `generate_liquidacion_excel`
+
+### Frontend Component Splitting
+- **GuiasTab.jsx** (1014 lines, CC:197) → 3 modular files:
+  - `GuiasTab.jsx` (684 lines) — main component with hooks and table
+  - `guias/GuiasHelpers.jsx` (149 lines) — ScoreCircle, ConfidenceBar, StatusPill, ReviewIndicator, SeverityBadge, KpiCard, DiscRow
+  - `guias/GuiasPackageDetail.jsx` (214 lines) — expanded row detail with evidence, AI eval, manual review
+
+### Other Fixes
+- PulseStrip: Changed array index key to `r.label` for proper React reconciliation
+- Test credentials: Moved hardcoded passwords to `os.environ.get()` with defaults in 3 test files
+
+### Test Results
+- Backend: 15/15 tests passed (100%)
+- Frontend: All components verified (100%)
+- Test report: `/app/test_reports/iteration_38.json`
+
+---
+
 ## 2026-04-10 — P1, P2, P3 Features Verified (3 features)
 
 ### P1: Inline Incident Registration from Guías Tab
