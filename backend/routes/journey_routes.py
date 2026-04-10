@@ -472,6 +472,8 @@ async def review_package_with_note(
         update_data["rejection_reason"] = note
     if adjusted_score is not None:
         update_data["adjusted_score"] = adjusted_score
+        update_data["ai_score"] = adjusted_score
+        update_data["evidence_score"] = adjusted_score
     if ai_incorrect:
         update_data["ai_evaluation_incorrect"] = True
 

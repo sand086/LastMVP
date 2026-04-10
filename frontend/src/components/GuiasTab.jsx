@@ -226,6 +226,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                     manually_reviewed: isApproval,
                     rejection_reason: isApproval ? null : `${reviewData.reason_category}: ${reviewData.reason_detail || ''}`,
                     reviewed_by: 'Tu',
+                    ...(reviewData.adjusted_score != null ? { ai_score: reviewData.adjusted_score, evidence_score: reviewData.adjusted_score } : {}),
                 },
             }));
             toast.success(isApproval ? 'Guia aprobada' : 'Guia rechazada');
