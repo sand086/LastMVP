@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { useAuth } from '../contexts/AuthContext';
 import { useSortableTable } from '../lib/useSortableTable';
@@ -12,41 +12,44 @@ import {
     FileText, Download, Loader2, Truck, Users, AlertTriangle,
     Sparkles, ShieldCheck, Target, BarChart3, ChevronDown, ChevronUp,
     TrendingUp, TrendingDown, RefreshCw, CheckCircle2, Clock,
+    Calendar, X, FileDown, Filter,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+    ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis,
+    CartesianGrid, Tooltip as RechartsTooltip, Legend,
+    PieChart, Pie, Cell,
+} from 'recharts';
 
-/* ─── Design tokens ─── */
+/* ─── Design tokens (from prompt spec) ─── */
 const T = {
-    bg: '#F5F4F1', surface: '#FFFFFF', surface2: '#F0EFEC',
-    border: '#E2E0DB', borderStrong: '#C8C6BF',
+    bg: '#f8f7f4', surface: '#FFFFFF', surface2: '#F0EFEC',
+    border: 'rgba(0,0,0,0.08)', borderSolid: '#E2E0DB',
     textPri: '#1A1916', textSec: '#6B6960', textTer: '#9C9A92',
-    blue: '#2563EB', green: '#16A34A', amber: '#D97706', coral: '#DC2626', teal: '#0D9488',
-    greenLt: '#F0FDF4', amberLt: '#FFFBEB', coralLt: '#FEF2F2', tealLt: '#F0FDFA',
+    teal: '#1D9E75', tealLt: '#E8F8F1',
+    green: '#16A34A', greenLt: '#F0FDF4',
+    amber: '#EF9F27', amberLt: '#FFFBEB',
+    coral: '#E24B4A', coralLt: '#FEF2F2',
+    blue: '#2563EB', blueLt: '#EFF6FF',
+    purple: '#3C3489', purpleLt: '#EEEDFE',
     radius: 10, radiusSm: 6,
 };
 
 const PERIODS = [
-    { label: 'Últimos 7 días', value: '7d' },
-    { label: 'Últimos 15 días', value: '15d' },
+    { label: 'Hoy', value: 'today' },
+    { label: '7 días', value: '7d' },
+    { label: '15 días', value: '15d' },
     { label: 'Mes actual', value: 'current_month' },
     { label: 'Mes anterior', value: 'prev_month' },
     { label: 'Semana anterior', value: 'prev_week' },
     { label: 'Personalizado', value: 'custom' },
 ];
 
-const SECTIONS = [
-    { id: 'providers', title: 'Métricas por proveedor', desc: 'Días operados, rutas, paquetes, tasa entrega, visita%, km', icon: Truck, defaultOn: true },
-    { id: 'drivers', title: 'Métricas por driver', desc: 'Desempeño individual por mensajero', icon: Users, defaultOn: true },
-    { id: 'incidents', title: 'Desglose de incidencias', desc: 'Conteo por tipo e imputabilidad', icon: AlertTriangle, defaultOn: true },
-    { id: 'attempts', title: 'Intentos de entrega', desc: '1°, 2°, 3er intento y causa de reintento', icon: RefreshCw, defaultOn: false, isNew: true },
-    { id: 'quality', title: 'Calidad de evidencias', desc: 'Score, errores por tipo, distribución', icon: ShieldCheck, defaultOn: true },
-    { id: 'sla', title: 'SLA vs Target', desc: 'Cumplimiento por nivel: driver, proveedor, ME→Cubbo', icon: Target, defaultOn: false, isNew: true },
-];
-
 const getDateRange = (preset) => {
     const now = new Date();
     const fmt = (d) => d.toISOString().split('T')[0];
     switch (preset) {
+        case 'today': return { from: fmt(now), to: fmt(now) };
         case '7d': { const f = new Date(now); f.setDate(f.getDate() - 6); return { from: fmt(f), to: fmt(now) }; }
         case '15d': { const f = new Date(now); f.setDate(f.getDate() - 14); return { from: fmt(f), to: fmt(now) }; }
         case 'current_month': return { from: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), to: fmt(now) };
@@ -56,20 +59,85 @@ const getDateRange = (preset) => {
     }
 };
 
-const ratePill = (val) => {
-    const n = parseFloat(val) || 0;
-    const bg = n >= 85 ? T.greenLt : n >= 70 ? T.amberLt : T.coralLt;
-    const color = n >= 85 ? T.green : n >= 70 ? T.amber : T.coral;
-    return <span style={{ padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, fontFamily: "'DM Mono', monospace", background: bg, color }}>{n.toFixed(1)}%</span>;
+const getPrevDateRange = (preset) => {
+    const now = new Date();
+    const fmt = (d) => d.toISOString().split('T')[0];
+    switch (preset) {
+        case 'today': { const y = new Date(now); y.setDate(y.getDate() - 1); return { from: fmt(y), to: fmt(y) }; }
+        case '7d': { const e = new Date(now); e.setDate(e.getDate() - 7); const s = new Date(e); s.setDate(s.getDate() - 6); return { from: fmt(s), to: fmt(e) }; }
+        case '15d': { const e = new Date(now); e.setDate(e.getDate() - 15); const s = new Date(e); s.setDate(s.getDate() - 14); return { from: fmt(s), to: fmt(e) }; }
+        case 'current_month': { const f = new Date(now.getFullYear(), now.getMonth() - 1, 1); return { from: fmt(f), to: fmt(new Date(now.getFullYear(), now.getMonth(), 0)) }; }
+        case 'prev_month': { const f = new Date(now.getFullYear(), now.getMonth() - 2, 1); return { from: fmt(f), to: fmt(new Date(now.getFullYear(), now.getMonth() - 1, 0)) }; }
+        default: return null;
+    }
 };
 
+const formatDateLabel = (dateStr) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T12:00:00');
+    return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+/* ─── Health bar color ─── */
+const healthColor = (val) => val >= 90 ? T.green : val >= 75 ? T.amber : T.coral;
+const healthBg = (val) => val >= 90 ? T.greenLt : val >= 75 ? T.amberLt : T.coralLt;
+
+/* ─── Rate pill with bar ─── */
+const RateCell = ({ value }) => {
+    const n = parseFloat(value) || 0;
+    const color = healthColor(n);
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 110 }}>
+            <div style={{ flex: 1, height: 6, borderRadius: 3, background: T.surface2, overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 3, width: `${Math.min(n, 100)}%`, background: color, transition: 'width 0.4s' }} />
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'DM Mono', monospace", color, minWidth: 42, textAlign: 'right' }}>{n.toFixed(1)}%</span>
+        </div>
+    );
+};
+
+/* ─── SLA Badge ─── */
+const SlaBadge = ({ actual, target }) => {
+    const diff = (actual || 0) - (target || 75);
+    if (diff >= 0) return <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: T.greenLt, color: T.green }} data-testid="sla-on-target">On target</span>;
+    if (diff >= -5) return <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: T.amberLt, color: T.amber }} data-testid="sla-at-risk">At risk</span>;
+    return <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: T.coralLt, color: T.coral }} data-testid="sla-breach">Breach</span>;
+};
+
+/* ─── Activity dot ─── */
+const ActivityDot = ({ active }) => (
+    <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: active ? T.green : T.textTer, marginRight: 8, flexShrink: 0 }} />
+);
+
+/* ─── Severity pill ─── */
 const severityPill = (sev) => {
     const map = { alta: T.coral, media: T.amber, baja: T.green };
     return <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, background: map[sev?.toLowerCase()] ? `${map[sev.toLowerCase()]}20` : T.surface2, color: map[sev?.toLowerCase()] || T.textSec }}>{sev || 'N/A'}</span>;
 };
 
+/* ─── KPI Card ─── */
+const KpiCard = ({ label, value, delta, sub, healthVal, borderRight }) => {
+    const hc = healthColor(parseFloat(value) || 0);
+    return (
+        <div style={{ padding: '18px 22px', borderRight: borderRight ? `1px solid ${T.borderSolid}` : 'none', position: 'relative' }}>
+            <p style={{ fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em', color: T.textTer, marginBottom: 6 }}>{label}</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontSize: 26, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", color: T.textPri }}>{value}</span>
+                {delta !== null && delta !== undefined && (
+                    <span style={{ fontSize: 12, fontWeight: 600, color: delta >= 0 ? T.green : T.coral, display: 'flex', alignItems: 'center', gap: 2 }}>
+                        {delta >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                        {delta >= 0 ? '+' : ''}{delta.toFixed(1)}pp
+                    </span>
+                )}
+            </div>
+            {sub && <p style={{ fontSize: 11, color: T.textTer, marginTop: 3 }}>{sub}</p>}
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: healthVal != null ? hc : T.borderSolid }} />
+        </div>
+    );
+};
+
 /* ─── KPI Strip ─── */
-const KPIStrip = ({ reportData, slaData, qualityData }) => {
+const KPIStrip = ({ reportData, slaData, qualityData, prevData }) => {
     const delivery = reportData?.delivery_rate || 0;
     const totalPkg = reportData?.total_packages || 1;
     const totalDelivered = reportData?.total_delivered || 0;
@@ -79,69 +147,186 @@ const KPIStrip = ({ reportData, slaData, qualityData }) => {
     const sla = slaData?.consolidated?.actual || delivery;
     const slaTarget = slaData?.consolidated?.target || 75;
 
-    const items = [
-        { label: 'Tasa de entrega', value: `${delivery}%`, delta: null },
-        { label: 'Tasa de visita', value: `${visitRate}%`, delta: null },
-        { label: 'Calidad evidencias', value: `${qualityAvg}%`, delta: null },
-        { label: 'SLA vs target', value: `${sla}%`, sub: `Target: ${slaTarget}%`, delta: sla - slaTarget },
-    ];
+    const prevDelivery = prevData?.delivery_rate || null;
+    const prevPkg = prevData?.total_packages || 1;
+    const prevDelivered = prevData?.total_delivered || 0;
+    const prevFailed = prevData?.total_failed || 0;
+    const prevVisit = prevPkg > 0 ? Math.round((prevDelivered + prevFailed) / prevPkg * 100 * 10) / 10 : null;
+
+    const deliveryDelta = prevDelivery != null ? delivery - prevDelivery : null;
+    const visitDelta = prevVisit != null ? visitRate - prevVisit : null;
 
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', border: `1px solid ${T.border}`, borderRadius: T.radius, background: T.surface, overflow: 'hidden' }} data-testid="kpi-strip">
-            {items.map((item, i) => (
-                <div key={`kpi-${item.label}`} style={{ padding: '16px 20px', borderRight: i < 3 ? `1px solid ${T.border}` : 'none' }}>
-                    <p style={{ fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em', color: T.textTer, marginBottom: 4 }}>{item.label}</p>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                        <span style={{ fontSize: 24, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", color: T.textPri }}>{item.value}</span>
-                        {item.delta !== null && (
-                            <span style={{ fontSize: 12, fontWeight: 500, color: item.delta >= 0 ? T.green : T.amber, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                {item.delta >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                                {item.delta >= 0 ? '+' : ''}{item.delta.toFixed(1)}pp
-                            </span>
-                        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', border: `1px solid ${T.borderSolid}`, borderRadius: T.radius, background: T.surface, overflow: 'hidden' }} data-testid="kpi-strip">
+            <KpiCard label="Tasa de entrega" value={`${delivery}%`} delta={deliveryDelta} healthVal={delivery} borderRight />
+            <KpiCard label="Tasa de visita" value={`${visitRate}%`} delta={visitDelta} healthVal={visitRate} borderRight />
+            <KpiCard label="Calidad evidencias" value={`${qualityAvg}%`} delta={null} healthVal={qualityAvg} sub={qualityAvg === 0 ? 'Sin evaluaciones' : undefined} borderRight />
+            <KpiCard label="SLA vs Target" value={`${sla}%`} delta={sla - slaTarget} sub={`Target: ${slaTarget}%`} healthVal={sla} />
+        </div>
+    );
+};
+
+/* ─── Charts Section ─── */
+const DONUT_COLORS = [T.coral, T.amber, T.teal, T.blue, T.purple, T.green];
+
+const ChartsSection = ({ reportData, journeyChartData }) => {
+    const incidentData = useMemo(() => {
+        if (!reportData?.incidents_by_type) return [];
+        return Object.entries(reportData.incidents_by_type).map(([name, value]) => ({ name, value }));
+    }, [reportData]);
+    const totalIncidents = incidentData.reduce((s, d) => s + d.value, 0);
+
+    return (
+        <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 16 }} data-testid="charts-section">
+            {/* Combo chart */}
+            <div style={{ background: T.surface, border: `1px solid ${T.borderSolid}`, borderRadius: T.radius, padding: '20px 20px 12px' }}>
+                <h3 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, marginBottom: 16 }}>Ordenes asignadas vs Tiempo promedio de entrega</h3>
+                {journeyChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={240}>
+                        <ComposedChart data={journeyChartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={T.borderSolid} />
+                            <XAxis dataKey="date" tick={{ fontSize: 11, fill: T.textTer }} />
+                            <YAxis yAxisId="left" tick={{ fontSize: 11, fill: T.textTer }} />
+                            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: T.textTer }} unit=" min" />
+                            <RechartsTooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: `1px solid ${T.borderSolid}` }} />
+                            <Legend wrapperStyle={{ fontSize: 11 }} />
+                            <Bar yAxisId="left" dataKey="ordenes" name="Ordenes" fill={T.teal} radius={[3, 3, 0, 0]} barSize={28} />
+                            <Line yAxisId="right" type="monotone" dataKey="tiempo_min" name="Tiempo (min)" stroke={T.amber} strokeWidth={2} dot={{ r: 3 }} />
+                        </ComposedChart>
+                    </ResponsiveContainer>
+                ) : (
+                    <div style={{ height: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textTer, fontSize: 13 }}>Sin datos para graficar en este periodo</div>
+                )}
+            </div>
+            {/* Donut chart */}
+            <div style={{ background: T.surface, border: `1px solid ${T.borderSolid}`, borderRadius: T.radius, padding: '20px' }}>
+                <h3 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, marginBottom: 16 }}>Desglose de incidencias</h3>
+                {incidentData.length > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <ResponsiveContainer width={160} height={160}>
+                            <PieChart>
+                                <Pie data={incidentData} cx="50%" cy="50%" innerRadius={42} outerRadius={70} dataKey="value" paddingAngle={2}>
+                                    {incidentData.map((_, i) => <Cell key={`cell-${i}`} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                                </Pie>
+                                <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" style={{ fontSize: 22, fontWeight: 700, fill: T.textPri }}>{totalIncidents}</text>
+                            </PieChart>
+                        </ResponsiveContainer>
+                        <div style={{ flex: 1 }}>
+                            {incidentData.map((d, i) => (
+                                <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                    <span style={{ width: 10, height: 10, borderRadius: 2, background: DONUT_COLORS[i % DONUT_COLORS.length], flexShrink: 0 }} />
+                                    <span style={{ flex: 1, fontSize: 12, color: T.textSec, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                                    <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'DM Mono', monospace", color: T.textPri }}>{d.value}</span>
+                                    <span style={{ fontSize: 10, color: T.textTer }}>{totalIncidents > 0 ? Math.round(d.value / totalIncidents * 100) : 0}%</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                    {item.sub && <p style={{ fontSize: 11, color: T.textTer, marginTop: 2 }}>{item.sub}</p>}
+                ) : (
+                    <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textTer, fontSize: 13 }}>Sin incidencias registradas</div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+/* ─── AI Insights Cards ─── */
+const AiInsightsBar = ({ narrative, generating, stale, onRegenerate }) => {
+    if (!narrative && !generating) return null;
+
+    const parseInsights = (text) => {
+        if (!text) return [];
+        const lines = text.split('\n').filter(l => l.trim());
+        const categories = ['Insight IA', 'Alerta SLA', 'Tendencia', 'Anomalia'];
+        const insights = [];
+        let current = { category: 'Insight IA', text: '' };
+        for (const line of lines) {
+            const cleaned = line.replace(/\*\*/g, '').trim();
+            if (cleaned.length < 10) continue;
+            if (insights.length < 3) {
+                insights.push({ category: categories[insights.length % categories.length], text: cleaned.slice(0, 200) });
+            }
+        }
+        return insights.length > 0 ? insights : [{ category: 'Insight IA', text: text.slice(0, 300) }];
+    };
+
+    const insights = parseInsights(narrative);
+
+    return (
+        <div data-testid="ai-insights-bar">
+            {stale && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: T.radiusSm, background: T.amberLt, marginBottom: 8, fontSize: 12, color: T.amber }}>
+                    <AlertTriangle size={14} />
+                    Los filtros cambiaron desde la ultima generacion.
+                    <button onClick={onRegenerate} style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 4, border: `1px solid ${T.amber}`, background: 'transparent', color: T.amber, fontSize: 11, fontWeight: 600, cursor: 'pointer' }} data-testid="regenerate-ai-btn">Regenerar IA</button>
                 </div>
-            ))}
+            )}
+            {generating ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 20, borderRadius: T.radius, background: T.purpleLt, color: T.purple, fontSize: 13 }}>
+                    <Loader2 size={16} className="animate-spin" /> Generando analisis inteligente...
+                </div>
+            ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(insights.length, 3)}, 1fr)`, gap: 12 }}>
+                    {insights.map((ins, i) => (
+                        <div key={`insight-${i}`} style={{ padding: '14px 16px', borderRadius: T.radius, background: T.purpleLt, border: `1px solid rgba(60,52,137,0.12)` }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: T.purple, display: 'block', marginBottom: 6 }}>{ins.category}</span>
+                            <p style={{ fontSize: 13, lineHeight: 1.5, color: T.textPri, margin: 0 }}>{ins.text}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 };
 
 /* ─── Tab: Providers ─── */
-const ProvidersTab = ({ data }) => {
+const ProvidersTab = ({ data, slaData }) => {
     const rows = useMemo(() => {
         if (!data?.provider_metrics) return [];
+        const slaMap = {};
+        if (slaData?.by_provider) {
+            for (const p of slaData.by_provider) {
+                slaMap[p.provider_name] = p;
+            }
+        }
         return Object.entries(data.provider_metrics).map(([name, m]) => ({
             name, ...m,
             visit_rate: m.packages_loaded > 0 ? Math.round((m.delivered + m.failed) / m.packages_loaded * 100 * 10) / 10 : 0,
+            sla_actual: slaMap[name]?.sla_actual || m.delivery_rate || 0,
+            sla_target: slaMap[name]?.target || 75,
+            active_today: m.days_operated > 0,
         }));
-    }, [data]);
+    }, [data, slaData]);
     const { sortedData, SortHeader } = useSortableTable(rows, 'delivery_rate', 'desc');
-    if (!rows.length) return <div style={{ padding: 40, textAlign: 'center', color: T.textTer }}>Sin datos de proveedores</div>;
+
+    if (!rows.length) return <EmptyState message="Sin datos de proveedores para este periodo." />;
+
     return (
         <div className="overflow-x-auto">
             <table className="lm-table" style={{ width: '100%' }}>
                 <thead><tr>
                     <SortHeader field="name">Proveedor</SortHeader>
-                    <SortHeader field="days_operated">Días op.</SortHeader>
+                    <SortHeader field="days_operated">Dias op.</SortHeader>
                     <SortHeader field="routes">Rutas</SortHeader>
                     <SortHeader field="packages_loaded">Paquetes</SortHeader>
                     <SortHeader field="delivered">Entregados</SortHeader>
                     <SortHeader field="delivery_rate">Entrega%</SortHeader>
                     <SortHeader field="visit_rate">Visita%</SortHeader>
                     <SortHeader field="km_total">Km totales</SortHeader>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 500, fontSize: 12, color: T.textTer, textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: `1px solid ${T.borderSolid}`, background: T.surface2 }}>SLA</th>
                 </tr></thead>
                 <tbody>
                     {sortedData.map(r => (
                         <tr key={r.name}>
-                            <td style={{ fontWeight: 500 }}><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: r.delivery_rate >= 85 ? T.green : r.delivery_rate >= 70 ? T.amber : T.coral, marginRight: 8 }} />{r.name}</td>
+                            <td style={{ fontWeight: 500 }}><ActivityDot active={r.active_today} />{r.name}</td>
                             <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.days_operated}</td>
                             <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.routes}</td>
                             <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.packages_loaded}</td>
                             <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.delivered}</td>
-                            <td>{ratePill(r.delivery_rate)}</td>
-                            <td>{ratePill(r.visit_rate)}</td>
+                            <td><RateCell value={r.delivery_rate} /></td>
+                            <td><RateCell value={r.visit_rate} /></td>
                             <td style={{ fontFamily: "'DM Mono', monospace" }}>{(r.km_total || 0).toLocaleString()}</td>
+                            <td><SlaBadge actual={r.sla_actual} target={r.sla_target} /></td>
                         </tr>
                     ))}
                 </tbody>
@@ -157,14 +342,16 @@ const DriversTab = ({ data }) => {
         return Object.entries(data.driver_metrics).map(([name, m]) => ({ name, ...m }));
     }, [data]);
     const { sortedData, SortHeader } = useSortableTable(rows, 'delivery_rate', 'desc');
-    if (!rows.length) return <div style={{ padding: 40, textAlign: 'center', color: T.textTer }}>Sin datos de drivers</div>;
+
+    if (!rows.length) return <EmptyState message="Sin datos de drivers para este periodo." />;
+
     return (
         <>
             <div className="overflow-x-auto">
                 <table className="lm-table" style={{ width: '100%' }}>
                     <thead><tr>
                         <SortHeader field="name">Driver</SortHeader>
-                        <SortHeader field="days_operated">Días op.</SortHeader>
+                        <SortHeader field="days_operated">Dias op.</SortHeader>
                         <SortHeader field="routes">Rutas</SortHeader>
                         <SortHeader field="packages_loaded">Paquetes</SortHeader>
                         <SortHeader field="delivered">Entregados</SortHeader>
@@ -174,20 +361,20 @@ const DriversTab = ({ data }) => {
                     <tbody>
                         {sortedData.map(r => (
                             <tr key={r.name} style={r.delivery_rate < 60 ? { background: T.amberLt } : {}}>
-                                <td style={{ fontWeight: 500 }}>{r.name}</td>
+                                <td style={{ fontWeight: 500 }}><ActivityDot active={r.days_operated > 0} />{r.name}</td>
                                 <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.days_operated}</td>
                                 <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.routes}</td>
                                 <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.packages_loaded}</td>
                                 <td style={{ fontFamily: "'DM Mono', monospace" }}>{r.delivered}</td>
-                                <td>{ratePill(r.delivery_rate)}</td>
+                                <td><RateCell value={r.delivery_rate} /></td>
                                 <td style={{ fontFamily: "'DM Mono', monospace" }}>{(r.km_total || 0).toLocaleString()}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
-            <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.border}`, fontSize: 12, color: T.textTer }}>
-                Política de strikes: 1° aviso → 2° descanso operativo → 3° baja. Filas con fondo ámbar: SLA individual &lt;60%.
+            <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.borderSolid}`, fontSize: 12, color: T.textTer }}>
+                Politica de strikes: 1er aviso - 2do descanso operativo - 3ro baja. Filas con fondo ambar: SLA individual &lt;60%.
             </div>
         </>
     );
@@ -200,7 +387,9 @@ const IncidentsTab = ({ data }) => {
         return Object.entries(data.incidents_by_type).map(([type, count]) => ({ type, total: count }));
     }, [data]);
     const { sortedData, SortHeader } = useSortableTable(rows, 'total', 'desc');
-    if (!rows.length) return <div style={{ padding: 40, textAlign: 'center', color: T.textTer }}>Sin incidencias en el período</div>;
+
+    if (!rows.length) return <EmptyState message="Sin incidencias registradas. Buen desempeno!" icon={CheckCircle2} />;
+
     return (
         <>
             <div className="overflow-x-auto">
@@ -219,7 +408,7 @@ const IncidentsTab = ({ data }) => {
                     </tbody>
                 </table>
             </div>
-            <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.border}`, fontSize: 12, color: T.textTer }}>
+            <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.borderSolid}`, fontSize: 12, color: T.textTer }}>
                 Incidencias de zona (accesibilidad) NO penalizan el SLA del driver.
             </div>
         </>
@@ -228,25 +417,24 @@ const IncidentsTab = ({ data }) => {
 
 /* ─── Tab: Attempts ─── */
 const AttemptsTab = ({ attempts }) => {
-    if (!attempts) return <div style={{ padding: 40, textAlign: 'center', color: T.textTer }}>Cargando...</div>;
+    if (!attempts) return <EmptyState message="Sin datos de intentos para este periodo." />;
     const bars = [
         { label: '1er intento', ...attempts.first_attempt, color: T.green },
         { label: '2do intento', ...attempts.second_attempt, color: T.amber },
         { label: '3er+ intento', ...attempts.third_attempt, color: T.coral },
     ];
     const causes = [
-        { label: 'Gestión del driver', key: 'driver_management', color: T.coral },
+        { label: 'Gestion del driver', key: 'driver_management', color: T.coral },
         { label: 'Cliente ausente', key: 'client_absent', color: T.amber },
-        { label: 'Dirección errónea', key: 'wrong_address', color: T.blue },
+        { label: 'Direccion erronea', key: 'wrong_address', color: T.blue },
         { label: 'Zona sin acceso', key: 'zone_no_access', color: T.teal },
     ];
     const maxBar = Math.max(1, ...bars.map(b => b.pct));
-
     return (
         <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, padding: 24 }}>
                 <div>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, marginBottom: 16 }}>Distribución de intentos</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, marginBottom: 16 }}>Distribucion de intentos</h4>
                     {bars.map(b => (
                         <div key={b.label} style={{ marginBottom: 14 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -260,7 +448,7 @@ const AttemptsTab = ({ attempts }) => {
                     ))}
                 </div>
                 <div>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, marginBottom: 16 }}>Causa de reintento (2°+)</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, marginBottom: 16 }}>Causa de reintento (2do+)</h4>
                     {causes.map(c => {
                         const d = attempts.retry_causes?.[c.key] || { count: 0, pct: 0 };
                         return (
@@ -277,8 +465,8 @@ const AttemptsTab = ({ attempts }) => {
                     })}
                 </div>
             </div>
-            <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.border}`, fontSize: 12, color: T.textTer }}>
-                Total de paquetes en período: {attempts.total_packages || 0}. Reintentos impactan directamente el costo operativo.
+            <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.borderSolid}`, fontSize: 12, color: T.textTer }}>
+                Total de paquetes en periodo: {attempts.total_packages || 0}. Reintentos impactan directamente el costo operativo.
             </div>
         </>
     );
@@ -294,12 +482,10 @@ const QualityTab = ({ data }) => {
     const incomplete = summary.incomplete || 0;
     const byProvider = qd?.by_provider || [];
     const byType = qd?.by_type || [];
-
-    if (!total && !byProvider.length) return <div style={{ padding: 40, textAlign: 'center', color: T.textTer }}>Sin datos de calidad en el período</div>;
-
+    if (!total && !byProvider.length) return <EmptyState message="Sin evidencias registradas para este periodo." />;
     return (
         <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 0 }}>
-            <div style={{ padding: 24, borderRight: `1px solid ${T.border}` }}>
+            <div style={{ padding: 24, borderRight: `1px solid ${T.borderSolid}` }}>
                 <div style={{ textAlign: 'center', marginBottom: 16 }}>
                     <div style={{ fontSize: 48, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", color: avg >= 90 ? T.green : avg >= 70 ? T.amber : T.coral }}>{avg.toFixed(1)}</div>
                     <div style={{ fontSize: 12, color: T.textTer }}>Score global</div>
@@ -344,9 +530,6 @@ const QualityTab = ({ data }) => {
                         ))}
                     </div>
                 )}
-                <div style={{ marginTop: 16, padding: '10px 14px', borderRadius: T.radiusSm, background: T.surface2, fontSize: 12, color: T.textTer }}>
-                    Evaluación automática sobre entregas del período. Modelo Claude Vision.
-                </div>
             </div>
         </div>
     );
@@ -356,36 +539,20 @@ const QualityTab = ({ data }) => {
 const SLATab = ({ slaData, canEditBrackets }) => {
     const [brackets, setBrackets] = useState([]);
     const [saving, setSaving] = useState(false);
-
-    useEffect(() => {
-        if (slaData?.brackets) setBrackets(slaData.brackets.map(b => ({ ...b })));
-    }, [slaData]);
-
-    if (!slaData) return <div style={{ padding: 40, textAlign: 'center', color: T.textTer }}>Cargando SLA...</div>;
-
+    useEffect(() => { if (slaData?.brackets) setBrackets(slaData.brackets.map(b => ({ ...b }))); }, [slaData]);
+    if (!slaData) return <EmptyState message="Cargando SLA..." />;
     const { consolidated, by_provider, by_driver } = slaData;
     const statusIcon = (s) => s === 'above' ? <CheckCircle2 size={14} color={T.green} /> : <AlertTriangle size={14} color={T.coral} />;
     const bracketStatusLabel = { exceeded: 'Superado', active: 'En curso', pending: 'Pendiente' };
     const bracketStatusColor = { exceeded: T.green, active: T.amber, pending: T.textTer };
-
-    const saveBrackets = async () => {
-        setSaving(true);
-        try {
-            await updateSlaTargets(brackets);
-            toast.success('SLA targets actualizados');
-        } catch { toast.error('Error al guardar'); }
-        setSaving(false);
-    };
+    const saveBrackets = async () => { setSaving(true); try { await updateSlaTargets(brackets); toast.success('SLA targets actualizados'); } catch { toast.error('Error al guardar'); } setSaving(false); };
 
     return (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-            {/* Left: Consolidated */}
-            <div style={{ padding: 24, borderRight: `1px solid ${T.border}` }}>
-                <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>SLA Consolidado ME → Cubbo</h4>
+            <div style={{ padding: 24, borderRight: `1px solid ${T.borderSolid}` }}>
+                <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>SLA Consolidado ME - Cubbo</h4>
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                    <div style={{ fontSize: 48, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", color: consolidated.actual >= consolidated.target ? T.green : T.coral }}>
-                        {consolidated.actual}%
-                    </div>
+                    <div style={{ fontSize: 48, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", color: consolidated.actual >= consolidated.target ? T.green : T.coral }}>{consolidated.actual}%</div>
                     <div style={{ height: 8, borderRadius: 4, background: T.surface2, marginTop: 8 }}>
                         <div style={{ height: '100%', borderRadius: 4, width: `${Math.min(consolidated.actual / consolidated.target * 100, 100)}%`, background: consolidated.actual >= consolidated.target ? T.green : T.amber }} />
                     </div>
@@ -396,32 +563,15 @@ const SLATab = ({ slaData, canEditBrackets }) => {
                     <div key={`bracket-${b.label}`} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '8px 12px', borderRadius: T.radiusSm, background: T.surface2 }}>
                         <span style={{ fontSize: 13, fontWeight: 500, width: 80, flexShrink: 0 }}>{b.label}</span>
                         {canEditBrackets ? (
-                            <input
-                                type="number"
-                                value={b.target}
-                                onChange={e => {
-                                    const updated = [...brackets];
-                                    updated[i] = { ...updated[i], target: Number(e.target.value) };
-                                    setBrackets(updated);
-                                }}
-                                onBlur={saveBrackets}
-                                style={{ width: 60, padding: '4px 8px', border: `1px solid ${T.border}`, borderRadius: 4, fontSize: 13, fontFamily: "'DM Mono', monospace", textAlign: 'center' }}
-                                data-testid={`sla-bracket-input-${i}`}
-                            />
-                        ) : (
-                            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 600 }}>{b.target}%</span>
-                        )}
+                            <input type="number" value={b.target} onChange={e => { const u = [...brackets]; u[i] = { ...u[i], target: Number(e.target.value) }; setBrackets(u); }} onBlur={saveBrackets} style={{ width: 60, padding: '4px 8px', border: `1px solid ${T.borderSolid}`, borderRadius: 4, fontSize: 13, fontFamily: "'DM Mono', monospace", textAlign: 'center' }} data-testid={`sla-bracket-input-${i}`} />
+                        ) : (<span style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 600 }}>{b.target}%</span>)}
                         <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#E5E5E0' }}>
                             <div style={{ height: '100%', borderRadius: 3, width: `${Math.min(consolidated.actual / b.target * 100, 100)}%`, background: bracketStatusColor[b.status] || T.textTer }} />
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 500, color: bracketStatusColor[b.status] || T.textTer, whiteSpace: 'nowrap' }}>
-                            {bracketStatusLabel[b.status] || b.status}
-                        </span>
+                        <span style={{ fontSize: 11, fontWeight: 500, color: bracketStatusColor[b.status] || T.textTer, whiteSpace: 'nowrap' }}>{bracketStatusLabel[b.status] || b.status}</span>
                     </div>
                 ))}
             </div>
-
-            {/* Right: By provider + driver */}
             <div style={{ padding: 24 }}>
                 <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Por proveedor</h4>
                 <table className="lm-table" style={{ width: '100%', marginBottom: 24 }}>
@@ -430,7 +580,7 @@ const SLATab = ({ slaData, canEditBrackets }) => {
                         {by_provider?.map(p => (
                             <tr key={p.provider_name} style={p.status === 'below' ? { background: T.coralLt } : {}}>
                                 <td style={{ fontWeight: 500 }}>{p.provider_name}</td>
-                                <td>{ratePill(p.sla_actual)}</td>
+                                <td><RateCell value={p.sla_actual} /></td>
                                 <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 13 }}>{p.target}%</td>
                                 <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: p.gap_pp >= 0 ? T.green : T.coral }}>{p.gap_pp >= 0 ? '+' : ''}{p.gap_pp}pp</td>
                                 <td>{statusIcon(p.status)}</td>
@@ -438,7 +588,6 @@ const SLATab = ({ slaData, canEditBrackets }) => {
                         ))}
                     </tbody>
                 </table>
-
                 <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Top drivers</h4>
                 <table className="lm-table" style={{ width: '100%' }}>
                     <thead><tr><th>Driver</th><th>SLA</th><th>vs Target</th><th></th></tr></thead>
@@ -446,7 +595,7 @@ const SLATab = ({ slaData, canEditBrackets }) => {
                         {by_driver?.slice(0, 8).map(d => (
                             <tr key={d.driver_name} style={d.status === 'below' ? { background: T.coralLt } : {}}>
                                 <td style={{ fontWeight: 500, fontSize: 13 }}>{d.driver_name}</td>
-                                <td>{ratePill(d.sla_actual)}</td>
+                                <td><RateCell value={d.sla_actual} /></td>
                                 <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: d.gap_pp >= 0 ? T.green : T.coral }}>{d.gap_pp >= 0 ? '+' : ''}{d.gap_pp}pp</td>
                                 <td>{statusIcon(d.status)}</td>
                             </tr>
@@ -458,44 +607,70 @@ const SLATab = ({ slaData, canEditBrackets }) => {
     );
 };
 
+/* ─── Empty State ─── */
+const EmptyState = ({ message, icon: Icon = FileText, onPeriodChange }) => (
+    <div style={{ padding: '48px 24px', textAlign: 'center' }} data-testid="empty-state">
+        <Icon size={32} color={T.textTer} style={{ marginBottom: 12 }} />
+        <p style={{ fontSize: 14, color: T.textSec, marginBottom: 16 }}>{message}</p>
+        {onPeriodChange && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+                {['Ayer', 'Ultimos 7 dias', 'Semana anterior'].map(label => {
+                    const val = label === 'Ayer' ? 'today' : label.includes('7') ? '7d' : 'prev_week';
+                    return (
+                        <button key={label} onClick={() => onPeriodChange(val === 'today' ? '7d' : val)} style={{ padding: '6px 14px', borderRadius: 14, border: `1px solid ${T.borderSolid}`, background: T.surface, fontSize: 12, cursor: 'pointer', color: T.textPri }} data-testid={`quick-period-${val}`}>{label}</button>
+                    );
+                })}
+            </div>
+        )}
+    </div>
+);
 
-/* ═════════════════════════════════════════════════════════════════ */
-/*                        REPORTS PAGE                              */
-/* ═════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*                          REPORTS PAGE                              */
+/* ═══════════════════════════════════════════════════════════════════ */
 
 const Reports = () => {
     const { user, canEdit } = useAuth();
     const canEditBrackets = ['coordinator', 'developer'].includes(user?.role);
+    const isProvider = user?.role === 'proveedor';
 
     // Global state
-    const [period, setPeriod] = useState('current_month');
+    const [period, setPeriod] = useState('today');
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
     const [clientId, setClientId] = useState('');
     const [providerId, setProviderId] = useState('');
-    const [sections, setSections] = useState(['providers', 'drivers', 'incidents', 'quality']);
+    const sections = useMemo(() => ['providers', 'drivers', 'incidents', 'attempts', 'quality', 'sla'], []);
 
     // Data
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
     const [reportData, setReportData] = useState(null);
+    const [prevReportData, setPrevReportData] = useState(null);
     const [qualityData, setQualityData] = useState(null);
     const [attemptsData, setAttemptsData] = useState(null);
     const [slaData, setSlaData] = useState(null);
     const [aiNarrative, setAiNarrative] = useState(null);
-    const [aiPeriod, setAiPeriod] = useState('');
+    const [aiStale, setAiStale] = useState(false);
+    const [journeyChartData, setJourneyChartData] = useState([]);
 
     // UI state
     const [loading, setLoading] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [exporting, setExporting] = useState(false);
+    const [exportingPdf, setExportingPdf] = useState(false);
     const [activeTab, setActiveTab] = useState('providers');
-    const [showAI, setShowAI] = useState(false);
+    const [showClientDrop, setShowClientDrop] = useState(false);
+    const [showProviderDrop, setShowProviderDrop] = useState(false);
+    const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
     const effectiveDates = useMemo(() => {
         if (period === 'custom' && dateFrom && dateTo) return { from: dateFrom, to: dateTo };
         return getDateRange(period);
     }, [period, dateFrom, dateTo]);
+
+    const prevDates = useMemo(() => getPrevDateRange(period), [period]);
 
     // Load clients/providers once
     useEffect(() => {
@@ -505,51 +680,70 @@ const Reports = () => {
         }).catch(() => {});
     }, []);
 
-    // Fetch report data when filters change
+    const selectedClientName = useMemo(() => clients.find(c => c.id === clientId)?.name || 'Todos los clientes', [clients, clientId]);
+    const selectedProviderName = useMemo(() => providers.find(p => p.id === providerId)?.name || 'Todos los proveedores', [providers, providerId]);
+
+    // Fetch data
     const fetchData = useCallback(async () => {
         setLoading(true);
+        if (aiNarrative) setAiStale(true);
         try {
             const params = { date_from: effectiveDates.from, date_to: effectiveDates.to };
             if (clientId) params.client_id = clientId;
             if (providerId) params.provider_id = providerId;
 
-            const promises = [
+            const [report, quality, attempts, sla] = await Promise.allSettled([
                 generateReport({ ...params, sections }),
-            ];
-            if (sections.includes('quality')) promises.push(getQualityReport(params).catch(() => ({ data: null })));
-            else promises.push(Promise.resolve({ data: null }));
+                getQualityReport(params),
+                getReportAttempts(params),
+                getReportSla(params),
+            ]);
 
-            if (sections.includes('attempts')) promises.push(getReportAttempts(params).catch(() => ({ data: null })));
-            else promises.push(Promise.resolve({ data: null }));
+            setReportData(report.status === 'fulfilled' ? report.value.data : null);
+            setQualityData(quality.status === 'fulfilled' ? quality.value.data : null);
+            setAttemptsData(attempts.status === 'fulfilled' ? attempts.value.data : null);
+            setSlaData(sla.status === 'fulfilled' ? sla.value.data : null);
 
-            if (sections.includes('sla')) promises.push(getReportSla(params).catch(() => ({ data: null })));
-            else promises.push(Promise.resolve({ data: null }));
+            // Build chart data from report
+            const rd = report.status === 'fulfilled' ? report.value.data : null;
+            if (rd?.daily_stats) {
+                setJourneyChartData(rd.daily_stats.map(d => ({
+                    date: d.date ? d.date.slice(5, 10) : '',
+                    ordenes: d.packages || 0,
+                    tiempo_min: d.avg_delivery_time || 0,
+                })));
+            } else {
+                setJourneyChartData([]);
+            }
 
-            const [report, quality, attempts, sla] = await Promise.all(promises);
-            setReportData(report.data);
-            setQualityData(quality.data);
-            setAttemptsData(attempts.data);
-            setSlaData(sla.data);
-        } catch (e) {
+            // Fetch prev period for delta comparison
+            if (prevDates) {
+                try {
+                    const prevParams = { date_from: prevDates.from, date_to: prevDates.to };
+                    if (clientId) prevParams.client_id = clientId;
+                    if (providerId) prevParams.provider_id = providerId;
+                    const prevRes = await generateReport({ ...prevParams, sections: ['providers'] });
+                    setPrevReportData(prevRes.data);
+                } catch { setPrevReportData(null); }
+            }
+        } catch {
             toast.error('Error al cargar datos');
         } finally {
             setLoading(false);
         }
-    }, [effectiveDates, clientId, providerId, sections]);
+    }, [effectiveDates, clientId, providerId, sections, prevDates, aiNarrative]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
     const handleGenerateAI = async () => {
-        if (showAI && aiNarrative) { setShowAI(false); return; }
         setGenerating(true);
-        setShowAI(true);
+        setAiStale(false);
         try {
             const res = await generateAiReport({
                 period, date_from: effectiveDates.from, date_to: effectiveDates.to,
                 client_id: clientId || undefined, provider_id: providerId || undefined, sections,
             });
             setAiNarrative(res.data.narrative);
-            setAiPeriod(res.data.period);
         } catch {
             setAiNarrative('Error al generar el reporte con IA.');
         } finally {
@@ -561,19 +755,70 @@ const Reports = () => {
         setExporting(true);
         try {
             const res = await generateReportExcel({
-                date_from: effectiveDates.from,
-                date_to: effectiveDates.to,
-                sections,
-                client_id: clientId || undefined,
-                provider_id: providerId || undefined,
+                date_from: effectiveDates.from, date_to: effectiveDates.to,
+                sections, client_id: clientId || undefined, provider_id: providerId || undefined,
             });
             downloadFile(res.data, `reporte_${effectiveDates.from}_${effectiveDates.to}.xlsx`);
-            toast.success('Reporte exportado');
+            toast.success('Reporte Excel exportado');
         } catch { toast.error('Error al exportar'); }
         setExporting(false);
     };
 
-    const toggleSection = (id) => setSections(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
+    const handleExportPDF = async () => {
+        setExportingPdf(true);
+        try {
+            const { default: jsPDF } = await import('jspdf');
+            const { default: html2canvas } = await import('html2canvas');
+            const el = document.getElementById('reports-content');
+            if (!el) throw new Error('No content');
+            const canvas = await html2canvas(el, { scale: 1.5, useCORS: true, logging: false });
+            const imgData = canvas.toDataURL('image/jpeg', 0.8);
+            const pdf = new jsPDF('l', 'mm', 'a4');
+            const pdfW = pdf.internal.pageSize.getWidth();
+            const pdfH = pdf.internal.pageSize.getHeight();
+
+            // Header
+            pdf.setFontSize(16);
+            pdf.text('LastMile OS — Reporte Operativo', 14, 15);
+            pdf.setFontSize(10);
+            pdf.text(`Periodo: ${effectiveDates.from} a ${effectiveDates.to}`, 14, 22);
+            const filters = [];
+            if (clientId) filters.push(`Cliente: ${selectedClientName}`);
+            if (providerId) filters.push(`Proveedor: ${selectedProviderName}`);
+            pdf.text(`Filtros: ${filters.length ? filters.join(', ') : 'Todos'}`, 14, 28);
+            pdf.text(`Generado: ${new Date().toLocaleString('es-MX')} por ${user?.name || user?.email}`, 14, 34);
+
+            const imgW = pdfW - 28;
+            const imgH = (canvas.height * imgW) / canvas.width;
+            let yPos = 40;
+            if (yPos + imgH > pdfH - 10) {
+                const maxH = pdfH - yPos - 10;
+                pdf.addImage(imgData, 'JPEG', 14, yPos, imgW, maxH);
+            } else {
+                pdf.addImage(imgData, 'JPEG', 14, yPos, imgW, imgH);
+            }
+
+            // AI section
+            if (aiNarrative) {
+                pdf.addPage();
+                pdf.setFontSize(14);
+                pdf.text('Analisis inteligente (generado por IA)', 14, 15);
+                pdf.setFontSize(8);
+                pdf.text('Este analisis fue generado automaticamente y debe validarse operativamente.', 14, 21);
+                pdf.setFontSize(10);
+                const splitText = pdf.splitTextToSize(aiNarrative.replace(/\*\*/g, ''), pdfW - 28);
+                pdf.text(splitText, 14, 28);
+            }
+
+            pdf.save(`reporte_${effectiveDates.from}_${effectiveDates.to}.pdf`);
+            toast.success('Reporte PDF exportado');
+        } catch (e) {
+            toast.error('Error al generar PDF');
+        }
+        setExportingPdf(false);
+    };
+
+    const hasData = reportData && (reportData.total_packages > 0 || Object.keys(reportData.provider_metrics || {}).length > 0);
 
     const TABS = [
         { id: 'providers', label: 'Proveedores', icon: Truck },
@@ -587,155 +832,194 @@ const Reports = () => {
     return (
         <div className="lm-dashboard" data-testid="reports-page">
             <style>{`
-                .lm-dashboard { font-family: 'DM Sans', sans-serif; display: flex; flex-direction: column; gap: 20px; }
-                :root { --bg: #F5F4F1; --surface: #FFFFFF; --surface-2: #F0EFEC; --border: #E2E0DB; --text-primary: #1A1916; --text-secondary: #6B6960; --text-tertiary: #9C9A92; }
-                .lm-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+                .lm-dashboard { font-family: 'DM Sans', sans-serif; display: flex; flex-direction: column; gap: 16px; }
+                .lm-card { background: ${T.surface}; border: 1px solid ${T.borderSolid}; border-radius: ${T.radius}px; overflow: hidden; }
                 .lm-table { border-collapse: collapse; font-size: 13px; }
-                .lm-table thead th { padding: 10px 14px; text-align: left; font-weight: 500; font-size: 12px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); background: var(--surface-2); cursor: pointer; white-space: nowrap; }
-                .lm-table tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
-                .lm-table tbody tr:hover { background: var(--surface-2); }
-                .lm-select { font-size: 13px; padding: 6px 28px 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B6960' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center; appearance: none; color: var(--text-primary); font-family: 'DM Sans', sans-serif; outline: none; }
-                .lm-select:focus { border-color: #2563EB; box-shadow: 0 0 0 2px rgba(37,99,235,0.12); }
+                .lm-table thead th { padding: 10px 14px; text-align: left; font-weight: 500; font-size: 12px; color: ${T.textTer}; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid ${T.borderSolid}; background: ${T.surface2}; cursor: pointer; white-space: nowrap; }
+                .lm-table tbody td { padding: 10px 14px; border-bottom: 1px solid ${T.borderSolid}; color: ${T.textPri}; }
+                .lm-table tbody tr:hover { background: ${T.surface2}; }
+                .chip-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 16px; font-size: 12px; font-weight: 500; border: 1px solid ${T.borderSolid}; background: ${T.surface}; cursor: pointer; font-family: 'DM Sans', sans-serif; color: ${T.textPri}; transition: all 0.15s; white-space: nowrap; }
+                .chip-btn:hover { background: ${T.surface2}; }
+                .chip-btn.active { background: ${T.textPri}; color: #fff; border-color: ${T.textPri}; }
+                .chip-dropdown { position: relative; }
+                .chip-dropdown-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; background: ${T.surface}; border: 1px solid ${T.borderSolid}; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); min-width: 180px; max-height: 280px; overflow-y: auto; }
+                .chip-dropdown-item { padding: 8px 14px; font-size: 13px; cursor: pointer; display: block; width: 100%; text-align: left; border: none; background: none; color: ${T.textPri}; font-family: 'DM Sans', sans-serif; }
+                .chip-dropdown-item:hover { background: ${T.surface2}; }
+                .chip-dropdown-item.selected { background: ${T.tealLt}; font-weight: 600; }
+                @media (max-width: 768px) {
+                    .filter-bar-desktop { display: none !important; }
+                    .filter-bar-mobile { display: flex !important; }
+                    .kpi-grid-4 { grid-template-columns: 1fr 1fr !important; }
+                    .charts-grid { grid-template-columns: 1fr !important; }
+                }
+                @media (min-width: 769px) {
+                    .filter-bar-mobile { display: none !important; }
+                }
+                .skeleton { background: linear-gradient(90deg, ${T.surface2} 25%, #E8E7E3 50%, ${T.surface2} 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
+                @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
             `}</style>
 
-            {/* ─── TOPBAR ─── */}
+            {/* ─── TOP BAR ─── */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                    <h1 style={{ fontSize: 22, fontWeight: 600, color: T.textPri, margin: 0 }}>Reportes</h1>
-                    <p style={{ fontSize: 13, color: T.textTer, marginTop: 2 }}>{effectiveDates.from} — {effectiveDates.to}</p>
+                    <h1 style={{ fontSize: 22, fontWeight: 700, color: T.textPri, margin: 0 }}>Reportes</h1>
+                    <p style={{ fontSize: 13, color: T.textTer, marginTop: 2 }}>Desempeno operativo consolidado</p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={handleExport} disabled={exporting || loading} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', border: `1px solid ${T.border}`, borderRadius: T.radiusSm, background: T.surface, fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", color: T.textPri }} data-testid="export-excel-btn">
+                    <button onClick={handleExport} disabled={exporting || loading} className="chip-btn" data-testid="export-excel-btn">
                         {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                        Descargar Excel
+                        Excel
                     </button>
-                    <button onClick={handleGenerateAI} disabled={generating || loading} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', border: 'none', borderRadius: T.radiusSm, background: T.textPri, color: '#fff', fontSize: 13, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }} data-testid="generate-ai-btn">
+                    <button onClick={handleExportPDF} disabled={exportingPdf || loading} className="chip-btn" data-testid="export-pdf-btn">
+                        {exportingPdf ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
+                        PDF
+                    </button>
+                    <button onClick={handleGenerateAI} disabled={generating || loading} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 16, border: 'none', background: T.purple, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }} data-testid="generate-ai-btn">
                         {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                         Generar IA
                     </button>
                 </div>
             </div>
 
-            {/* ─── ROW 1: Period + Sections ─── */}
-            <div style={{ display: 'flex', gap: 20 }}>
-                {/* Period card */}
-                <div className="lm-card" style={{ width: 320, flexShrink: 0, padding: 20 }}>
-                    <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Período</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 12 }}>
-                        {PERIODS.map(p => (
-                            <button key={p.value} onClick={() => setPeriod(p.value)} data-testid={`period-${p.value}`}
-                                style={{ padding: '7px 6px', fontSize: 12, borderRadius: T.radiusSm, border: `1px solid ${period === p.value ? T.textPri : T.border}`, background: period === p.value ? T.textPri : T.surface, color: period === p.value ? '#fff' : T.textPri, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", transition: 'all 0.15s' }}>
-                                {p.label}
-                            </button>
-                        ))}
-                    </div>
-                    {period === 'custom' && (
-                        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ flex: 1, padding: '6px 8px', border: `1px solid ${T.border}`, borderRadius: 4, fontSize: 13 }} data-testid="custom-date-from" />
-                            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ flex: 1, padding: '6px 8px', border: `1px solid ${T.border}`, borderRadius: 4, fontSize: 13 }} data-testid="custom-date-to" />
-                        </div>
-                    )}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <select className="lm-select" style={{ width: '100%' }} value={clientId} onChange={e => setClientId(e.target.value)} data-testid="report-client-filter">
-                            <option value="">Todos los clientes</option>
-                            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        <select className="lm-select" style={{ width: '100%' }} value={providerId} onChange={e => setProviderId(e.target.value)} data-testid="report-provider-filter">
-                            <option value="">Todos los proveedores</option>
-                            {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                    </div>
+            {/* ─── FILTER BAR (desktop) ─── */}
+            <div className="filter-bar-desktop" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '12px 16px', background: T.surface, border: `1px solid ${T.borderSolid}`, borderRadius: T.radius }} data-testid="filter-bar">
+                {/* Date chip */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 14, background: T.tealLt, color: T.teal, fontSize: 12, fontWeight: 600, marginRight: 4 }}>
+                    <Calendar size={13} />
+                    {formatDateLabel(effectiveDates.from)}{effectiveDates.from !== effectiveDates.to ? ` — ${formatDateLabel(effectiveDates.to)}` : ''}
                 </div>
 
-                {/* Sections card */}
-                <div className="lm-card" style={{ flex: 1, padding: 20 }}>
-                    <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Secciones del reporte</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                        {SECTIONS.map(s => {
-                            const active = sections.includes(s.id);
-                            const Icon = s.icon;
-                            return (
-                                <div key={s.id} onClick={() => toggleSection(s.id)} data-testid={`section-${s.id}`}
-                                    style={{ padding: '12px 14px', borderRadius: T.radiusSm, border: `1.5px solid ${active ? T.textPri : T.border}`, background: active ? '#F8F8F6' : T.surface, cursor: 'pointer', transition: 'all 0.15s', position: 'relative' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                                        <div style={{ width: 16, height: 16, borderRadius: 3, border: `2px solid ${active ? T.textPri : T.borderStrong}`, background: active ? T.textPri : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            {active && <CheckCircle2 size={10} color="#fff" />}
-                                        </div>
-                                        <Icon size={15} color={T.textSec} />
-                                        <span style={{ fontSize: 13, fontWeight: 500, color: T.textPri }}>{s.title}</span>
-                                    </div>
-                                    <p style={{ fontSize: 11, color: T.textTer, margin: 0, paddingLeft: 24 }}>{s.desc}</p>
-                                    {s.isNew && (
-                                        <span style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3, background: T.tealLt, color: T.teal }}>Nuevo</span>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
+                <div style={{ width: 1, height: 24, background: T.borderSolid, margin: '0 4px' }} />
+
+                {/* Period chips */}
+                {PERIODS.map(p => (
+                    <button key={p.value} onClick={() => setPeriod(p.value)} className={`chip-btn ${period === p.value ? 'active' : ''}`} data-testid={`period-${p.value}`}>
+                        {p.label}
+                    </button>
+                ))}
+
+                {period === 'custom' && (
+                    <>
+                        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${T.borderSolid}`, fontSize: 12 }} data-testid="custom-date-from" />
+                        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${T.borderSolid}`, fontSize: 12 }} data-testid="custom-date-to" />
+                    </>
+                )}
+
+                <div style={{ width: 1, height: 24, background: T.borderSolid, margin: '0 4px' }} />
+
+                {/* Client dropdown */}
+                <div className="chip-dropdown">
+                    <button className="chip-btn" onClick={() => { setShowClientDrop(!showClientDrop); setShowProviderDrop(false); }} data-testid="report-client-filter">
+                        <ChevronDown size={12} /> {selectedClientName}
+                    </button>
+                    {showClientDrop && (
+                        <div className="chip-dropdown-menu">
+                            <button className={`chip-dropdown-item ${!clientId ? 'selected' : ''}`} onClick={() => { setClientId(''); setShowClientDrop(false); }}>Todos los clientes</button>
+                            {clients.map(c => (
+                                <button key={c.id} className={`chip-dropdown-item ${clientId === c.id ? 'selected' : ''}`} onClick={() => { setClientId(c.id); setShowClientDrop(false); }}>{c.name}</button>
+                            ))}
+                        </div>
+                    )}
                 </div>
+
+                {/* Provider dropdown (hidden for provider role) */}
+                {!isProvider && (
+                    <div className="chip-dropdown">
+                        <button className="chip-btn" onClick={() => { setShowProviderDrop(!showProviderDrop); setShowClientDrop(false); }} data-testid="report-provider-filter">
+                            <ChevronDown size={12} /> {selectedProviderName}
+                        </button>
+                        {showProviderDrop && (
+                            <div className="chip-dropdown-menu">
+                                <button className={`chip-dropdown-item ${!providerId ? 'selected' : ''}`} onClick={() => { setProviderId(''); setShowProviderDrop(false); }}>Todos los proveedores</button>
+                                {providers.map(p => (
+                                    <button key={p.id} className={`chip-dropdown-item ${providerId === p.id ? 'selected' : ''}`} onClick={() => { setProviderId(p.id); setShowProviderDrop(false); }}>{p.name}</button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
-            {/* ─── AI OUTPUT (collapsible) ─── */}
-            {showAI && (
-                <div className="lm-card" style={{ padding: 20, borderLeft: `3px solid ${T.textPri}` }} data-testid="ai-output">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Sparkles size={16} color={T.textPri} />
-                            <span style={{ fontSize: 14, fontWeight: 600, color: T.textPri }}>Análisis generado por IA</span>
-                        </div>
-                        <button onClick={() => setShowAI(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textTer, padding: 4 }}>
-                            <ChevronUp size={16} />
-                        </button>
+            {/* ─── FILTER BAR (mobile) ─── */}
+            <div className="filter-bar-mobile" style={{ display: 'none' }}>
+                <button onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)} className="chip-btn" style={{ width: '100%', justifyContent: 'center' }}>
+                    <Filter size={14} /> Filtros: {PERIODS.find(p => p.value === period)?.label} {mobileFiltersOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                </button>
+                {mobileFiltersOpen && (
+                    <div style={{ padding: 12, background: T.surface, border: `1px solid ${T.borderSolid}`, borderRadius: T.radius, marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {PERIODS.map(p => (
+                            <button key={p.value} onClick={() => setPeriod(p.value)} className={`chip-btn ${period === p.value ? 'active' : ''}`}>{p.label}</button>
+                        ))}
                     </div>
-                    {aiPeriod && <p style={{ fontSize: 12, color: T.textTer, marginBottom: 12 }}>{aiPeriod}</p>}
-                    {generating ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.textSec, fontSize: 13 }}>
-                            <Loader2 size={16} className="animate-spin" />Generando análisis...
-                        </div>
-                    ) : (
-                        <div style={{ fontSize: 13, lineHeight: 1.7, color: T.textPri }}
-                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize((aiNarrative || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')) }} />
-                    )}
-                </div>
-            )}
+                )}
+            </div>
 
-            {/* ─── KPI STRIP ─── */}
-            <KPIStrip reportData={reportData} slaData={slaData} qualityData={qualityData} />
+            {/* ─── CONTENT (captured for PDF) ─── */}
+            <div id="reports-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-            {/* ─── TABS ─── */}
-            <div className="lm-card">
-                {/* Tab bar */}
-                <div style={{ display: 'flex', borderBottom: `1px solid ${T.border}`, background: T.surface2, overflow: 'auto' }}>
-                    {TABS.filter(t => sections.includes(t.id)).map(t => {
-                        const Icon = t.icon;
-                        const isActive = activeTab === t.id;
-                        return (
-                            <button key={t.id} onClick={() => setActiveTab(t.id)} data-testid={`tab-${t.id}`}
-                                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 20px', fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? T.textPri : T.textSec, background: isActive ? T.surface : 'transparent', border: 'none', borderBottom: isActive ? `2px solid ${T.textPri}` : '2px solid transparent', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap', transition: 'all 0.15s' }}>
-                                <Icon size={14} />
-                                {t.label}
-                                {t.isNew && <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: T.tealLt, color: T.teal }}>Nuevo</span>}
-                            </button>
-                        );
-                    })}
-                </div>
-                {/* Tab content */}
-                <div style={{ minHeight: 200 }}>
-                    {loading ? (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60, gap: 8, color: T.textSec, fontSize: 14 }}>
-                            <Loader2 size={20} className="animate-spin" />Cargando datos...
+                {/* ─── AI INSIGHTS ─── */}
+                <AiInsightsBar narrative={aiNarrative} generating={generating} stale={aiStale} onRegenerate={handleGenerateAI} />
+
+                {/* ─── KPI STRIP ─── */}
+                {loading ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, border: `1px solid ${T.borderSolid}`, borderRadius: T.radius, overflow: 'hidden' }} className="kpi-grid-4">
+                        {[1, 2, 3, 4].map(i => <div key={i} className="skeleton" style={{ height: 90 }} />)}
+                    </div>
+                ) : (
+                    <div className="kpi-grid-4">
+                        <KPIStrip reportData={reportData} slaData={slaData} qualityData={qualityData} prevData={prevReportData} />
+                    </div>
+                )}
+
+                {/* ─── CHARTS ─── */}
+                {!loading && hasData && (
+                    <div className="charts-grid">
+                        <ChartsSection reportData={reportData} journeyChartData={journeyChartData} />
+                    </div>
+                )}
+
+                {/* ─── EMPTY STATE ─── */}
+                {!loading && !hasData && (
+                    <div className="lm-card">
+                        <EmptyState message="Sin operaciones registradas para este periodo. Selecciona otro periodo para ver datos historicos." icon={Calendar} onPeriodChange={(p) => setPeriod(p)} />
+                    </div>
+                )}
+
+                {/* ─── TABS ─── */}
+                {hasData && (
+                    <div className="lm-card">
+                        <div style={{ display: 'flex', borderBottom: `1px solid ${T.borderSolid}`, background: T.surface2, overflow: 'auto' }}>
+                            {TABS.map(t => {
+                                const Icon = t.icon;
+                                const isActive = activeTab === t.id;
+                                return (
+                                    <button key={t.id} onClick={() => setActiveTab(t.id)} data-testid={`tab-${t.id}`}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 20px', fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? T.textPri : T.textSec, background: isActive ? T.surface : 'transparent', border: 'none', borderBottom: isActive ? `2px solid ${T.teal}` : '2px solid transparent', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap', transition: 'all 0.15s' }}>
+                                        <Icon size={14} />
+                                        {t.label}
+                                        {t.isNew && <span style={{ fontSize: 9, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: T.tealLt, color: T.teal }}>Nuevo</span>}
+                                    </button>
+                                );
+                            })}
                         </div>
-                    ) : (
-                        <>
-                            {activeTab === 'providers' && <ProvidersTab data={reportData} />}
-                            {activeTab === 'drivers' && <DriversTab data={reportData} />}
-                            {activeTab === 'incidents' && <IncidentsTab data={reportData} />}
-                            {activeTab === 'attempts' && <AttemptsTab attempts={attemptsData} />}
-                            {activeTab === 'quality' && <QualityTab data={{ quality_report: qualityData }} />}
-                            {activeTab === 'sla' && <SLATab slaData={slaData} canEditBrackets={canEditBrackets} />}
-                        </>
-                    )}
-                </div>
+                        <div style={{ minHeight: 200 }}>
+                            {loading ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60, gap: 8, color: T.textSec, fontSize: 14 }}>
+                                    <Loader2 size={20} className="animate-spin" /> Cargando datos...
+                                </div>
+                            ) : (
+                                <>
+                                    {activeTab === 'providers' && <ProvidersTab data={reportData} slaData={slaData} />}
+                                    {activeTab === 'drivers' && <DriversTab data={reportData} />}
+                                    {activeTab === 'incidents' && <IncidentsTab data={reportData} />}
+                                    {activeTab === 'attempts' && <AttemptsTab attempts={attemptsData} />}
+                                    {activeTab === 'quality' && <QualityTab data={{ quality_report: qualityData }} />}
+                                    {activeTab === 'sla' && <SLATab slaData={slaData} canEditBrackets={canEditBrackets} />}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -415,36 +415,38 @@ async def generate_report(data: ReportRequest, user: dict = Depends(get_current_
     report_data["incidents_by_type"] = incidents_by_type
     report_data["incidents_by_imputability"] = incidents_by_imputability
 
-    ai_insights = ""
-    try:
-        llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
-        if llm_key:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage
-            chat = LlmChat(
-                api_key=llm_key,
-                session_id=f"report-{uuid.uuid4()}",
-                system_message="Eres un analista de operaciones logísticas de última milla. Genera insights concisos y accionables en español. Usa datos duros. Máximo 400 palabras.",
-            ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-            prompt = f"""Analiza estos datos de operación de última milla y genera insights clave:
+    # Build daily_stats for combo chart (orders per day + avg delivery time)
+    daily_map = {}
+    for j in journeys:
+        d = (j.get("date") or "")[:10]  # Normalize to YYYY-MM-DD
+        if not d or len(d) < 10:
+            continue
+        if d not in daily_map:
+            daily_map[d] = {"packages": 0, "delivered": 0, "delivery_times": []}
+        daily_map[d]["packages"] += j.get("packages_total", 0)
+        daily_map[d]["delivered"] += j.get("packages_delivered", 0)
+        # Estimate delivery time from start/close timestamps
+        start_data = j.get("start_data") or {}
+        close_data = j.get("close_data") or {}
+        if start_data.get("started_at") and close_data.get("closed_at"):
+            try:
+                from datetime import datetime as dt
+                t_start = dt.fromisoformat(start_data["started_at"].replace("Z", "+00:00"))
+                t_close = dt.fromisoformat(close_data["closed_at"].replace("Z", "+00:00"))
+                minutes = (t_close - t_start).total_seconds() / 60
+                if 0 < minutes < 1440:  # Reasonable range: 0-24 hours
+                    daily_map[d]["delivery_times"].append(minutes)
+            except Exception:
+                pass
 
-PERÍODO: {data.date_from} a {data.date_to}
-RESUMEN GENERAL: {report_data['total_journeys']} rutas, {report_data['total_packages']} paquetes, tasa de entrega {report_data['delivery_rate']}%, {report_data['total_km']} km, {report_data['total_incidents']} incidencias
+    daily_stats = []
+    for d in sorted(daily_map.keys()):
+        dm = daily_map[d]
+        avg_time = round(sum(dm["delivery_times"]) / len(dm["delivery_times"])) if dm["delivery_times"] else 0
+        daily_stats.append({"date": d, "packages": dm["packages"], "delivered": dm["delivered"], "avg_delivery_time": avg_time})
+    report_data["daily_stats"] = daily_stats
 
-POR PROVEEDOR: {str({k: {kk: vv for kk, vv in v.items()} for k, v in provider_metrics.items()})}
-
-POR DRIVER: {str({k: {kk: vv for kk, vv in v.items()} for k, v in driver_metrics.items()})}
-
-INCIDENCIAS POR TIPO: {str(incidents_by_type)}
-INCIDENCIAS POR IMPUTABILIDAD: {str(incidents_by_imputability)}
-
-Genera un análisis ejecutivo con: 1) Resumen general, 2) Hallazgos clave, 3) Recomendaciones de mejora."""
-            msg = UserMessage(text=prompt)
-            ai_insights = await chat.send_message(msg)
-    except Exception as e:
-        logger.error(f"Error generating AI insights: {e}")
-        ai_insights = "No se pudieron generar insights de IA en este momento."
-
-    report_data["ai_insights"] = ai_insights
+    report_data["ai_insights"] = ""
     return report_data
 
 
