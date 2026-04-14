@@ -1,5 +1,32 @@
 # LastMile OS - Changelog
 
+## 2026-04-10 — Bug Fix: Reportes mostraba 0% para fechas con datos
+
+### Causa Raíz
+El campo `date` en journeys tiene formato mixto: `"2026-04-09"` (solo fecha) vs `"2026-04-09 20:33:23.480000"` (fecha+hora).
+La query usaba `$lte "2026-04-09"` que excluye `"2026-04-09 20:33:23"` por comparación lexicográfica de strings.
+
+### Corrección
+Reemplazado `$lte date_to` por `$lt _next_day(date_to)` en **10 endpoints** de analytics_routes.py:
+- `/reports/quality` (L170)
+- `/reports/generate` (L330)
+- `/reports/generate-excel` (L455)
+- `/reports/journeys` (L560)
+- `/reports/incidents export` (L614)
+- `/reports/journeys list` (L703)
+- `/reports/kpis` (L912) — **principal**
+- `/reports/attempts` (L1071)
+- `/reports/sla` (L1164)
+- `/reports/daily-stats` (L1282)
+
+También corregido `datetime.strptime` sin truncar hora (L925) y `group_by "day"` truncado a 10 chars.
+
+### Verificación
+- Query nueva con `$lt "2026-04-10"`: 5 journeys encontradas ✅
+- Query vieja con `$lte "2026-04-09"`: 0 journeys ❌
+
+---
+
 ## 2026-04-10 — PDF Export Redesign (Multi-page)
 
 ### Problem

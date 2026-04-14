@@ -167,7 +167,7 @@ async def get_quality_report(
     if not date_to:
         date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    journey_query = {"date": {"$gte": date_from, "$lte": date_to}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
+    journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
     journey_query = apply_assignment_filter(user, journey_query)
     if provider_id:
         journey_query["provider_id"] = provider_id
@@ -327,7 +327,7 @@ async def export_quality_report(
 
 @router.post("/reports/generate")
 async def generate_report(data: ReportRequest, user: dict = Depends(get_current_user)):
-    j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
+    j_query = {"date": {"$gte": data.date_from, "$lt": _next_day(data.date_to)}}
     j_query = apply_assignment_filter(user, j_query)
     if data.client_id:
         j_query["client_id"] = data.client_id
@@ -452,7 +452,7 @@ async def generate_report(data: ReportRequest, user: dict = Depends(get_current_
 
 @router.post("/reports/generate-excel")
 async def generate_report_excel(data: ReportRequest, user: dict = Depends(get_current_user)):
-    j_query = {"date": {"$gte": data.date_from, "$lte": data.date_to}}
+    j_query = {"date": {"$gte": data.date_from, "$lt": _next_day(data.date_to)}}
     j_query = apply_assignment_filter(user, j_query)
     if data.client_id:
         j_query["client_id"] = data.client_id
@@ -557,7 +557,7 @@ async def export_journeys(
     if date_from:
         query["date"] = {"$gte": date_from}
     if date_to:
-        query.setdefault("date", {})["$lte"] = date_to
+        query.setdefault("date", {})["$lt"] = _next_day(date_to)
     if client_id:
         query["client_id"] = client_id
     if provider_id:
@@ -611,7 +611,7 @@ async def export_incidents(
         if date_from:
             j_query["date"] = {"$gte": date_from}
         if date_to:
-            j_query.setdefault("date", {})["$lte"] = date_to
+            j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
         journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(500)
         query["journey_id"] = {"$in": [j["id"] for j in journeys]}
 
@@ -700,7 +700,7 @@ async def report_journeys(
     if date_from:
         query["date"] = {"$gte": date_from}
     if date_to:
-        query.setdefault("date", {})["$lte"] = date_to
+        query.setdefault("date", {})["$lt"] = _next_day(date_to)
     if client_id:
         query["client_id"] = client_id
     if provider_id:
@@ -909,7 +909,7 @@ async def report_kpis(
         date_to = now.strftime("%Y-%m-%d")
 
     journeys = await db.journeys.find(
-        {"date": {"$gte": date_from, "$lte": date_to}}, {"_id": 0}
+        {"date": {"$gte": date_from, "$lt": _next_day(date_to)}}, {"_id": 0}
     ).to_list(10000)
 
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
@@ -922,12 +922,12 @@ async def report_kpis(
         elif group_by == "client":
             key = clients.get(j.get("client_id"), "Sin cliente")
         elif group_by == "week":
-            d = datetime.strptime(j.get("date", date_from), "%Y-%m-%d")
+            d = datetime.strptime(j.get("date", date_from)[:10], "%Y-%m-%d")
             key = f"{d.year}-W{d.isocalendar()[1]:02d}"
         elif group_by == "month":
             key = j.get("date", "")[:7]
         else:
-            key = j.get("date", "")
+            key = j.get("date", "")[:10]
 
         if key not in groups:
             groups[key] = {
@@ -1068,7 +1068,7 @@ async def report_attempts(
     if date_from:
         j_query["date"] = {"$gte": date_from}
     if date_to:
-        j_query.setdefault("date", {})["$lte"] = date_to
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
     if client_id:
         j_query["client_id"] = client_id
     if provider_id:
@@ -1161,7 +1161,7 @@ async def report_sla(
     if date_from:
         j_query["date"] = {"$gte": date_from}
     if date_to:
-        j_query.setdefault("date", {})["$lte"] = date_to
+        j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
     if client_id:
         j_query["client_id"] = client_id
     if provider_id:
@@ -1279,7 +1279,7 @@ async def generate_ai_report(
         date_to = now.strftime("%Y-%m-%d")
         date_from = (now - timedelta(days=6)).strftime("%Y-%m-%d")
 
-    j_query = {"date": {"$gte": date_from, "$lte": date_to}}
+    j_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}}
     if client_id:
         j_query["client_id"] = client_id
     if provider_id:
