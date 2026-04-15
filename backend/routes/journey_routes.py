@@ -712,6 +712,7 @@ async def create_journeys_from_cosmo(
         journey = {
             "id": journey_id,
             "cosmo_route_id": route_id,
+            "order_id": route_id,
             "date": journey_date,
             "client_id": data.client_id,
             "provider_id": provider_id,
