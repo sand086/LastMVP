@@ -125,7 +125,7 @@ def _write_provider_data_row(ws, r: int, row: dict, sla_packages: int, is_alt: b
 
     # N-S: M&E data
     _write_data_cell(ws, r, 14, total_pkgs, is_alt=is_alt)
-    _write_data_cell(ws, r, 15, delivered, is_alt=is_alt)
+    _write_data_cell(ws, r, 15, f"=H{r}+I{r}", is_formula=True)
     _write_data_cell(ws, r, 16, cancelled, is_alt=is_alt)
     _write_data_cell(ws, r, 17, row.get("pendientes", 0) or 0, is_alt=is_alt)
     _write_data_cell(ws, r, 18, row.get("con_evidencia", 0) or 0, is_alt=is_alt)
@@ -142,7 +142,7 @@ def _write_provider_data_row(ws, r: int, row: dict, sla_packages: int, is_alt: b
     _write_data_cell(ws, r, 25, "", is_formula=True, fmt='$#,##0.00')
     _write_data_cell(ws, r, 26, f"=M{r}-Y{r}", is_formula=True, fmt='$#,##0.00')
     _write_data_cell(ws, r, 27, f"=IFERROR(O{r}/N{r},0)", is_formula=True, fmt='0%')
-    _write_data_cell(ws, r, 28, f"=IFERROR(O{r}/{sla_packages},0)", is_formula=True, fmt='0%')
+    _write_data_cell(ws, r, 28, f"=IFERROR(O{r}/MAX(G{r},{sla_packages}),0)", is_formula=True, fmt='0%')
 
 
 def _write_provider_pivot_table(ws, sorted_rows):

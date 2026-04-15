@@ -133,35 +133,46 @@ const ApiDocumentation = () => {
     };
 
     const generatePowerBiCode = () => {
-        return `// Power BI - Power Query M Code
+        return `// Power BI - Power Query M Code (con Refresh Token)
 let
-    // Configuración
-    ApiUrl = "${API_URL}/api/reports/${selectedEndpoint}",
-    Token = "YOUR_TOKEN_HERE",  // Reemplazar con tu token
-    
-    // Parámetros opcionales
+    // ─── Configuración ───
+    ApiUrl = "${API_URL}/api",
+    RefreshToken = "TU_REFRESH_TOKEN_AQUI",  // Generar desde Integraciones
+
+    // ─── Paso 1: Obtener access token usando refresh token ───
+    TokenResponse = Json.Document(
+        Web.Contents(
+            ApiUrl & "/auth/exchange-token",
+            [
+                Headers = [
+                    #"Authorization" = "Bearer " & RefreshToken,
+                    #"Content-Type" = "application/json"
+                ],
+                Content = Text.ToBinary("{}")
+            ]
+        )
+    ),
+    AccessToken = TokenResponse[access_token],
+
+    // ─── Paso 2: Consultar datos ───
     DateFrom = "${dateFrom ? format(dateFrom, 'yyyy-MM-dd') : ''}",
     DateTo = "${dateTo ? format(dateTo, 'yyyy-MM-dd') : ''}",
     ${selectedEndpoint === 'kpis' ? `GroupBy = "${groupBy}",` : ''}
-    
-    // Construir URL con parámetros
     QueryParams = [date_from = DateFrom, date_to = DateTo${selectedEndpoint === 'kpis' ? ', group_by = GroupBy' : ''}],
-    
-    // Llamada a la API
+
     Source = Json.Document(
         Web.Contents(
-            ApiUrl,
+            ApiUrl & "/reports/${selectedEndpoint}",
             [
                 Headers = [
-                    #"Authorization" = "Bearer " & Token,
+                    #"Authorization" = "Bearer " & AccessToken,
                     #"Content-Type" = "application/json"
                 ],
                 Query = QueryParams
             ]
         )
     ),
-    
-    // Extraer datos
+
     Data = Source[data],
     #"Converted to Table" = Table.FromList(Data, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
     #"Expanded Column1" = Table.ExpandRecordColumn(#"Converted to Table", "Column1", Record.FieldNames(Data{0}))
@@ -175,29 +186,33 @@ import pandas as pd
 
 # Configuración
 API_URL = "${API_URL}/api"
-TOKEN = "YOUR_TOKEN_HERE"  # Reemplazar con tu token
+REFRESH_TOKEN = "TU_REFRESH_TOKEN_AQUI"  # Generar desde Integraciones
 
-# Headers
+# Paso 1: Obtener access token usando refresh token
+auth_response = requests.post(
+    f"{API_URL}/auth/exchange-token",
+    headers={"Authorization": f"Bearer {REFRESH_TOKEN}"}
+)
+access_token = auth_response.json()["access_token"]
+
+# Paso 2: Consultar datos
 headers = {
-    "Authorization": f"Bearer {TOKEN}",
+    "Authorization": f"Bearer {access_token}",
     "Content-Type": "application/json"
 }
 
-# Parámetros
 params = {
     "date_from": "${dateFrom ? format(dateFrom, 'yyyy-MM-dd') : ''}",
     "date_to": "${dateTo ? format(dateTo, 'yyyy-MM-dd') : ''}"${selectedEndpoint === 'kpis' ? `,
     "group_by": "${groupBy}"` : ''}
 }
 
-# Obtener datos
 response = requests.get(
     f"{API_URL}/reports/${selectedEndpoint}",
     headers=headers,
-    params={k: v for k, v in params.items() if v}  # Solo params no vacíos
+    params={k: v for k, v in params.items() if v}
 )
 
-# Convertir a DataFrame
 data = response.json()
 df = pd.DataFrame(data["data"])
 print(f"Total registros: {data['total']}")

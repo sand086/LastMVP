@@ -98,6 +98,22 @@ def create_token(user_id: str, email: str, role: str) -> str:
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
+
+def create_refresh_token(user_id: str, email: str, role: str, days: int = 90) -> dict:
+    """Create a long-lived refresh token for API/Power BI integrations."""
+    jti = str(uuid.uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "role": role,
+        "jti": jti,
+        "type": "refresh",
+        "exp": expires_at,
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {"token": token, "jti": jti, "expires_at": expires_at.isoformat()}
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])

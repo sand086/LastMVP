@@ -551,17 +551,6 @@ const JourneyDetail = () => {
         max_packages: 50,
         traslado_primer_punto: 40,
     });
-    const [startChecklist, setStartChecklist] = useState({
-        whatsapp: false,
-        odometer_photo: false,
-        zone_confirmed: false,
-        packages_scanned: false,
-        retry_registered: false,
-        cedis_arrival: false,
-        cedis_pass: false,
-        cosmo_route: false,
-        cedis_screenshot: false,
-    });
     const [startSubmitting, setStartSubmitting] = useState(false);
     const [showStartSummary, setShowStartSummary] = useState(false);
     const [startSummary, setStartSummary] = useState('');
@@ -785,20 +774,10 @@ const JourneyDetail = () => {
 
     // Start journey handlers
     const handleStartJourney = async () => {
-        const optionalKeys = ['odometer_photo', 'cedis_screenshot'];
-        const requiredChecks = Object.entries(startChecklist)
-            .filter(([key]) => !optionalKeys.includes(key))
-            .every(([, v]) => v);
-        if (!requiredChecks) {
-            toast.error('Completa todos los items obligatorios del checklist');
-            return;
-        }
-
         setStartSubmitting(true);
         try {
             await startJourney(id, {
                 ...startForm,
-                checklist_completed: true,
             });
 
             const summary = generateWhatsAppStartSummary(journey, startForm);
@@ -1072,7 +1051,18 @@ const JourneyDetail = () => {
                             <span className={`status-badge ${getStatusColor(journey.status)}`}>
                                 {getStatusLabel(journey.status)}
                             </span>
-                            {journey.cosmo_route_id && (
+                            {journey.order_id && (
+                                <button
+                                    className="inline-flex items-center gap-1.5 text-xs font-mono text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-0.5 ml-2 hover:bg-blue-100 transition-colors"
+                                    onClick={() => { navigator.clipboard.writeText(journey.order_id); toast.success('Order ID copiado'); }}
+                                    title="Copiar Order ID"
+                                    data-testid="copy-order-id"
+                                >
+                                    {journey.order_id}
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                </button>
+                            )}
+                            {journey.cosmo_route_id && !journey.order_id && (
                                 <span className="text-xs text-slate-400 font-mono ml-2" data-testid="cosmo-route-id">
                                     {journey.cosmo_route_id}
                                 </span>
@@ -1083,12 +1073,12 @@ const JourneyDetail = () => {
                                 <span className="font-medium text-slate-700">{journey.driver_name} • </span>
                             )}
                             {journey.provider_name} • {journey.client_name}
-                            {journey.route_type === 'Foránea' && journey.city && (
+                            {journey.route_type && journey.route_type !== 'CDMX / Zona Metro' && (
                                 <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded border border-violet-200">
-                                    Foránea — {journey.city}
+                                    {journey.route_type}{journey.city ? ` — ${journey.city}` : ''}
                                 </span>
                             )}
-                            {journey.route_type === 'CDMX / Zona Metro' && (
+                            {(!journey.route_type || journey.route_type === 'CDMX / Zona Metro') && (
                                 <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded border border-blue-200">
                                     CDMX
                                 </span>
@@ -1182,8 +1172,6 @@ const JourneyDetail = () => {
                         canEdit={canEdit}
                         startForm={startForm}
                         setStartForm={setStartForm}
-                        startChecklist={startChecklist}
-                        setStartChecklist={setStartChecklist}
                         startSubmitting={startSubmitting}
                         startImages={startImages}
                         handleUploadImages={handleUploadImages}

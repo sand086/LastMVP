@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
-import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Button } from '../components/ui/button';
 import { Play, Loader2, CheckCircle2, Clock } from 'lucide-react';
@@ -15,8 +14,6 @@ export const JourneyStartTab = ({
     canEdit,
     startForm,
     setStartForm,
-    startChecklist,
-    setStartChecklist,
     startSubmitting,
     startImages,
     handleUploadImages,
@@ -172,11 +169,41 @@ export const JourneyStartTab = ({
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="CDMX / Zona Metro">CDMX / Zona Metro</SelectItem>
-                                    <SelectItem value="Foranea">Foranea</SelectItem>
+                                    <SelectItem value="Aguascalientes">Aguascalientes</SelectItem>
+                                    <SelectItem value="Baja California">Baja California</SelectItem>
+                                    <SelectItem value="Baja California Sur">Baja California Sur</SelectItem>
+                                    <SelectItem value="Campeche">Campeche</SelectItem>
+                                    <SelectItem value="Chiapas">Chiapas</SelectItem>
+                                    <SelectItem value="Chihuahua">Chihuahua</SelectItem>
+                                    <SelectItem value="Coahuila">Coahuila</SelectItem>
+                                    <SelectItem value="Colima">Colima</SelectItem>
+                                    <SelectItem value="Durango">Durango</SelectItem>
+                                    <SelectItem value="Guanajuato">Guanajuato</SelectItem>
+                                    <SelectItem value="Guerrero">Guerrero</SelectItem>
+                                    <SelectItem value="Hidalgo">Hidalgo</SelectItem>
+                                    <SelectItem value="Jalisco">Jalisco</SelectItem>
+                                    <SelectItem value="Mexico">Estado de Mexico</SelectItem>
+                                    <SelectItem value="Michoacan">Michoacan</SelectItem>
+                                    <SelectItem value="Morelos">Morelos</SelectItem>
+                                    <SelectItem value="Nayarit">Nayarit</SelectItem>
+                                    <SelectItem value="Nuevo Leon">Nuevo Leon</SelectItem>
+                                    <SelectItem value="Oaxaca">Oaxaca</SelectItem>
+                                    <SelectItem value="Puebla">Puebla</SelectItem>
+                                    <SelectItem value="Queretaro">Queretaro</SelectItem>
+                                    <SelectItem value="Quintana Roo">Quintana Roo</SelectItem>
+                                    <SelectItem value="San Luis Potosi">San Luis Potosi</SelectItem>
+                                    <SelectItem value="Sinaloa">Sinaloa</SelectItem>
+                                    <SelectItem value="Sonora">Sonora</SelectItem>
+                                    <SelectItem value="Tabasco">Tabasco</SelectItem>
+                                    <SelectItem value="Tamaulipas">Tamaulipas</SelectItem>
+                                    <SelectItem value="Tlaxcala">Tlaxcala</SelectItem>
+                                    <SelectItem value="Veracruz">Veracruz</SelectItem>
+                                    <SelectItem value="Yucatan">Yucatan</SelectItem>
+                                    <SelectItem value="Zacatecas">Zacatecas</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
-                        {startForm.route_type === 'Foranea' && (
+                        {startForm.route_type !== 'CDMX / Zona Metro' && (
                             <>
                                 <div className="space-y-2">
                                     <Label>Ciudad</Label>
@@ -222,37 +249,6 @@ export const JourneyStartTab = ({
                             label="Agregar fotos de inicio"
                         />
                         <p className="text-xs text-slate-400">Solo si genera valor adicional.</p>
-                    </div>
-
-                    {/* Checklist */}
-                    <div className="border border-slate-200 rounded-sm p-4 space-y-3">
-                        <p className="font-medium text-slate-900 mb-3">Checklist de salida</p>
-                        {[
-                            { key: 'cedis_arrival', label: 'Llegada a CEDIS registrada con hora' },
-                            { key: 'cedis_pass', label: 'Confirmacion de pase a CEDIS' },
-                            { key: 'cosmo_route', label: 'Confirmacion de ruta en Cosmo / plataforma' },
-                            { key: 'packages_scanned', label: 'Paquetes escaneados y asignados en la plataforma del cliente' },
-                            { key: 'retry_registered', label: 'Paquetes de reintento del dia anterior registrados' },
-                            { key: 'whatsapp', label: 'Driver / mensajero notifico salida del almacen' },
-                            { key: 'odometer_photo', label: 'Evidencia fotografica del odometro tomada', optional: true },
-                            { key: 'cedis_screenshot', label: 'Pantallazo CEDIS - 1a entrega tomado', optional: true },
-                            { key: 'zone_confirmed', label: 'Zona de entrega confirmada' },
-                        ].map((item) => (
-                            <div key={item.key} className="flex items-center space-x-3">
-                                <Checkbox
-                                    id={item.key}
-                                    checked={startChecklist[item.key]}
-                                    onCheckedChange={(checked) =>
-                                        setStartChecklist({ ...startChecklist, [item.key]: checked })
-                                    }
-                                    data-testid={`checklist-${item.key}`}
-                                />
-                                <label htmlFor={item.key} className="text-sm text-slate-700 cursor-pointer">
-                                    {item.label}
-                                    {item.optional && <span className="text-slate-400 ml-1">(opcional)</span>}
-                                </label>
-                            </div>
-                        ))}
                     </div>
 
                     <div className="flex justify-end">

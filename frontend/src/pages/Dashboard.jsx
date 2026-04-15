@@ -98,6 +98,7 @@ const RoutesTable = ({ journeys }) => {
             <table className="lm-table" style={{ width: '100%' }}>
                 <thead>
                     <tr>
+                        <SortHeader field="order_id">Order ID</SortHeader>
                         <SortHeader field="date">Fecha</SortHeader>
                         <SortHeader field="client_name">Cliente</SortHeader>
                         <SortHeader field="provider_name">Proveedor</SortHeader>
@@ -115,6 +116,9 @@ const RoutesTable = ({ journeys }) => {
                         const pc = getProgressColor(rate);
                         return (
                             <tr key={j.id} data-testid={`journey-row-${j.id}`}>
+                                <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: '#1D4ED8', maxWidth: 110 }} className="truncate" title={j.order_id}>
+                                    {j.order_id || <span style={{ color: T.textTer }}>—</span>}
+                                </td>
                                 <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 13 }}>{formatDate(j.date)}</td>
                                 <td>{j.client_name}</td>
                                 <td>{j.provider_name}</td>

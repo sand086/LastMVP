@@ -423,6 +423,48 @@ async def delete_incident(incident_id: str, user: dict = Depends(require_role(["
     return {"message": "Incidencia eliminada"}
 
 
+
+@router.delete("/journeys/{journey_id}")
+async def delete_journey(journey_id: str, user: dict = Depends(require_role(["coordinator", "developer"]))):
+    """Delete a journey and cascade delete all related packages, incidents, and images."""
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0, "id": 1, "status": 1})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    # Cascade delete
+    pkg_result = await db.packages.delete_many({"journey_id": journey_id})
+    inc_result = await db.incidents.delete_many({"journey_id": journey_id})
+    img_result = await db.images.delete_many({"journey_id": journey_id})
+    ts_result = await db.training_samples.delete_many({"journey_id": journey_id})
+    await db.journeys.delete_one({"id": journey_id})
+
+    # Audit log
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "journey_deleted",
+        "journey_id": journey_id,
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "details": {
+            "packages_deleted": pkg_result.deleted_count,
+            "incidents_deleted": inc_result.deleted_count,
+            "images_deleted": img_result.deleted_count,
+            "training_samples_deleted": ts_result.deleted_count,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    logger.info(f"Journey {journey_id} deleted by {user.get('email')}: {pkg_result.deleted_count} packages, {inc_result.deleted_count} incidents")
+    return {
+        "message": "Ruta eliminada exitosamente",
+        "deleted": {
+            "packages": pkg_result.deleted_count,
+            "incidents": inc_result.deleted_count,
+            "images": img_result.deleted_count,
+        },
+    }
+
+
 @router.put("/incidents/journey/{journey_id}/resolve-all")
 async def resolve_all_incidents(journey_id: str, user: dict = Depends(require_role(["coordinator", "agent"]))):
     now = datetime.now(timezone.utc).isoformat()

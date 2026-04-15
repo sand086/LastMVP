@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { getJourneys, getClients, getProviders } from '../lib/api';
+import { getJourneys, getClients, getProviders, deleteJourney } from '../lib/api';
 import { 
     formatDate, 
     getStatusColor, 
@@ -11,18 +11,15 @@ import {
 } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Input } from '../components/ui/input';
 import { Progress } from '../components/ui/progress';
 import { Calendar } from '../components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { 
-    Truck, 
-    Calendar as CalendarIcon,
-    Eye,
-    Upload,
-    AlertTriangle,
-    Filter,
-    X
+    Truck, Calendar as CalendarIcon, Eye, Upload, AlertTriangle,
+    Filter, X, Search, Trash2, Loader2, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -31,8 +28,11 @@ import PulseStrip from '../components/PulseStrip';
 import PulseCell from '../components/PulseCell';
 import api from '../lib/api';
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100];
+
 const Journeys = () => {
-    const { canEdit } = useAuth();
+    const { canEdit, hasRole } = useAuth();
+    const canDelete = hasRole(['coordinator', 'developer']);
     const [journeys, setJourneys] = useState([]);
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
@@ -46,6 +46,15 @@ const Journeys = () => {
     const [selectedProvider, setSelectedProvider] = useState('all');
     const [selectedStatus, setSelectedStatus] = useState('all');
     const [showFilters, setShowFilters] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // Pagination
+    const [pageSize, setPageSize] = useState(25);
+    const [currentPage, setCurrentPage] = useState(1);
+
+    // Delete modal
+    const [deleteModal, setDeleteModal] = useState({ open: false, journey: null });
+    const [deleting, setDeleting] = useState(false);
 
     const fetchData = useCallback(async () => {
         try {
@@ -78,145 +87,150 @@ const Journeys = () => {
             } else if (failed.length > 0) {
                 console.warn('Partial fetch failures:', failed.map(f => f.reason?.message));
             }
-        } catch (error) {
-            console.error('Error fetching journeys:', error);
-            toast.error('Error al cargar rutas');
-        } finally {
-            setLoading(false);
+        } catch (err) {
+            toast.error('Error al cargar datos');
         }
+        setLoading(false);
     }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus]);
 
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
-
-    const clearFilters = () => {
-        setDateFrom(null);
-        setDateTo(null);
-        setSelectedClient('all');
-        setSelectedProvider('all');
-        setSelectedStatus('all');
-    };
+    useEffect(() => { fetchData(); }, [fetchData]);
 
     const hasActiveFilters = dateFrom || dateTo || selectedClient !== 'all' || selectedProvider !== 'all' || selectedStatus !== 'all';
 
+    const clearFilters = () => {
+        setDateFrom(null); setDateTo(null);
+        setSelectedClient('all'); setSelectedProvider('all'); setSelectedStatus('all');
+        setSearchQuery('');
+    };
+
+    // Client-side search + pagination
+    const filteredJourneys = useMemo(() => {
+        if (!searchQuery.trim()) return journeys;
+        const q = searchQuery.toLowerCase().trim();
+        return journeys.filter(j =>
+            (j.order_id || '').toLowerCase().includes(q) ||
+            (j.driver_name || '').toLowerCase().includes(q) ||
+            (j.client_name || '').toLowerCase().includes(q) ||
+            (j.provider_name || '').toLowerCase().includes(q)
+        );
+    }, [journeys, searchQuery]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredJourneys.length / pageSize));
+    const paginatedJourneys = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredJourneys.slice(start, start + pageSize);
+    }, [filteredJourneys, currentPage, pageSize]);
+
+    // Reset page when filters change
+    useEffect(() => { setCurrentPage(1); }, [searchQuery, pageSize, journeys]);
+
+    const handleDelete = async () => {
+        const j = deleteModal.journey;
+        if (!j) return;
+        setDeleting(true);
+        try {
+            const res = await deleteJourney(j.id);
+            toast.success(res.data?.message || 'Ruta eliminada');
+            setDeleteModal({ open: false, journey: null });
+            fetchData();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al eliminar ruta');
+        }
+        setDeleting(false);
+    };
+
+    const getRouteTypeLabel = (journey) => {
+        const rt = journey.route_type || '';
+        if (rt === 'CDMX / Zona Metro' || rt === 'CDMX') {
+            return <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded">CDMX</span>;
+        }
+        return (
+            <span className="px-1.5 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded">
+                {rt || 'CDMX'}{journey.city ? ` — ${journey.city}` : ''}
+            </span>
+        );
+    };
+
     return (
-        <div className="space-y-6">
-            {/* Header */}
+        <div className="space-y-4" data-testid="journeys-page">
             <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="font-heading text-2xl font-bold text-slate-900 tracking-tight">
-                        Rutas
-                    </h1>
-                    <p className="text-slate-500 text-sm">
-                        Gestiona todas las rutas de entrega
-                    </p>
-                </div>
-                <div className="flex items-center gap-3">
-                    <Button
-                        variant="outline"
-                        onClick={() => setShowFilters(!showFilters)}
-                        data-testid="toggle-filters-btn"
-                    >
-                        <Filter className="w-4 h-4 mr-2" />
-                        Filtros
-                        {hasActiveFilters && (
-                            <span className="ml-2 w-2 h-2 bg-blue-500 rounded-full" />
+                <h2 className="text-xl font-semibold text-slate-900">Rutas</h2>
+                <div className="flex items-center gap-2">
+                    {/* Search bar */}
+                    <div className="relative w-64">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <Input
+                            placeholder="Buscar Order ID, driver..."
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            className="pl-9 h-9 text-sm"
+                            data-testid="search-journeys-input"
+                        />
+                        {searchQuery && (
+                            <button className="absolute right-2 top-1/2 -translate-y-1/2" onClick={() => setSearchQuery('')}>
+                                <X className="w-3.5 h-3.5 text-slate-400" />
+                            </button>
                         )}
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} data-testid="toggle-filters-btn">
+                        <Filter className="w-4 h-4 mr-1" />
+                        Filtros {hasActiveFilters && <span className="ml-1 w-2 h-2 rounded-full bg-blue-500" />}
                     </Button>
                     {canEdit() && (
                         <Link to="/layout">
-                            <Button data-testid="new-layout-btn">
-                                <Upload className="w-4 h-4 mr-2" />
-                                Cargar layout
+                            <Button size="sm" data-testid="upload-layout-btn">
+                                <Upload className="w-4 h-4 mr-1" /> Cargar layout
                             </Button>
                         </Link>
                     )}
                 </div>
             </div>
 
-            {/* Filters */}
+            {/* Filters panel */}
             {showFilters && (
-                <Card className="animate-fade-in">
-                    <CardContent className="p-4">
-                        <div className="flex flex-wrap items-center gap-4">
-                            {/* Date Range */}
-                            <div className="flex items-center gap-2">
+                <Card>
+                    <CardContent className="py-3 px-4">
+                        <div className="flex flex-wrap gap-3 items-end">
+                            <div className="space-y-1">
+                                <span className="text-xs text-slate-500">Desde</span>
                                 <Popover>
                                     <PopoverTrigger asChild>
-                                        <Button 
-                                            variant="outline" 
-                                            className="justify-start text-left font-normal"
-                                            data-testid="journeys-date-from"
-                                        >
-                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                            {dateFrom ? format(dateFrom, 'dd MMM', { locale: es }) : 'Desde'}
+                                        <Button variant="outline" size="sm" className="h-9 w-40 justify-start" data-testid="filter-date-from">
+                                            <CalendarIcon className="w-4 h-4 mr-2" />
+                                            {dateFrom ? format(dateFrom, 'dd MMM yyyy', { locale: es }) : 'Seleccionar'}
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                        <Calendar
-                                            mode="single"
-                                            selected={dateFrom}
-                                            onSelect={setDateFrom}
-                                            initialFocus
-                                        />
-                                    </PopoverContent>
-                                </Popover>
-                                <span className="text-slate-400">—</span>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <Button 
-                                            variant="outline" 
-                                            className="justify-start text-left font-normal"
-                                            data-testid="journeys-date-to"
-                                        >
-                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                            {dateTo ? format(dateTo, 'dd MMM', { locale: es }) : 'Hasta'}
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                        <Calendar
-                                            mode="single"
-                                            selected={dateTo}
-                                            onSelect={setDateTo}
-                                            initialFocus
-                                        />
-                                    </PopoverContent>
+                                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={dateFrom} onSelect={setDateFrom} locale={es} /></PopoverContent>
                                 </Popover>
                             </div>
-
+                            <div className="space-y-1">
+                                <span className="text-xs text-slate-500">Hasta</span>
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" size="sm" className="h-9 w-40 justify-start" data-testid="filter-date-to">
+                                            <CalendarIcon className="w-4 h-4 mr-2" />
+                                            {dateTo ? format(dateTo, 'dd MMM yyyy', { locale: es }) : 'Seleccionar'}
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={dateTo} onSelect={setDateTo} locale={es} /></PopoverContent>
+                                </Popover>
+                            </div>
                             <Select value={selectedClient} onValueChange={setSelectedClient}>
-                                <SelectTrigger className="w-[180px]" data-testid="journeys-client-filter">
-                                    <SelectValue placeholder="Cliente" />
-                                </SelectTrigger>
+                                <SelectTrigger className="w-40 h-9" data-testid="filter-client"><SelectValue placeholder="Cliente" /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">Todos los clientes</SelectItem>
-                                    {clients.map((client) => (
-                                        <SelectItem key={client.id} value={client.id}>
-                                            {client.name}
-                                        </SelectItem>
-                                    ))}
+                                    <SelectItem value="all">Todos</SelectItem>
+                                    {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                                 </SelectContent>
                             </Select>
-
                             <Select value={selectedProvider} onValueChange={setSelectedProvider}>
-                                <SelectTrigger className="w-[180px]" data-testid="journeys-provider-filter">
-                                    <SelectValue placeholder="Proveedor" />
-                                </SelectTrigger>
+                                <SelectTrigger className="w-40 h-9" data-testid="filter-provider"><SelectValue placeholder="Proveedor" /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">Todos los proveedores</SelectItem>
-                                    {providers.map((provider) => (
-                                        <SelectItem key={provider.id} value={provider.id}>
-                                            {provider.name}
-                                        </SelectItem>
-                                    ))}
+                                    <SelectItem value="all">Todos</SelectItem>
+                                    {providers.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                                 </SelectContent>
                             </Select>
-
                             <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                                <SelectTrigger className="w-[160px]" data-testid="journeys-status-filter">
-                                    <SelectValue placeholder="Estado" />
-                                </SelectTrigger>
+                                <SelectTrigger className="w-36 h-9" data-testid="filter-status"><SelectValue placeholder="Estado" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">Todos</SelectItem>
                                     <SelectItem value="scheduled">Programada</SelectItem>
@@ -224,16 +238,9 @@ const Journeys = () => {
                                     <SelectItem value="closed">Cerrada</SelectItem>
                                 </SelectContent>
                             </Select>
-
                             {hasActiveFilters && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={clearFilters}
-                                    data-testid="clear-filters-btn"
-                                >
-                                    <X className="w-4 h-4 mr-1" />
-                                    Limpiar
+                                <Button variant="ghost" size="sm" onClick={clearFilters} data-testid="clear-filters-btn">
+                                    <X className="w-4 h-4 mr-1" /> Limpiar
                                 </Button>
                             )}
                         </div>
@@ -241,7 +248,6 @@ const Journeys = () => {
                 </Card>
             )}
 
-            {/* Pulse Strip */}
             {pulseConfig && <PulseStrip journeys={journeys} pulseConfig={pulseConfig} />}
 
             {/* Journey List */}
@@ -249,127 +255,170 @@ const Journeys = () => {
                 <CardContent className="p-0">
                     {loading ? (
                         <div className="p-8 space-y-4">
-                            {[1, 2, 3].map((i) => (
-                                <div key={`skel-${i}`} className="h-16 bg-slate-100 animate-pulse rounded" />
-                            ))}
+                            {[1, 2, 3].map((i) => <div key={`skel-${i}`} className="h-16 bg-slate-100 animate-pulse rounded" />)}
                         </div>
-                    ) : journeys.length === 0 ? (
+                    ) : filteredJourneys.length === 0 ? (
                         <div className="text-center py-16">
                             <Truck className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                            <h3 className="text-lg font-medium text-slate-700 mb-2">
-                                No hay rutas
-                            </h3>
+                            <h3 className="text-lg font-medium text-slate-700 mb-2">No hay rutas</h3>
                             <p className="text-slate-500 mb-6 max-w-md mx-auto">
-                                {hasActiveFilters 
-                                    ? 'No se encontraron rutas con los filtros seleccionados'
-                                    : 'Comienza cargando un layout para crear tu primera ruta'}
+                                {searchQuery ? `Sin resultados para "${searchQuery}"` :
+                                 hasActiveFilters ? 'No se encontraron rutas con los filtros seleccionados' :
+                                 'Comienza cargando un layout para crear tu primera ruta'}
                             </p>
-                            {canEdit() && !hasActiveFilters && (
-                                <Link to="/layout">
-                                    <Button data-testid="empty-state-upload-btn">
-                                        <Upload className="w-4 h-4 mr-2" />
-                                        Cargar layout
-                                    </Button>
-                                </Link>
+                            {canEdit() && !hasActiveFilters && !searchQuery && (
+                                <Link to="/layout"><Button data-testid="empty-state-upload-btn"><Upload className="w-4 h-4 mr-2" /> Cargar layout</Button></Link>
                             )}
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="data-table w-full">
-                                <thead>
-                                    <tr>
-                                        <th>Fecha</th>
-                                        <th>Cliente</th>
-                                        <th>Proveedor</th>
-                                        <th>Tipo</th>
-                                        <th>Paquetes</th>
-                                        <th>Progreso</th>
-                                        <th>Incidencias</th>
-                                        <th>Pulse</th>
-                                        <th>Estado</th>
-                                        <th>Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {journeys.map((journey) => {
-                                        const deliveryRate = calculateDeliveryRate(
-                                            journey.packages_delivered,
-                                            journey.packages_total
-                                        );
-                                        const progressColor = getProgressColor(deliveryRate);
-                                        
-                                        return (
-                                            <tr key={journey.id} data-testid={`journey-item-${journey.id}`}>
-                                                <td className="font-mono text-sm">
-                                                    {formatDate(journey.date)}
-                                                </td>
-                                                <td>{journey.client_name}</td>
-                                                <td>{journey.provider_name}</td>
-                                                <td>
-                                                    {journey.route_type === 'Foránea' ? (
-                                                        <span className="px-1.5 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded">
-                                                            Foránea{journey.city ? ` — ${journey.city}` : ''}
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="data-table w-full">
+                                    <thead>
+                                        <tr>
+                                            <th>Order ID</th>
+                                            <th>Fecha</th>
+                                            <th>Driver</th>
+                                            <th>Cliente</th>
+                                            <th>Proveedor</th>
+                                            <th>Tipo</th>
+                                            <th>Paquetes</th>
+                                            <th>Progreso</th>
+                                            <th>Incidencias</th>
+                                            <th>Pulse</th>
+                                            <th>Estado</th>
+                                            <th>Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {paginatedJourneys.map((journey) => {
+                                            const deliveryRate = calculateDeliveryRate(journey.packages_delivered, journey.packages_total);
+                                            const progressColor = getProgressColor(deliveryRate);
+                                            return (
+                                                <tr key={journey.id} data-testid={`journey-item-${journey.id}`}>
+                                                    <td className="font-mono text-xs text-blue-700 max-w-[120px] truncate" title={journey.order_id}>
+                                                        {journey.order_id || '—'}
+                                                    </td>
+                                                    <td className="font-mono text-sm">{formatDate(journey.date)}</td>
+                                                    <td className="text-sm max-w-[120px] truncate" title={journey.driver_name}>
+                                                        {journey.driver_name || <span className="text-slate-400">—</span>}
+                                                    </td>
+                                                    <td>{journey.client_name}</td>
+                                                    <td>{journey.provider_name}</td>
+                                                    <td>{getRouteTypeLabel(journey)}</td>
+                                                    <td className="font-mono">{journey.packages_delivered}/{journey.packages_total}</td>
+                                                    <td className="w-32">
+                                                        <div className="flex items-center gap-2">
+                                                            <Progress value={deliveryRate} className="h-2 flex-1" indicatorClassName={progressColor} />
+                                                            <span className="text-xs font-mono w-10 text-right">{deliveryRate}%</span>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        {journey.open_incidents_count > 0 ? (
+                                                            <span className="inline-flex items-center gap-1 text-amber-600">
+                                                                <AlertTriangle className="w-4 h-4" />{journey.open_incidents_count}
+                                                            </span>
+                                                        ) : <span className="text-slate-400">0</span>}
+                                                    </td>
+                                                    <td><PulseCell journey={journey} pulseConfig={pulseConfig} /></td>
+                                                    <td>
+                                                        <span className={`status-badge ${getStatusColor(journey.status)}`}>
+                                                            {getStatusLabel(journey.status)}
                                                         </span>
-                                                    ) : (
-                                                        <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded">
-                                                            CDMX
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="font-mono">
-                                                    {journey.packages_delivered}/{journey.packages_total}
-                                                </td>
-                                                <td className="w-32">
-                                                    <div className="flex items-center gap-2">
-                                                        <Progress 
-                                                            value={deliveryRate} 
-                                                            className="h-2 flex-1"
-                                                            indicatorClassName={progressColor}
-                                                        />
-                                                        <span className="text-xs font-mono w-10 text-right">
-                                                            {deliveryRate}%
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    {journey.open_incidents_count > 0 ? (
-                                                        <span className="inline-flex items-center gap-1 text-amber-600">
-                                                            <AlertTriangle className="w-4 h-4" />
-                                                            {journey.open_incidents_count}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-slate-400">0</span>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    <PulseCell journey={journey} pulseConfig={pulseConfig} />
-                                                </td>
-                                                <td>
-                                                    <span className={`status-badge ${getStatusColor(journey.status)}`}>
-                                                        {getStatusLabel(journey.status)}
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <Link to={`/journeys/${journey.id}`}>
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="sm"
-                                                            data-testid={`view-detail-${journey.id}`}
-                                                        >
-                                                            <Eye className="w-4 h-4 mr-1" />
-                                                            Ver detalle
-                                                        </Button>
-                                                    </Link>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <div className="flex items-center gap-1">
+                                                            <Link to={`/journeys/${journey.id}`}>
+                                                                <Button variant="ghost" size="sm" data-testid={`view-detail-${journey.id}`}>
+                                                                    <Eye className="w-4 h-4" />
+                                                                </Button>
+                                                            </Link>
+                                                            {canDelete && (
+                                                                <Button variant="ghost" size="sm"
+                                                                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                                    onClick={() => setDeleteModal({ open: true, journey })}
+                                                                    data-testid={`delete-journey-${journey.id}`}>
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Pagination */}
+                            <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200" data-testid="pagination-bar">
+                                <div className="flex items-center gap-2 text-sm text-slate-500">
+                                    <span>{filteredJourneys.length} ruta{filteredJourneys.length !== 1 ? 's' : ''}</span>
+                                    <span className="text-slate-300">|</span>
+                                    <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
+                                        <SelectTrigger className="w-20 h-7 text-xs" data-testid="page-size-select"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {PAGE_SIZE_OPTIONS.map(s => <SelectItem key={s} value={String(s)}>{s} / pag</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <Button variant="ghost" size="sm" disabled={currentPage <= 1}
+                                        onClick={() => setCurrentPage(p => p - 1)} data-testid="prev-page-btn">
+                                        <ChevronLeft className="w-4 h-4" />
+                                    </Button>
+                                    <span className="text-sm text-slate-600 px-2">{currentPage} / {totalPages}</span>
+                                    <Button variant="ghost" size="sm" disabled={currentPage >= totalPages}
+                                        onClick={() => setCurrentPage(p => p + 1)} data-testid="next-page-btn">
+                                        <ChevronRight className="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        </>
                     )}
                 </CardContent>
             </Card>
+
+            {/* Delete Confirmation Modal */}
+            <Dialog open={deleteModal.open} onOpenChange={(open) => !open && setDeleteModal({ open: false, journey: null })}>
+                <DialogContent data-testid="delete-journey-modal">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-700">Eliminar ruta</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 py-2">
+                        <p className="text-sm text-slate-600">
+                            Esta accion eliminara permanentemente la ruta y todos sus datos asociados:
+                        </p>
+                        <ul className="text-sm text-slate-600 space-y-1 pl-4 list-disc">
+                            <li>Todos los paquetes de la ruta</li>
+                            <li>Todas las incidencias registradas</li>
+                            <li>Todas las imagenes y evidencias</li>
+                            <li>Evaluaciones de IA y training samples</li>
+                        </ul>
+                        {deleteModal.journey && (
+                            <div className="bg-slate-50 rounded-lg p-3 space-y-1">
+                                <p className="text-xs text-slate-500">Ruta a eliminar:</p>
+                                <p className="text-sm font-medium">{deleteModal.journey.order_id || deleteModal.journey.id?.slice(0, 12)}</p>
+                                <p className="text-xs text-slate-500">
+                                    {formatDate(deleteModal.journey.date)} — {deleteModal.journey.driver_name || 'Sin driver'} — {deleteModal.journey.packages_total} paquetes
+                                </p>
+                            </div>
+                        )}
+                        <p className="text-xs font-semibold text-red-600">
+                            Esta accion no se puede deshacer.
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDeleteModal({ open: false, journey: null })} disabled={deleting}>
+                            Cancelar
+                        </Button>
+                        <Button variant="destructive" onClick={handleDelete} disabled={deleting} data-testid="confirm-delete-btn">
+                            {deleting ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Trash2 className="w-4 h-4 mr-1" />}
+                            Eliminar definitivamente
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

@@ -9,7 +9,7 @@ from starlette.requests import Request as StarletteRequest
 
 from dependencies import (
     db, limiter, security, get_current_user, require_role,
-    hash_password, verify_password, verify_password_async, create_token,
+    hash_password, verify_password, verify_password_async, create_token, create_refresh_token,
     JWT_SECRET, JWT_ALGORITHM,
 )
 from models import (
@@ -152,3 +152,90 @@ async def change_password_by_admin(
         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}},
     )
     return {"message": "Contraseña actualizada exitosamente"}
+
+
+
+# ==================== REFRESH TOKEN ====================
+
+@router.post("/auth/refresh-token")
+async def generate_refresh_token(
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Generate a long-lived refresh token (90 days) for API/Power BI integrations.
+    Only coordinators and developers can generate refresh tokens."""
+    result = create_refresh_token(user["id"], user["email"], user["role"])
+
+    # Store token metadata for revocation support
+    await db.refresh_tokens.insert_one({
+        "jti": result["jti"],
+        "user_id": user["id"],
+        "user_email": user["email"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": result["expires_at"],
+        "revoked": False,
+    })
+
+    return {
+        "refresh_token": result["token"],
+        "expires_at": result["expires_at"],
+        "message": "Token generado. Valido por 90 dias. Guardar en lugar seguro.",
+    }
+
+
+@router.post("/auth/exchange-token")
+async def exchange_refresh_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Exchange a refresh token for a short-lived access token."""
+    try:
+        payload = pyjwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=400, detail="No es un refresh token")
+
+        jti = payload.get("jti")
+        if jti:
+            stored = await db.refresh_tokens.find_one({"jti": jti}, {"_id": 0})
+            if not stored or stored.get("revoked"):
+                raise HTTPException(status_code=401, detail="Refresh token revocado")
+
+        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="Usuario no encontrado")
+
+        access_token = create_token(user["id"], user["email"], user["role"])
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {"id": user["id"], "email": user["email"], "role": user["role"], "name": user.get("name")},
+        }
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Refresh token expirado")
+    except pyjwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Refresh token invalido")
+
+
+@router.delete("/auth/refresh-token/{jti}")
+async def revoke_refresh_token(
+    jti: str,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Revoke a specific refresh token."""
+    result = await db.refresh_tokens.update_one(
+        {"jti": jti, "user_id": user["id"]},
+        {"$set": {"revoked": True, "revoked_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Token no encontrado")
+    return {"message": "Refresh token revocado exitosamente"}
+
+
+@router.get("/auth/refresh-tokens")
+async def list_refresh_tokens(
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """List all active refresh tokens for the current user."""
+    tokens = await db.refresh_tokens.find(
+        {"user_id": user["id"], "revoked": False},
+        {"_id": 0, "jti": 1, "created_at": 1, "expires_at": 1},
+    ).sort("created_at", -1).to_list(50)
+    return tokens

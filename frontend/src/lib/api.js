@@ -70,6 +70,7 @@ export const getJourney = (id) => api.get(`/journeys/${id}`);
 export const createJourney = (data) => api.post('/journeys', data);
 export const startJourney = (id, data) => api.put(`/journeys/${id}/start`, data);
 export const closeJourney = (id, data) => api.put(`/journeys/${id}/close`, data);
+export const deleteJourney = (id) => api.delete(`/journeys/${id}`);
 
 // Incidents
 export const getIncidents = (params) => api.get('/incidents', { params });
