@@ -121,8 +121,8 @@ ALLOWED_ORIGINS = [
     os.environ.get("CORS_ORIGINS",
         "https://lastmile-mvp.preview.emergentagent.com"
     ).split(",")
-    if o.strip()
-]
+    if o.strip() and o.strip() != "*"
+] or ["https://lastmile-mvp.preview.emergentagent.com"]
 
 app.add_middleware(
     CORSMiddleware,

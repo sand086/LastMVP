@@ -4,6 +4,7 @@ Authentication routes: login, logout, password reset.
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.responses import JSONResponse
 from datetime import datetime, timezone, timedelta
 from starlette.requests import Request as StarletteRequest
 
@@ -11,6 +12,7 @@ from dependencies import (
     db, limiter, security, get_current_user, require_role,
     hash_password, verify_password, verify_password_async, create_token, create_refresh_token,
     JWT_SECRET, JWT_ALGORITHM,
+    COOKIE_NAME, COOKIE_MAX_AGE, COOKIE_SECURE, COOKIE_HTTPONLY, COOKIE_SAMESITE, COOKIE_PATH,
 )
 from models import (
     UserLogin, TokenResponse, PasswordResetRequestCreate, PasswordChangeByAdmin,
@@ -20,7 +22,7 @@ from middleware import log_audit_event
 router = APIRouter(tags=["Auth"])
 
 
-@router.post("/auth/login", response_model=TokenResponse)
+@router.post("/auth/login")
 @limiter.limit("20/minute")
 async def login(data: UserLogin, request: StarletteRequest):
     now = datetime.now(timezone.utc)
@@ -73,7 +75,22 @@ async def login(data: UserLogin, request: StarletteRequest):
     token = create_token(user["id"], user["email"], user["role"])
     user_response = {k: v for k, v in user.items() if k != "password"}
     await log_audit_event(db, user["id"], user["role"], "login_success", "user", user["id"])
-    return TokenResponse(access_token=token, user=user_response)
+
+    response = JSONResponse(content={
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user_response,
+    })
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=COOKIE_HTTPONLY,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=COOKIE_MAX_AGE,
+        path=COOKIE_PATH,
+    )
+    return response
 
 
 @router.get("/auth/me")
@@ -82,19 +99,30 @@ async def get_me(user: dict = Depends(get_current_user)):
 
 
 @router.post("/auth/logout")
-async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        payload = pyjwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        jti = payload.get("jti")
-        if jti:
-            await db.revoked_tokens.insert_one({
-                "jti": jti,
-                "revoked_at": datetime.now(timezone.utc).isoformat(),
-                "expires_at": datetime.fromtimestamp(payload["exp"], tz=timezone.utc).isoformat(),
-            })
-    except Exception:
-        pass
-    return {"message": "Sesión cerrada correctamente."}
+async def logout(request: StarletteRequest):
+    """Logout: revoke token + clear httpOnly cookie."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+    if token:
+        try:
+            payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            jti = payload.get("jti")
+            if jti:
+                await db.revoked_tokens.insert_one({
+                    "jti": jti,
+                    "revoked_at": datetime.now(timezone.utc).isoformat(),
+                    "expires_at": datetime.fromtimestamp(payload["exp"], tz=timezone.utc).isoformat(),
+                })
+        except Exception:
+            pass
+
+    response = JSONResponse(content={"message": "Sesión cerrada correctamente."})
+    response.delete_cookie(COOKIE_NAME, path=COOKIE_PATH)
+    return response
 
 
 # ==================== PASSWORD RESET ====================

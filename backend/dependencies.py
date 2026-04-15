@@ -14,6 +14,7 @@ from typing import List
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette.requests import Request
 from motor.motor_asyncio import AsyncIOMotorClient
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -59,7 +60,14 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 # ==================== SECURITY ====================
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
+COOKIE_NAME = "lm_access_token"
+COOKIE_MAX_AGE = JWT_EXPIRY_HOURS * 3600
+COOKIE_SECURE = True
+COOKIE_HTTPONLY = True
+COOKIE_SAMESITE = "lax"
+COOKIE_PATH = "/api"
 
 # ==================== AUTH HELPERS ====================
 
@@ -114,9 +122,17 @@ def create_refresh_token(user_id: str, email: str, role: str, days: int = 90) ->
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return {"token": token, "jti": jti, "expires_at": expires_at.isoformat()}
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_current_user(request: Request):
+    """Extract JWT from httpOnly cookie first, fallback to Authorization Bearer header."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="No autenticado")
     try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         jti = payload.get("jti")
         if jti:
             revoked = await db.revoked_tokens.find_one({"jti": jti})

@@ -2,21 +2,13 @@ import axios from 'axios';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL + '/api';
 
-// Create axios instance
+// Create axios instance with httpOnly cookie support
 const api = axios.create({
     baseURL: API_BASE,
     headers: {
         'Content-Type': 'application/json',
     },
-});
-
-// Add auth token to requests
-api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
+    withCredentials: true,
 });
 
 // Handle 401 errors — auto-logout with redirect reason
@@ -25,13 +17,11 @@ api.interceptors.response.use(
     (error) => {
         if (error.response?.status === 401) {
             const currentPath = window.location.pathname;
-            // Avoid redirect loop on login page
             if (currentPath !== '/login') {
-                console.warn('[Auth] Token expirado o inválido — cerrando sesión');
-                localStorage.removeItem('token');
+                console.warn('[Auth] Sesión expirada — redirigiendo a login');
                 localStorage.removeItem('user');
                 window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}&reason=expired`;
-                return new Promise(() => {}); // Prevent further processing
+                return new Promise(() => {});
             }
         }
         return Promise.reject(error);

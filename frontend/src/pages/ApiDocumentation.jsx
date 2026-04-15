@@ -117,7 +117,7 @@ const ApiDocumentation = () => {
         URL.revokeObjectURL(url);
     };
 
-    const getToken = () => localStorage.getItem('token') || '';
+    const getToken = () => '(httpOnly cookie - autenticación automática)';
 
     const generateCurlCommand = (endpoint) => {
         const params = [];

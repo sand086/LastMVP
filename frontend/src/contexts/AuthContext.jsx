@@ -17,35 +17,25 @@ export const AuthProvider = ({ children }) => {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        const savedUser = localStorage.getItem('user');
-        
-        if (token && savedUser) {
-            setUser(JSON.parse(savedUser));
-            // Verify token is still valid
-            getMe()
-                .then((res) => {
-                    setUser(res.data);
-                    localStorage.setItem('user', JSON.stringify(res.data));
-                })
-                .catch(() => {
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('user');
-                    setUser(null);
-                })
-                .finally(() => setLoading(false));
-        } else {
-            setLoading(false);
-        }
+        // Verify session via httpOnly cookie (no token in localStorage)
+        getMe()
+            .then((res) => {
+                setUser(res.data);
+                localStorage.setItem('user', JSON.stringify(res.data));
+            })
+            .catch(() => {
+                localStorage.removeItem('user');
+                setUser(null);
+            })
+            .finally(() => setLoading(false));
     }, []);
 
     const login = async (email, password) => {
         try {
             setError(null);
             const response = await apiLogin(email, password);
-            const { access_token, user: userData } = response.data;
+            const { user: userData } = response.data;
             
-            localStorage.setItem('token', access_token);
             localStorage.setItem('user', JSON.stringify(userData));
             setUser(userData);
             
@@ -63,7 +53,6 @@ export const AuthProvider = ({ children }) => {
         } catch (err) {
             // Ignore errors on logout
         } finally {
-            localStorage.removeItem('token');
             localStorage.removeItem('user');
             setUser(null);
         }
