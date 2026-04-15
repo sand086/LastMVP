@@ -1,5 +1,43 @@
 # LastMile OS - Changelog
 
+## 2026-04-15 — 5 Feature Prompts Implementados (P1-P5)
+
+### P1: Refresh Token para Power BI
+- Nuevo endpoint `POST /api/auth/refresh-token` genera tokens de 90 días
+- `POST /api/auth/exchange-token` intercambia refresh → access token
+- `GET /api/auth/refresh-tokens` lista tokens activos
+- `DELETE /api/auth/refresh-token/{jti}` revoca un token
+- Snippets actualizados en ApiDocumentation (Python + Power Query M Code)
+- Solo coordinadores/developers pueden generar tokens
+
+### P2: Fix Fórmulas Liquidación
+- Columna O: Cambiado de `delivered` a `=H{r}+I{r}` (entregas + fallidas)
+- Columna AB: Cambiado de `=O/sla` a `=O/MAX(G,sla)` (evita div by zero y usa el mayor)
+
+### P3: Eliminar Ruta + Columna Driver
+- `DELETE /api/journeys/{id}` con cascade: paquetes, incidencias, imágenes, training_samples
+- Audit log registrado con detalle de eliminación
+- Modal de confirmación con lista de datos que se eliminarán
+- Solo coordinadores/developers ven el botón eliminar
+
+### P4: Order ID + Búsqueda + Paginación
+- Columna Order ID como primera columna en tablas Journeys y Dashboard
+- Búsqueda rápida por Order ID, driver, cliente, proveedor
+- Paginación con selector 25/50/100 por página
+- Order ID en header de JourneyDetail con botón copiar al clipboard
+
+### P5: Inicio de Ruta — Checklist eliminado + 32 Estados
+- Checklist de salida eliminado completamente (9 items)
+- Validación de checklist removida de handleStartJourney
+- Dropdown "Tipo de ruta" ahora tiene 33 opciones: CDMX + 32 estados de México
+
+### Test Results
+- Backend: 21/21 tests passed (100%)
+- Frontend: 5/5 features verified (100%)
+- Test report: `/app/test_reports/iteration_40.json`
+
+---
+
 ## 2026-04-10 — Bug Fix: Reportes mostraba 0% para fechas con datos
 
 ### Causa Raíz

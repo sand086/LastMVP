@@ -102,6 +102,11 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] P3: Cubbo Standard Evidence Evaluation (ReviewModal) — Done 2026-04-10
 - [x] Code Quality Review: Security fixes, backend refactoring, GuiasTab split, hook deps, PulseStrip key — Done 2026-04-10
 - [x] PDF Export Redesign: Multi-page, legible, all 6 tabs + cover + AI analysis — Done 2026-04-10
+- [x] P1: Refresh Token for Power BI (generate, exchange, revoke, list) — Done 2026-04-15
+- [x] P2: Liquidación formulas fix (Col O = H+I, Col AB = O/MAX(G,sla)) — Done 2026-04-15
+- [x] P3: Delete Journey + Driver column in tables — Done 2026-04-15
+- [x] P4: Order ID in tables + search + pagination 25/50/100 — Done 2026-04-15
+- [x] P5: Remove checklist + 32 Mexico states in route type — Done 2026-04-15
 - [ ] Split remaining large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P1)
 - [ ] localStorage -> httpOnly cookies migration (P1, security hardening)
 - [ ] Mobile-optimized views for field agents (P2)
