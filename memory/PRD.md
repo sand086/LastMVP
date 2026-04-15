@@ -107,6 +107,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] P3: Delete Journey + Driver column in tables — Done 2026-04-15
 - [x] P4: Order ID in tables + search + pagination 25/50/100 — Done 2026-04-15
 - [x] P5: Remove checklist + 32 Mexico states in route type — Done 2026-04-15
+- [x] Kosmo Sync Performance Optimization (P0) — Done 2026-04-15
 - [ ] Split remaining large components: Settings (1066L), JourneyDetail (1237L), Layout (802L) (P1)
 - [ ] localStorage -> httpOnly cookies migration (P1, security hardening)
 - [ ] Mobile-optimized views for field agents (P2)

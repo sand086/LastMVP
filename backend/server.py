@@ -12,7 +12,7 @@ import os
 
 from dependencies import db, limiter, mongo_client
 from middleware import AuditMiddleware, SecurityHeadersMiddleware
-from kosmo_sync import start_periodic_sync, stop_periodic_sync
+from kosmo_sync import start_periodic_sync, stop_periodic_sync, close_http_client
 from ws_manager import ws_manager
 
 from routes import (
@@ -152,6 +152,11 @@ async def startup_event():
     await db.packages.create_index("address_cp", background=True)
     await db.packages.create_index("evidence_score", background=True)
 
+    # Kosmo sync indexes for adaptive scheduling
+    await db.packages.create_index("kosmo_scraped_at", background=True)
+    await db.packages.create_index([("tracking_url", 1), ("kosmo_scraped_at", 1)], background=True)
+    await db.journeys.create_index("next_sync_at", background=True)
+
     # Journey indexes
     await db.journeys.create_index("date", background=True)
     await db.journeys.create_index("status", background=True)
@@ -203,4 +208,5 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     stop_periodic_sync()
+    await close_http_client()
     mongo_client.close()

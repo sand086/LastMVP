@@ -65,11 +65,13 @@ class TestKosmoSyncStatus:
         assert "total_checked" in data, "Missing total_checked field"
         assert "updated" in data, "Missing updated field"
         assert "errors" in data, "Missing errors field"
+        assert "rate_limited" in data, "Missing rate_limited field"
         
         # Verify types
         assert isinstance(data["total_checked"], int)
         assert isinstance(data["updated"], int)
         assert isinstance(data["errors"], int)
+        assert isinstance(data["rate_limited"], bool)
 
     def test_get_sync_status_requires_auth(self):
         """GET /api/sync/status should require authentication"""
@@ -97,26 +99,17 @@ class TestKosmoSyncTracking:
         assert response.status_code == 200
 
     def test_sync_tracking_response_structure(self, dev_token):
-        """POST /api/sync/tracking should return correct JSON structure"""
+        """POST /api/sync/tracking should return started or in_progress"""
         response = requests.post(
             f"{BASE_URL}/api/sync/tracking",
             headers={"Authorization": f"Bearer {dev_token}"}
         )
         data = response.json()
         
-        # Verify required fields
-        assert "total_checked" in data, "Missing total_checked field"
-        assert "updated" in data, "Missing updated field"
-        assert "no_change" in data, "Missing no_change field"
-        assert "errors" in data, "Missing errors field"
-        assert "details" in data, "Missing details field"
-        
-        # Verify types
-        assert isinstance(data["total_checked"], int)
-        assert isinstance(data["updated"], int)
-        assert isinstance(data["no_change"], int)
-        assert isinstance(data["errors"], int)
-        assert isinstance(data["details"], list)
+        # Background task endpoint returns status+message
+        assert "status" in data, "Missing status field"
+        assert "message" in data, "Missing message field"
+        assert data["status"] in ("started", "in_progress")
 
     def test_sync_tracking_requires_auth(self):
         """POST /api/sync/tracking should require authentication"""

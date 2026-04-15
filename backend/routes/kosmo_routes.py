@@ -53,4 +53,5 @@ async def get_sync_status(user: dict = Depends(get_current_user)):
         "total_checked": doc.get("total_checked", 0),
         "updated": doc.get("updated", 0),
         "errors": doc.get("errors", 0),
+        "rate_limited": doc.get("rate_limited", False),
     }
