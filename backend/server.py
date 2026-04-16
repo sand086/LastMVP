@@ -164,6 +164,10 @@ async def startup_event():
     await db.drivers.create_index("provider_id", background=True)
     await db.drivers.create_index("status", background=True)
 
+    # TTL indexes for cleanup (Audit P0)
+    await db.request_metrics.create_index("timestamp", expireAfterSeconds=2592000, background=True)
+    await db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0, background=True)
+
     # Journey indexes
     await db.journeys.create_index("date", background=True)
     await db.journeys.create_index("status", background=True)

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
@@ -227,8 +227,12 @@ function App() {
 
 function LumiChatWrapper() {
     const { isAuthenticated } = useAuth();
+    const location = useLocation();
     if (!isAuthenticated) return null;
-    return <LumiChat />;
+    // Detect journeyId from URL pattern /journeys/:id
+    const match = location.pathname.match(/^\/journeys\/([a-f0-9-]{36})$/);
+    const journeyId = match ? match[1] : null;
+    return <LumiChat journeyId={journeyId} />;
 }
 
 export default App;

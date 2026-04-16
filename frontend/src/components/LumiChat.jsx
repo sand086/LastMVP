@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import DOMPurify from 'dompurify';
 import { sendLumiMessage } from '../lib/api';
-import { X, Send, MessageCircle } from 'lucide-react';
+import api from '../lib/api';
+import { X, Send } from 'lucide-react';
 
 const TruckSVG = ({ size = 28 }) => (
     <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" width={size} height={size}>
@@ -32,22 +33,23 @@ function formatAIText(text) {
 
 const WELCOME_MSG = {
     role: 'assistant',
-    content: 'Hola, soy **Lumi**, tu asistente de inteligencia operacional. Puedo ayudarte con datos de entregas, SLA, drivers, incidencias y calidad de evidencias del período activo. ¿Qué necesitas saber?',
+    content: 'Hola, soy **Lumi**, tu asistente de inteligencia operacional. Puedo ayudarte con datos de entregas, SLA, drivers, incidencias y calidad de evidencias del periodo activo.',
 };
 
 const QUICK_ACTIONS = [
     { label: 'SLA actual', icon: '📊' },
-    { label: 'Drivers críticos', icon: '⚠️' },
+    { label: 'Drivers criticos', icon: '⚠️' },
     { label: 'Evidencias', icon: '📸' },
     { label: 'Incidencias', icon: '🚨' },
 ];
 
-const LumiChat = ({ period = '7d', clientId, providerId }) => {
+const LumiChat = ({ period = '7d', clientId, providerId, journeyId }) => {
     const [open, setOpen] = useState(false);
     const [messages, setMessages] = useState([WELCOME_MSG]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [showBadge, setShowBadge] = useState(false);
+    const [activeContext, setActiveContext] = useState(null);
     const scrollRef = useRef(null);
     const inputRef = useRef(null);
 
@@ -63,6 +65,17 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
     useEffect(() => {
         if (open && inputRef.current) inputRef.current.focus();
     }, [open]);
+
+    // Fetch active journey context when journeyId changes
+    useEffect(() => {
+        if (journeyId) {
+            api.get(`/lumi/active-context?journey_id=${journeyId}`)
+                .then(res => setActiveContext(res.data))
+                .catch(() => setActiveContext(null));
+        } else {
+            setActiveContext(null);
+        }
+    }, [journeyId]);
 
     const handleOpen = () => { setOpen(true); setShowBadge(false); };
 
@@ -81,14 +94,15 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                 period,
                 client_id: clientId || undefined,
                 provider_id: providerId || undefined,
+                journey_id: journeyId || undefined,
             });
             setMessages(prev => [...prev, { role: 'assistant', content: res.data.reply }]);
         } catch {
-            setMessages(prev => [...prev, { role: 'assistant', content: 'Hubo un problema de conexión. Intenta de nuevo.' }]);
+            setMessages(prev => [...prev, { role: 'assistant', content: 'Hubo un problema de conexion. Intenta de nuevo.' }]);
         } finally {
             setLoading(false);
         }
-    }, [loading, messages, period, clientId, providerId]);
+    }, [loading, messages, period, clientId, providerId, journeyId]);
 
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(input); }
@@ -122,9 +136,9 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                 .lumi-quick-btn { padding: 5px 10px; border: 1px solid #E2E0DB; border-radius: 6px; font-size: 12px; font-family: 'DM Sans', sans-serif; background: #fff; cursor: pointer; color: #1A1916; transition: background 0.15s, border-color 0.15s; }
                 .lumi-quick-btn:hover { background: #F0EFEC; border-color: #C8C6BF; }
                 .lumi-footer { text-align: center; padding: 6px 16px 10px; font-size: 11px; color: #9C9A92; }
+                .lumi-ctx-badge { display: flex; align-items: center; gap: 6px; padding: 4px 10px; margin: 0 16px 4px; border-radius: 6px; background: #EFF6FF; border: 1px solid #BFDBFE; font-size: 11px; color: #1D4ED8; }
             `}</style>
 
-            {/* FAB trigger */}
             {!open && (
                 <button className="lumi-fab" onClick={handleOpen} data-testid="lumi-fab">
                     <TruckSVG size={28} />
@@ -132,10 +146,8 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                 </button>
             )}
 
-            {/* Chat panel */}
             {open && (
                 <div className="lumi-panel" data-testid="lumi-panel">
-                    {/* Header */}
                     <div className="lumi-header">
                         <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#2A2A27', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <TruckSVG size={22} />
@@ -144,7 +156,7 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                             <div style={{ fontWeight: 600, fontSize: 14 }}>Lumi — Asistente LastMile</div>
                             <div style={{ fontSize: 11, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ADE80' }} />
-                                Conectado · Período activo cargado
+                                Conectado
                             </div>
                         </div>
                         <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', opacity: 0.7, padding: 4 }} data-testid="lumi-close">
@@ -152,18 +164,24 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                         </button>
                     </div>
 
-                    {/* Messages */}
+                    {/* Active context indicator */}
+                    {activeContext && (
+                        <div className="lumi-ctx-badge" data-testid="lumi-active-context">
+                            <span style={{ fontSize: 13 }}>📍</span>
+                            Contexto activo: Ruta {activeContext.journey_code}
+                        </div>
+                    )}
+
                     <div className="lumi-messages" ref={scrollRef}>
                         {messages.map((msg, i) => (
                             <div key={`msg-${msg.role}-${i}-${msg.content?.slice(0,12)}`}>
                                 <div className={`lumi-bubble ${msg.role === 'user' ? 'lumi-bubble-user' : 'lumi-bubble-ai'}`}
                                     dangerouslySetInnerHTML={{ __html: formatAIText(msg.content) }}
                                 />
-                                {/* Quick actions after welcome message */}
                                 {i === 0 && msg.role === 'assistant' && (
                                     <div className="lumi-quick">
                                         {QUICK_ACTIONS.map(qa => (
-                                            <button key={qa.label} className="lumi-quick-btn" onClick={() => sendMsg(`¿Cuál es el ${qa.label.toLowerCase()} del período?`)} data-testid={`lumi-qa-${qa.label.toLowerCase().replace(/\s/g,'-')}`}>
+                                            <button key={qa.label} className="lumi-quick-btn" onClick={() => sendMsg(`¿Cual es el ${qa.label.toLowerCase()} del periodo?`)} data-testid={`lumi-qa-${qa.label.toLowerCase().replace(/\s/g,'-')}`}>
                                                 {qa.icon} {qa.label}
                                             </button>
                                         ))}
@@ -172,13 +190,10 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                             </div>
                         ))}
                         {loading && (
-                            <div className="lumi-typing">
-                                <span /><span /><span />
-                            </div>
+                            <div className="lumi-typing"><span /><span /><span /></div>
                         )}
                     </div>
 
-                    {/* Input */}
                     <div className="lumi-input-area">
                         <textarea
                             ref={inputRef}
@@ -186,7 +201,7 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                             value={input}
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder="Escribe tu pregunta..."
+                            placeholder={activeContext ? `Pregunta sobre ${activeContext.journey_code}...` : 'Escribe tu pregunta...'}
                             rows={1}
                             data-testid="lumi-input"
                         />
@@ -195,7 +210,7 @@ const LumiChat = ({ period = '7d', clientId, providerId }) => {
                         </button>
                     </div>
                     <div className="lumi-footer">
-                        Lumi usa los datos del reporte activo · Powered by Claude
+                        {activeContext ? `Ruta ${activeContext.journey_code} · Datos en vivo` : 'Lumi usa los datos del reporte activo'} · Powered by Claude
                     </div>
                 </div>
             )}

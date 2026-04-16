@@ -117,7 +117,9 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Split Settings.jsx (1147->416L), JourneyDetail.jsx (1447->1055L) - Done 2026-04-15
 - [x] P0 Driver Management: Drivers tab in Settings + Blocking modal for new providers in Layout upload - Done 2026-04-16
 - [x] P1 Driver Management: Route-level provider editing + audit log (route_edits) - Done 2026-04-16
-- [ ] Split Layout.jsx (861L) into sub-components (P3)
+- [x] Lumi Fix: Active journey context injection (P0+P1+P2 combined) - Done 2026-04-16
+- [x] Auto-Audit Report: Generated /app/memory/AUDIT_REPORT.md + Applied P0 fixes (TTL indexes, audit_log cleanup) - Done 2026-04-16
+- [ ] Split Layout.jsx (980L) into sub-components (P3)
 - [ ] Mobile-optimized views for field agents (P2)
 - [ ] Export journey details to PDF (P2)
 - [ ] Automatic image compression for large uploads (P2)
