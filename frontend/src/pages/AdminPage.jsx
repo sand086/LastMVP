@@ -72,14 +72,20 @@ export default function AdminPage() {
     const s = summary || { totals: {}, by_entregable: {}, evaluaciones_count: 0, lumi_count: 0, reportes_count: 0 };
     const t = s.totals || {};
 
+    const now = new Date();
+    const currentLabel = now.toLocaleString('es-MX', { month: 'long', year: 'numeric' });
+    const prevD = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevLabel = prevD.toLocaleString('es-MX', { month: 'long', year: 'numeric' });
+    const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
     return (
         <div style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }} data-testid="admin-page">
                 {/* Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                     <div>
-                        <h1 style={{ fontSize: 22, fontWeight: 700, color: T.textPri, fontFamily: "'DM Sans'" }}>Consumo IA & Administración</h1>
+                        <h1 style={{ fontSize: 22, fontWeight: 700, color: T.textPri, fontFamily: "'DM Sans'" }}>Consumo IA & Administracion</h1>
                         <p style={{ fontSize: 13, color: T.textTer, marginTop: 2 }}>
-                            {period === 'current_month' ? 'Marzo 2026' : period === 'prev_month' ? 'Febrero 2026' : 'Personalizado'} · Cubbo
+                            {period === 'current_month' ? cap(currentLabel) : period === 'prev_month' ? cap(prevLabel) : 'Personalizado'} · Cubbo
                         </p>
                     </div>
                 </div>

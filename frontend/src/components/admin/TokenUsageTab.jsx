@@ -58,13 +58,20 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
         { key: 'lumi', label: 'Consultas Lumi', model: 'claude-sonnet-4-5', color: T.purple, bgColor: T.purpleLt },
     ];
 
+    // Generate dynamic month labels
+    const now = new Date();
+    const currentMonthLabel = now.toLocaleString('es-MX', { month: 'long', year: 'numeric' });
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthLabel = prevDate.toLocaleString('es-MX', { month: 'long', year: 'numeric' });
+    const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
     return (
         <div data-testid="token-usage-tab">
             {/* Filters */}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
                 <select value={period} onChange={e => setPeriod(e.target.value)} style={{ padding: '6px 12px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12, background: T.surface, color: T.textPri }}>
-                    <option value="current_month">Marzo 2026</option>
-                    <option value="prev_month">Febrero 2026</option>
+                    <option value="current_month">{capitalize(currentMonthLabel)}</option>
+                    <option value="prev_month">{capitalize(prevMonthLabel)}</option>
                 </select>
                 <select value={entregable} onChange={e => setEntregable(e.target.value)} style={{ padding: '6px 12px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12, background: T.surface }}>
                     <option value="">Todos los entregables</option>
