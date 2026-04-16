@@ -21,6 +21,8 @@ import {
     bulkUpdatePackageStatus,
     rescrapePackage,
     batchRescrapeJourney,
+    getProviders,
+    changeJourneyProvider,
 } from '../lib/api';
 import api from '../lib/api';
 import { 
@@ -208,6 +210,13 @@ const JourneyDetail = () => {
     // Batch rescrape state
     const [batchRescraping, setBatchRescraping] = useState(false);
     const [batchRescrapeProgress, setBatchRescrapeProgress] = useState({ done: 0, total: 0, recovered: 0 });
+
+    // Provider edit state (P1)
+    const [showProviderEdit, setShowProviderEdit] = useState(false);
+    const [providersList, setProvidersList] = useState([]);
+    const [selectedProvider, setSelectedProvider] = useState('');
+    const [providerEditSaving, setProviderEditSaving] = useState(false);
+    const [showProviderConfirm, setShowProviderConfirm] = useState(false);
 
     useEffect(() => {
         fetchJourney();
@@ -573,6 +582,46 @@ const JourneyDetail = () => {
         }
     };
 
+    // Provider edit handlers (P1)
+    const openProviderEdit = async () => {
+        try {
+            const res = await getProviders();
+            setProvidersList(res.data);
+        } catch { /* ignore */ }
+        setSelectedProvider(journey.provider_id || '');
+        setShowProviderEdit(true);
+    };
+
+    const handleSaveProvider = async () => {
+        if (!selectedProvider) { toast.error('Selecciona un proveedor'); return; }
+        if (selectedProvider === journey.provider_id) { setShowProviderEdit(false); return; }
+        // If route is closed/completed, require confirmation
+        if (journey.status === 'closed') {
+            setShowProviderConfirm(true);
+            return;
+        }
+        await doSaveProvider();
+    };
+
+    const doSaveProvider = async () => {
+        setProviderEditSaving(true);
+        setShowProviderConfirm(false);
+        try {
+            const res = await changeJourneyProvider(id, { provider_id: selectedProvider });
+            if (res.data.changed) {
+                toast.success(res.data.message);
+                fetchJourney();
+            } else {
+                toast.info(res.data.message);
+            }
+            setShowProviderEdit(false);
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al cambiar proveedor');
+        } finally {
+            setProviderEditSaving(false);
+        }
+    };
+
     const handleCopy = (text) => {
         copyToClipboard(text);
         setCopied(true);
@@ -681,7 +730,20 @@ const JourneyDetail = () => {
                             {journey.driver_name && (
                                 <span className="font-medium text-slate-700">{journey.driver_name} • </span>
                             )}
-                            {journey.provider_name} • {journey.client_name}
+                            <span className="inline-flex items-center gap-1">
+                                {journey.provider_name}
+                                {isCoordinator() && (
+                                    <button
+                                        onClick={openProviderEdit}
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded hover:bg-slate-200 transition-colors"
+                                        title="Cambiar proveedor de esta ruta"
+                                        data-testid="edit-route-provider-btn"
+                                    >
+                                        <Pencil className="w-3 h-3 text-slate-400" />
+                                    </button>
+                                )}
+                            </span>
+                            {' '} • {journey.client_name}
                             {journey.route_type && journey.route_type !== 'CDMX / Zona Metro' && (
                                 <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded border border-violet-200">
                                     {journey.route_type}{journey.city ? ` — ${journey.city}` : ''}
@@ -1048,6 +1110,58 @@ const JourneyDetail = () => {
                 initialIndex={mainCarouselIndex}
                 packageInfo={mainCarouselPkgInfo}
             />
+
+            {/* Provider Edit Dialog (P1) */}
+            <Dialog open={showProviderEdit} onOpenChange={setShowProviderEdit}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading">Cambiar proveedor de ruta</DialogTitle>
+                        <DialogDescription>
+                            Este cambio aplica solo a esta ruta. No modifica el driver maestro.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div className="space-y-1">
+                            <Label>Proveedor</Label>
+                            <Select value={selectedProvider} onValueChange={setSelectedProvider}>
+                                <SelectTrigger data-testid="route-provider-select">
+                                    <SelectValue placeholder="Seleccionar proveedor" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {providersList.map(p => (
+                                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowProviderEdit(false)}>Cancelar</Button>
+                        <Button onClick={handleSaveProvider} disabled={providerEditSaving} data-testid="save-route-provider-btn">
+                            {providerEditSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Guardar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Provider Change Confirmation for Closed Routes */}
+            <AlertDialog open={showProviderConfirm} onOpenChange={setShowProviderConfirm}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="font-heading">Ruta completada</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta ruta ya fue completada. El cambio de proveedor se registrara en el historial de auditoria.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={doSaveProvider} data-testid="confirm-provider-change-btn">
+                            Confirmar cambio
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 };

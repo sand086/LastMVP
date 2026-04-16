@@ -61,6 +61,7 @@ export const createJourney = (data) => api.post('/journeys', data);
 export const startJourney = (id, data) => api.put(`/journeys/${id}/start`, data);
 export const closeJourney = (id, data) => api.put(`/journeys/${id}/close`, data);
 export const deleteJourney = (id) => api.delete(`/journeys/${id}`);
+export const changeJourneyProvider = (id, data) => api.patch(`/journeys/${id}/provider`, data);
 
 // Incidents
 export const getIncidents = (params) => api.get('/incidents', { params });

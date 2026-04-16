@@ -116,7 +116,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] httpOnly cookie migration (P1, security hardening) - Done 2026-04-15
 - [x] Split Settings.jsx (1147->416L), JourneyDetail.jsx (1447->1055L) - Done 2026-04-15
 - [x] P0 Driver Management: Drivers tab in Settings + Blocking modal for new providers in Layout upload - Done 2026-04-16
-- [ ] P1 Driver Management: Route-level provider editing + audit log (P1)
+- [x] P1 Driver Management: Route-level provider editing + audit log (route_edits) - Done 2026-04-16
 - [ ] Split Layout.jsx (861L) into sub-components (P3)
 - [ ] Mobile-optimized views for field agents (P2)
 - [ ] Export journey details to PDF (P2)

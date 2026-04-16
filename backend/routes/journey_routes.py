@@ -16,6 +16,7 @@ from models import (
     JourneyCreate, JourneyStartData, JourneyCloseData,
     IncidentCreate, IncidentResponse, CosmoJourneyCreate, BulkStatusUpdate,
 )
+from pydantic import BaseModel
 from middleware import log_audit_event
 from evidence_scoring import (
     evaluate_packages_for_journey,
@@ -1366,4 +1367,64 @@ async def review_discrepancy(
         "package_id": pkg["id"],
         "new_status": update_fields.get("status", previous_status),
         "reviewed_by": reviewer,
+    }
+
+
+# ==================== P1: ROUTE-LEVEL PROVIDER EDIT ====================
+
+class ProviderChangeRequest(BaseModel):
+    provider_id: str
+    reason: Optional[str] = None
+
+@router.patch("/journeys/{journey_id}/provider")
+async def change_journey_provider(
+    journey_id: str,
+    data: ProviderChangeRequest,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Change the provider assigned to a specific route. Logs to route_edits audit."""
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    new_provider = await db.providers.find_one({"id": data.provider_id}, {"_id": 0, "id": 1, "name": 1})
+    if not new_provider:
+        raise HTTPException(status_code=400, detail="Proveedor no encontrado")
+
+    old_provider_id = journey.get("provider_id", "")
+    if old_provider_id == data.provider_id:
+        return {"message": "El proveedor ya es el mismo", "changed": False}
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Update journey
+    await db.journeys.update_one(
+        {"id": journey_id},
+        {"$set": {"provider_id": data.provider_id, "updated_at": now}},
+    )
+
+    # Audit log in route_edits
+    await db.route_edits.insert_one({
+        "id": str(uuid.uuid4()),
+        "route_id": journey_id,
+        "field": "provider_id",
+        "old_value": old_provider_id,
+        "new_value": data.provider_id,
+        "changed_by": user["id"],
+        "changed_by_name": user.get("name", user.get("email", "")),
+        "changed_at": now,
+        "reason": data.reason or "",
+        "route_status": journey.get("status", ""),
+    })
+
+    await log_audit_event(
+        db, user["id"], user["role"], "route_provider_changed", "journey", journey_id,
+        details=f"Provider changed from {old_provider_id} to {data.provider_id}",
+    )
+
+    return {
+        "message": f"Proveedor actualizado a {new_provider['name']}",
+        "changed": True,
+        "new_provider_id": new_provider["id"],
+        "new_provider_name": new_provider["name"],
     }
