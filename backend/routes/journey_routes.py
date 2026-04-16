@@ -193,6 +193,7 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
     journey_id = str(uuid.uuid4())
     journey = {
         "id": journey_id,
+        "order_id": "",
         "date": data.date,
         "client_id": data.client_id,
         "provider_id": data.provider_id,

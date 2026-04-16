@@ -213,6 +213,21 @@ async def startup_event():
 
     logger.info("Production indexes created/verified")
 
+    # Auto-migrate: set order_id = cosmo_route_id for journeys missing order_id
+    migrated = await db.journeys.update_many(
+        {
+            "cosmo_route_id": {"$nin": [None, ""]},
+            "$or": [
+                {"order_id": {"$exists": False}},
+                {"order_id": None},
+                {"order_id": ""},
+            ],
+        },
+        [{"$set": {"order_id": "$cosmo_route_id"}}],
+    )
+    if migrated.modified_count > 0:
+        logger.info(f"Auto-migrated order_id for {migrated.modified_count} journeys")
+
     start_periodic_sync(db)
 
 
