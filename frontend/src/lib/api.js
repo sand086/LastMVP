@@ -256,3 +256,12 @@ export const testWebhook = (id) => api.post(`/webhooks/${id}/test`);
 export const getWebhookDeliveries = (id) => api.get(`/webhooks/${id}/deliveries`);
 export const regenerateWebhookSecret = (id) => api.post(`/webhooks/${id}/regenerate-secret`);
 
+
+// Drivers
+export const getDrivers = (params) => api.get('/drivers', { params });
+export const getDriver = (id) => api.get(`/drivers/${id}`);
+export const updateDriver = (id, data) => api.patch(`/drivers/${id}`, data);
+export const populateDrivers = () => api.post('/drivers/populate');
+export const getVehicleTypes = () => api.get('/drivers/vehicle-types');
+export const createProviderInline = (data) => api.post('/providers/inline', data);
+

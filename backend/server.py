@@ -30,6 +30,7 @@ from routes import (
     lumi_router,
     admin_module_router,
     kosmo_router,
+    driver_router,
 )
 
 # Configure logging
@@ -85,6 +86,7 @@ api_router.include_router(system_router)
 api_router.include_router(lumi_router)
 api_router.include_router(admin_module_router)
 api_router.include_router(kosmo_router)
+api_router.include_router(driver_router)
 
 app.include_router(api_router)
 
@@ -156,6 +158,11 @@ async def startup_event():
     await db.packages.create_index("kosmo_scraped_at", background=True)
     await db.packages.create_index([("tracking_url", 1), ("kosmo_scraped_at", 1)], background=True)
     await db.journeys.create_index("next_sync_at", background=True)
+
+    # Driver indexes
+    await db.drivers.create_index("name", unique=True, background=True)
+    await db.drivers.create_index("provider_id", background=True)
+    await db.drivers.create_index("status", background=True)
 
     # Journey indexes
     await db.journeys.create_index("date", background=True)

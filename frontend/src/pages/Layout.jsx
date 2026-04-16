@@ -8,11 +8,13 @@ import {
     getClients, 
     getProviders,
     getMessengerMappings,
-    getUploadHistory
+    getUploadHistory,
+    createProviderInline,
 } from '../lib/api';
 import { formatDate } from '../lib/utils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Calendar } from '../components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
@@ -46,6 +48,9 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '../components/ui/alert-dialog';
+import {
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from '../components/ui/dialog';
 import {
     Table,
     TableBody,
@@ -97,6 +102,12 @@ const Layout = () => {
     const [routeType, setRouteType] = useState('CDMX / Zona Metro');
     const [routeCity, setRouteCity] = useState('');
     const [routeMaxPackages, setRouteMaxPackages] = useState(50);
+
+    // Pending providers modal (blocking)
+    const [pendingProviders, setPendingProviders] = useState([]);
+    const [currentPendingIdx, setCurrentPendingIdx] = useState(-1);
+    const [pendingProviderForm, setPendingProviderForm] = useState({ name: '', contact_name: '', rfc: '' });
+    const [creatingPendingProvider, setCreatingPendingProvider] = useState(false);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -218,8 +229,16 @@ const Layout = () => {
                     }
                 }
             }
-            
-            setCurrentStep(3);
+
+            // Check for pending providers that need to be created
+            if (res.data.pending_providers?.length > 0) {
+                setPendingProviders(res.data.pending_providers);
+                setCurrentPendingIdx(0);
+                const first = res.data.pending_providers[0];
+                setPendingProviderForm({ name: first.team_name, contact_name: '', rfc: '' });
+            } else {
+                setCurrentStep(3);
+            }
         } catch (error) {
             setRouteError(error.response?.data?.detail || 'Error al procesar archivo');
             setRouteFile(null);
@@ -304,8 +323,66 @@ const Layout = () => {
         setRouteError(null);
         setDriverProviderMap({});
         setCreationResult(null);
+        setPendingProviders([]);
+        setCurrentPendingIdx(-1);
         if (historyFileRef.current) historyFileRef.current.value = '';
         if (routeFileRef.current) routeFileRef.current.value = '';
+    };
+
+    // Handle creating pending provider and advancing to next
+    const handleCreatePendingProvider = async () => {
+        if (!pendingProviderForm.name.trim()) { toast.error('Nombre del proveedor requerido'); return; }
+        setCreatingPendingProvider(true);
+        try {
+            const res = await createProviderInline({
+                name: pendingProviderForm.name.trim(),
+                contact_name: pendingProviderForm.contact_name || '',
+                rfc: pendingProviderForm.rfc || '',
+                created_via: 'layout_upload',
+            });
+            const newProv = res.data;
+            toast.success(`Proveedor "${newProv.name}" ${newProv.already_existed ? 'ya existia' : 'creado'}`);
+
+            // Auto-bind all drivers of this team to the new provider
+            const currentPending = pendingProviders[currentPendingIdx];
+            if (currentPending?.drivers) {
+                const newMap = { ...driverProviderMap };
+                currentPending.drivers.forEach(dn => { newMap[dn] = newProv.id; });
+                setDriverProviderMap(newMap);
+            }
+
+            // Refresh providers list
+            try {
+                const provRes = await getProviders();
+                setProviders(provRes.data);
+            } catch { /* ignore */ }
+
+            // Advance to next pending provider or finish
+            const nextIdx = currentPendingIdx + 1;
+            if (nextIdx < pendingProviders.length) {
+                setCurrentPendingIdx(nextIdx);
+                const next = pendingProviders[nextIdx];
+                setPendingProviderForm({ name: next.team_name, contact_name: '', rfc: '' });
+            } else {
+                // All done, proceed to step 3
+                setPendingProviders([]);
+                setCurrentPendingIdx(-1);
+                setCurrentStep(3);
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al crear proveedor');
+        } finally {
+            setCreatingPendingProvider(false);
+        }
+    };
+
+    const handleCancelPendingUpload = () => {
+        setPendingProviders([]);
+        setCurrentPendingIdx(-1);
+        setRouteFile(null);
+        setRouteData(null);
+        if (routeFileRef.current) routeFileRef.current.value = '';
+        toast.info('Carga cancelada');
     };
 
     if (!canEdit()) {
@@ -854,6 +931,48 @@ const Layout = () => {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Blocking Modal: Create Pending Provider */}
+            <Dialog open={currentPendingIdx >= 0 && currentPendingIdx < pendingProviders.length} onOpenChange={() => {}}>
+                <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-lg">
+                            Proveedor no registrado: {pendingProviders[currentPendingIdx]?.team_name}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {pendingProviders[currentPendingIdx]?.drivers?.length > 1 ? (
+                                <>Los drivers <strong>{pendingProviders[currentPendingIdx]?.drivers?.join(', ')}</strong> aparecen asociados al proveedor <strong>{pendingProviders[currentPendingIdx]?.team_name}</strong>, que no existe en el sistema. Crea el proveedor para continuar la carga.</>
+                            ) : (
+                                <>El driver <strong>{pendingProviders[currentPendingIdx]?.drivers?.[0]}</strong> aparece asociado al proveedor <strong>{pendingProviders[currentPendingIdx]?.team_name}</strong>, que no existe en el sistema. Crea el proveedor para continuar la carga.</>
+                            )}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {currentPendingIdx >= 0 && pendingProviders.length > 1 && (
+                        <p className="text-xs text-slate-500">Proveedor {currentPendingIdx + 1} de {pendingProviders.length}</p>
+                    )}
+                    <div className="space-y-3">
+                        <div className="space-y-1">
+                            <Label>Nombre del proveedor *</Label>
+                            <Input value={pendingProviderForm.name} onChange={(e) => setPendingProviderForm(p => ({ ...p, name: e.target.value }))} data-testid="pending-provider-name" />
+                        </div>
+                        <div className="space-y-1">
+                            <Label>RFC / Razon social</Label>
+                            <Input value={pendingProviderForm.rfc} onChange={(e) => setPendingProviderForm(p => ({ ...p, rfc: e.target.value }))} placeholder="Opcional" data-testid="pending-provider-rfc" />
+                        </div>
+                        <div className="space-y-1">
+                            <Label>Contacto</Label>
+                            <Input value={pendingProviderForm.contact_name} onChange={(e) => setPendingProviderForm(p => ({ ...p, contact_name: e.target.value }))} placeholder="Opcional" data-testid="pending-provider-contact" />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={handleCancelPendingUpload} data-testid="cancel-pending-upload-btn">Cancelar carga</Button>
+                        <Button onClick={handleCreatePendingProvider} disabled={creatingPendingProvider} data-testid="create-pending-provider-btn">
+                            {creatingPendingProvider && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Crear y continuar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

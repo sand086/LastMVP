@@ -167,11 +167,54 @@ async def upload_route_summary(
                 })
 
         drivers = list(set(r["driver_name"] for r in cleaned_routes if r["driver_name"]))
+
+        # Detect new drivers and new providers (Teams)
+        teams_in_csv = {}
+        for r in cleaned_routes:
+            dn = r.get("driver_name", "").strip()
+            team = r.get("team", "").strip()
+            if dn and team:
+                teams_in_csv[dn] = team
+
+        # Get existing providers by name
+        existing_providers = await db.providers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+        provider_names_lower = {p["name"].lower(): p for p in existing_providers}
+
+        # Get existing messenger mappings
+        existing_mappings = await db.messenger_mappings.find({}, {"_id": 0}).to_list(500)
+        mapping_by_driver = {m["messenger_name"]: m.get("provider_id", "") for m in existing_mappings}
+
+        # Identify pending providers that don't exist
+        pending_providers = []
+        seen_teams = set()
+        driver_status = []
+        for driver_name in sorted(drivers):
+            team = teams_in_csv.get(driver_name, "")
+            has_mapping = driver_name in mapping_by_driver and mapping_by_driver[driver_name]
+            team_exists = team.lower() in provider_names_lower if team else True
+
+            if not has_mapping and team and not team_exists and team not in seen_teams:
+                pending_providers.append({
+                    "team_name": team,
+                    "drivers": [dn for dn, t in teams_in_csv.items() if t == team],
+                })
+                seen_teams.add(team)
+
+            driver_status.append({
+                "name": driver_name,
+                "team": team,
+                "has_mapping": has_mapping,
+                "team_exists": team_exists,
+                "needs_new_provider": not has_mapping and team and not team_exists,
+            })
+
         return {
             "filename": file.filename,
             "total_routes": len(cleaned_routes),
             "routes": cleaned_routes,
             "drivers": sorted(drivers),
+            "driver_status": driver_status,
+            "pending_providers": pending_providers,
             "preview": cleaned_routes[:10],
         }
     except Exception as e:

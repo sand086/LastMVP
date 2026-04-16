@@ -12,3 +12,4 @@ from .system_routes import router as system_router
 from .lumi_routes import router as lumi_router
 from .admin_module_routes import router as admin_module_router
 from .kosmo_routes import router as kosmo_router
+from .driver_routes import router as driver_router

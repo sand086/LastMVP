@@ -34,6 +34,7 @@ import { SettingsUsersTab } from '../components/settings/SettingsUsersTab';
 import { SettingsClientsTab } from '../components/settings/SettingsClientsTab';
 import { SettingsProvidersTab } from '../components/settings/SettingsProvidersTab';
 import { SettingsSystemTab } from '../components/settings/SettingsSystemTab';
+import { SettingsDriversTab } from '../components/settings/SettingsDriversTab';
 
 const getRoleLabel = (role) => ({ agent: 'Agente', coordinator: 'Coordinador', executive: 'Ejecutivo', developer: 'Developer', proveedor: 'Proveedor' }[role] || role);
 const getRoleBadgeColor = (role) => ({ agent: 'bg-emerald-100 text-emerald-700', coordinator: 'bg-blue-100 text-blue-700', executive: 'bg-slate-100 text-slate-700', developer: 'bg-violet-100 text-violet-700', proveedor: 'bg-amber-100 text-amber-700' }[role] || 'bg-slate-100 text-slate-700');
@@ -271,8 +272,9 @@ const Settings = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-5">
+                <TabsList className="grid w-full grid-cols-6">
                     <TabsTrigger value="users" data-testid="tab-users"><Users className="w-4 h-4 mr-2" />Usuarios</TabsTrigger>
+                    <TabsTrigger value="drivers" data-testid="tab-drivers"><Truck className="w-4 h-4 mr-2" />Drivers</TabsTrigger>
                     <TabsTrigger value="clients" data-testid="tab-clients"><Building2 className="w-4 h-4 mr-2" />Clientes</TabsTrigger>
                     <TabsTrigger value="providers" data-testid="tab-providers"><Truck className="w-4 h-4 mr-2" />Proveedores</TabsTrigger>
                     <TabsTrigger value="system" data-testid="tab-system"><Settings2 className="w-4 h-4 mr-2" />Sistema</TabsTrigger>
@@ -281,6 +283,9 @@ const Settings = () => {
 
                 <TabsContent value="users">
                     <SettingsUsersTab loading={loading} searchUsers={searchUsers} setSearchUsers={setSearchUsers} sortedUsers={sortedUsers} filteredUsers={filteredUsers} UserSortHeader={UserSortHeader} getRoleBadgeColor={getRoleBadgeColor} getRoleLabel={getRoleLabel} handleOpenUserModal={handleOpenUserModal} handleOpenAssignmentModal={handleOpenAssignmentModal} handleOpenPasswordModal={handleOpenPasswordModal} onDeleteUser={(user) => { setDeleteTarget({ id: user.id, type: 'user' }); setDeleteType('usuario'); setShowDeleteConfirm(true); }} />
+                </TabsContent>
+                <TabsContent value="drivers">
+                    <SettingsDriversTab />
                 </TabsContent>
                 <TabsContent value="clients">
                     <SettingsClientsTab loading={loading} searchClients={searchClients} setSearchClients={setSearchClients} sortedClients={sortedClients} filteredClients={filteredClients} ClientSortHeader={ClientSortHeader} handleOpenEntityModal={handleOpenEntityModal} handleDeleteEntity={handleDeleteEntity} />
