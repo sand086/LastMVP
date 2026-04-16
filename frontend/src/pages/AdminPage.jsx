@@ -49,7 +49,7 @@ export default function AdminPage() {
         try {
             const res = await api.get('/admin/summary', { params: { period, client_id: clientId || undefined } });
             setSummary(res.data);
-        } catch {
+        } catch (err) { console.error("AdminPage error:", err);
             toast.error('Error al cargar resumen admin');
         } finally {
             setLoading(false);

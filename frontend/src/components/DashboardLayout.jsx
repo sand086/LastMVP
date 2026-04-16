@@ -60,7 +60,7 @@ export const DashboardLayout = ({ children }) => {
         try {
             const res = await api.get('/system/errors/count');
             setErrorCount(res.data.count || 0);
-        } catch {
+        } catch (err) { console.error("DashboardLayout fetch error:", err);
             // Silently fail
         }
     }, [showSystemSection]);

@@ -96,13 +96,13 @@ const Settings = () => {
     const filteredProviders = providers.filter(p => !searchProviders || p.name?.toLowerCase().includes(searchProviders.toLowerCase()) || p.contact_name?.toLowerCase().includes(searchProviders.toLowerCase()));
     const { sortedData: sortedProviders, SortHeader: ProvSortHeader } = useSortableTable(filteredProviders, 'name', 'asc');
 
-    useEffect(() => { fetchData(); }, []);
-    useEffect(() => { if (activeTab === 'system') fetchConfig(); }, [activeTab]);
+    useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => { if (activeTab === 'system') fetchConfig(); }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchConfig = async () => {
         setConfigLoading(true);
         try { const res = await api.get('/system/config'); setSystemConfig(res.data); }
-        catch { /* ignore */ }
+        catch (err) { console.error('Error loading system config:', err); }
         finally { setConfigLoading(false); }
     };
 

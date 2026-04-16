@@ -64,7 +64,7 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
                 const pData = provRes.value.data;
                 setProviders(Array.isArray(pData) ? pData : pData.providers || []);
             }
-        } catch {
+        } catch (err) { console.error("Admin component error:", err);
             toast.error('Error al cargar configuración');
         } finally {
             setLoading(false);
@@ -117,18 +117,18 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
     };
 
     // Cost preview calculation
-    const by = summary?.by_entregable || {};
-    const evalData = by.evaluacion || {};
-    const avgEvalTokens = evalData.avg_per_unit || {};
-    const evalCount = evalData.count || 0;
-
-    const previewModels = React.useMemo(() => models.filter(m => m.active).map(m => {
-        const avgIn = avgEvalTokens.input || 1400;
-        const avgOut = avgEvalTokens.output || 600;
-        const costPerEval = ((avgIn * (m.input_per_million || 0)) + (avgOut * (m.output_per_million || 0))) / 1_000_000;
-        const totalMonthly = costPerEval * (evalCount || 1842);
-        return { name: m.name, costPerEval: costPerEval.toFixed(4), totalMonthly: totalMonthly.toFixed(2), totalMxn: (totalMonthly * tcRate).toFixed(2) };
-    }), [models, avgEvalTokens, evalCount, tcRate]);
+    const evalData = React.useMemo(() => (summary?.by_entregable || {}).evaluacion || {}, [summary]);
+    const previewModels = React.useMemo(() => {
+        const avgTokens = evalData.avg_per_unit || {};
+        const count = evalData.count || 0;
+        return models.filter(m => m.active).map(m => {
+            const avgIn = avgTokens.input || 1400;
+            const avgOut = avgTokens.output || 600;
+            const costPerEval = ((avgIn * (m.input_per_million || 0)) + (avgOut * (m.output_per_million || 0))) / 1_000_000;
+            const totalMonthly = costPerEval * (count || 1842);
+            return { name: m.name, costPerEval: costPerEval.toFixed(4), totalMonthly: totalMonthly.toFixed(2), totalMxn: (totalMonthly * tcRate).toFixed(2) };
+        });
+    }, [models, evalData, tcRate]);
 
     if (loading) return <div style={{ padding: 60, textAlign: 'center', color: T.textTer }}>Cargando configuración...</div>;
 

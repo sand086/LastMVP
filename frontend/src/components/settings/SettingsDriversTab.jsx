@@ -45,7 +45,7 @@ export const SettingsDriversTab = () => {
             setDrivers(res.data.data);
             setTotal(res.data.total);
             setPages(res.data.pages);
-        } catch {
+        } catch (err) { console.error("SettingsDriversTab error:", err);
             toast.error('Error al cargar drivers');
         } finally {
             setLoading(false);

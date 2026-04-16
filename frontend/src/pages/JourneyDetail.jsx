@@ -224,7 +224,7 @@ const JourneyDetail = () => {
         // Fetch pulse config
         api.get('/admin/config').then(res => {
             setPulseConfig(res.data?.pulse_config || null);
-        }).catch(() => {});
+        }).catch((err) => { console.error('Failed to load pulse config:', err); });
         // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchJourney/fetchImages are stable, only re-run on id change
     }, [id]);
 
@@ -587,7 +587,7 @@ const JourneyDetail = () => {
         try {
             const res = await getProviders();
             setProvidersList(res.data);
-        } catch { /* ignore */ }
+        } catch (err) { console.error('Failed to load providers:', err); }
         setSelectedProvider(journey.provider_id || '');
         setShowProviderEdit(true);
     };

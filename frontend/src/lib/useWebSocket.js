@@ -42,8 +42,8 @@ export function useWebSocket(onEvent) {
                     const data = JSON.parse(event.data);
                     if (data.type === 'pong') return;
                     onEventRef.current?.(data);
-                } catch {
-                    // ignore parse errors
+                } catch (err) {
+                    console.error('WebSocket message parse error:', err);
                 }
             };
 
@@ -57,7 +57,8 @@ export function useWebSocket(onEvent) {
             ws.onerror = () => {
                 ws.close();
             };
-        } catch {
+        } catch (err) {
+            console.error('WebSocket connection error:', err);
             // Retry on connection error
             reconnectTimerRef.current = setTimeout(connect, WS_RECONNECT_INTERVAL);
         }

@@ -108,7 +108,7 @@ async function captureChart(selector) {
         const { default: html2canvas } = await import('html2canvas');
         const canvas = await html2canvas(el, { scale: 2, useCORS: true, logging: false, backgroundColor: '#FFFFFF' });
         return canvas.toDataURL('image/png');
-    } catch {
+    } catch (err) { console.error("PDF generation error:", err);
         return null;
     }
 }

@@ -417,7 +417,7 @@ const QualityTabV2 = ({ journeyId, journeyData, onRefreshJourney }) => {
             const catMap = {};
             (cfg.error_catalog || []).forEach(e => { catMap[e.key] = e; });
             setCatalogMap(catMap);
-        } catch {
+        } catch (err) { console.error("QualityTabV2 error:", err);
             toast.error('Error al cargar datos de calidad');
         } finally {
             setLoading(false);

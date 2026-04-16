@@ -40,7 +40,7 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
             setEvents(res.data.events);
             setPagination(res.data.pagination);
             setDetailSummary(res.data.summary);
-        } catch {
+        } catch (err) { console.error("Admin component error:", err);
             toast.error('Error al cargar eventos de tokens');
         } finally {
             setLoading(false);

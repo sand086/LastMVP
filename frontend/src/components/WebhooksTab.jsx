@@ -35,7 +35,7 @@ export const WebhooksTab = () => {
             const [whRes, evRes] = await Promise.all([getWebhooks(), getWebhookEvents()]);
             setWebhooks(whRes.data);
             setEvents(evRes.data.events);
-        } catch {
+        } catch (err) { console.error("WebhooksTab error:", err);
             toast.error('Error al cargar webhooks');
         } finally {
             setLoading(false);
@@ -81,7 +81,7 @@ export const WebhooksTab = () => {
         try {
             const res = await getWebhookDeliveries(id);
             setDeliveries(prev => ({ ...prev, [id]: res.data }));
-        } catch { /* ignore */ }
+        } catch (err) { console.error('Webhook deliveries fetch error:', err); }
     };
 
     if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;

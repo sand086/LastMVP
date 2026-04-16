@@ -355,7 +355,7 @@ const Layout = () => {
             try {
                 const provRes = await getProviders();
                 setProviders(provRes.data);
-            } catch { /* ignore */ }
+            } catch (err) { console.error('Failed to refresh providers:', err); }
 
             // Advance to next pending provider or finish
             const nextIdx = currentPendingIdx + 1;

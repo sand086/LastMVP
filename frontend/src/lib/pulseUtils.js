@@ -28,7 +28,7 @@ function parseDepartureMinutes(dt) {
         if (parts.length >= 2) {
             return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
         }
-    } catch { /* ignore */ }
+    } catch (err) { console.error('Pulse config parse error:', err); }
     return null;
 }
 

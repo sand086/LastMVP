@@ -42,7 +42,7 @@ const ALL_COLUMNS = [
 ];
 
 const INITIAL_COLS = (() => {
-    try { const s = localStorage.getItem('admin_routes_columns'); return s ? JSON.parse(s) : null; } catch { return null; }
+    try { const s = localStorage.getItem('admin_routes_columns'); return s ? JSON.parse(s) : null; } catch (err) { console.error('Column config parse error:', err); return null; }
 })() || ALL_COLUMNS.filter(c => c.default).map(c => c.key);
 
 const fmtMoney = (n) => n ? `$${Number(n).toLocaleString('es-MX')}` : '—';
@@ -82,7 +82,7 @@ export default function RoutesReportTab({ canEdit }) {
             setRows(res.data.rows);
             setTotals(res.data.totals);
             setPagination(res.data.pagination);
-        } catch {
+        } catch (err) { console.error("Admin component error:", err);
             toast.error('Error al cargar reporte de rutas');
         } finally {
             setLoading(false);
@@ -107,7 +107,7 @@ export default function RoutesReportTab({ canEdit }) {
             a.click();
             window.URL.revokeObjectURL(url);
             toast.success('Excel exportado');
-        } catch {
+        } catch (err) { console.error("Admin component error:", err);
             toast.error('Error al exportar');
         } finally {
             setExporting(false);
@@ -130,7 +130,7 @@ export default function RoutesReportTab({ canEdit }) {
             a.click();
             window.URL.revokeObjectURL(url);
             toast.success('Liquidación exportada');
-        } catch {
+        } catch (err) { console.error("Admin component error:", err);
             toast.error('Error al exportar liquidación');
         } finally {
             setExportingLiq(false);

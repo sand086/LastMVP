@@ -462,7 +462,7 @@ const QualityCriteria = () => {
             setErrorCatalog(s.error_catalog);
             setMeta(s._meta || {});
             setDirty(false);
-        } catch {
+        } catch (err) { console.error("QualityCriteria error:", err);
             toast.error('Error al cargar configuración');
         } finally {
             setLoading(false);
@@ -505,7 +505,7 @@ const QualityCriteria = () => {
             toast.success('Configuración guardada');
             setDirty(false);
             fetchAll(); // Reload for fresh version
-        } catch {
+        } catch (err) { console.error("QualityCriteria error:", err);
             toast.error('Error al guardar');
         } finally {
             setSaving(false);

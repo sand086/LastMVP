@@ -703,7 +703,7 @@ const Reports = () => {
         Promise.all([getClients(), getProviders()]).then(([c, p]) => {
             setClients(c.data || []);
             setProviders(p.data || []);
-        }).catch(() => {});
+        }).catch((err) => { console.error('Failed to load clients/providers:', err); });
     }, []);
 
     const selectedClientName = useMemo(() => clients.find(c => c.id === clientId)?.name || 'Todos los clientes', [clients, clientId]);
@@ -750,9 +750,10 @@ const Reports = () => {
                     if (providerId) prevParams.provider_id = providerId;
                     const prevRes = await generateReport({ ...prevParams, sections: ['providers'] });
                     setPrevReportData(prevRes.data);
-                } catch { setPrevReportData(null); }
+                } catch (err) { console.error('Failed to fetch prev period:', err); setPrevReportData(null); }
             }
-        } catch {
+        } catch (err) {
+            console.error('Reports data fetch failed:', err);
             toast.error('Error al cargar datos');
         } finally {
             setLoading(false);
@@ -771,7 +772,7 @@ const Reports = () => {
             });
             setAiNarrative(res.data.narrative || '');
             setAiCards(res.data.cards || []);
-        } catch {
+        } catch (err) { console.error("Reports AI generation error:", err);
             setAiNarrative('Error al generar el reporte con IA.');
             setAiCards([]);
         } finally {

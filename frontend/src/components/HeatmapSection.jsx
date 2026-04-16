@@ -58,7 +58,7 @@ const HeatmapSection = ({ dateFrom, dateTo, clientId, providerId }) => {
             if (providerId && providerId !== 'all') params.provider_id = providerId;
             const res = await getReportsHeatmap(params);
             setHeatData(res.data || []);
-        } catch {
+        } catch (err) { console.error("Heatmap fetch error:", err);
             setHeatData([]);
         } finally {
             setLoading(false);

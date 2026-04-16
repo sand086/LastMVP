@@ -234,7 +234,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
             setReviewModalPkg(null);
             advanceToNext(pkg.id);
             onRefreshJourney?.();
-        } catch {
+        } catch (err) { console.error("GuiasTab error:", err);
             toast.error('Error al guardar revision');
         } finally {
             setSavingReview(null);

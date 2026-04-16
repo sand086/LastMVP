@@ -268,11 +268,12 @@ const Dashboard = () => {
                 try {
                     const statusRes = await getKosmoSyncStatus();
                     if (statusRes.data) setKosmoSync(statusRes.data);
-                } catch {}
+                } catch (err) { console.error('Kosmo sync status check failed:', err); }
                 fetchData();
                 setSyncing(false);
             }, 5000);
-        } catch {
+        } catch (err) {
+            console.error('Kosmo sync trigger failed:', err);
             toast.error('Error al sincronizar con Kosmo');
             setSyncing(false);
         }
@@ -294,7 +295,7 @@ const Dashboard = () => {
         try {
             const res = await searchPackages(query);
             setSearchResults(res.data || []);
-        } catch { setSearchResults([]); }
+        } catch (err) { console.error('Package search failed:', err); setSearchResults([]); }
         finally { setSearching(false); }
     };
 

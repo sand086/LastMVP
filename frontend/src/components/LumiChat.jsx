@@ -97,7 +97,7 @@ const LumiChat = ({ period = '7d', clientId, providerId, journeyId }) => {
                 journey_id: journeyId || undefined,
             });
             setMessages(prev => [...prev, { role: 'assistant', content: res.data.reply }]);
-        } catch {
+        } catch (err) { console.error("Lumi context fetch error:", err);
             setMessages(prev => [...prev, { role: 'assistant', content: 'Hubo un problema de conexion. Intenta de nuevo.' }]);
         } finally {
             setLoading(false);
