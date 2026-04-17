@@ -31,6 +31,7 @@ from routes import (
     admin_module_router,
     kosmo_router,
     driver_router,
+    manual_router,
 )
 
 # Configure logging
@@ -87,6 +88,7 @@ api_router.include_router(lumi_router)
 api_router.include_router(admin_module_router)
 api_router.include_router(kosmo_router)
 api_router.include_router(driver_router)
+api_router.include_router(manual_router)
 
 app.include_router(api_router)
 
@@ -163,6 +165,11 @@ async def startup_event():
     await db.drivers.create_index("name", unique=True, background=True)
     await db.drivers.create_index("provider_id", background=True)
     await db.drivers.create_index("status", background=True)
+
+    # Manual indexes
+    await db.manuals.create_index("slug", unique=True, background=True)
+    await db.manuals.create_index("section", background=True)
+    await db.manuals.create_index("is_published", background=True)
 
     # TTL indexes for cleanup (Audit P0)
     await db.request_metrics.create_index("timestamp", expireAfterSeconds=2592000, background=True)

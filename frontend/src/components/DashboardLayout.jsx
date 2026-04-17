@@ -19,6 +19,7 @@ import {
     ShieldCheck,
     ClipboardCheck,
     Cpu,
+    BookOpen,
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -38,6 +39,7 @@ const navItems = [
     { path: '/settings', label: 'Configuración', icon: Settings, roles: ['coordinator', 'developer'] },
     { path: '/quality-criteria', label: 'Criterios Calidad', icon: ClipboardCheck, roles: ['coordinator', 'developer'] },
     { path: '/admin', label: 'Admin IA', icon: Cpu, roles: ['developer', 'executive', 'ejecutivo', 'coordinator'] },
+    { path: '/manuales', label: 'Manuales', icon: BookOpen, roles: ['agent', 'coordinator', 'executive', 'developer', 'proveedor'] },
 ];
 
 const systemNavItems = [

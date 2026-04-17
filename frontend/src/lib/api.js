@@ -266,3 +266,15 @@ export const populateDrivers = () => api.post('/drivers/populate');
 export const getVehicleTypes = () => api.get('/drivers/vehicle-types');
 export const createProviderInline = (data) => api.post('/providers/inline', data);
 
+
+// Manuals (Knowledge Hub)
+export const getManuals = (params) => api.get('/manuals', { params });
+export const getManualBySlug = (slug) => api.get(`/manuals/${slug}`);
+export const getManualsAdmin = () => api.get('/manuals-admin');
+export const getManualAdmin = (id) => api.get(`/manuals-admin/${id}`);
+export const createManual = (data) => api.post('/manuals-admin', data);
+export const updateManual = (id, data) => api.patch(`/manuals-admin/${id}`, data);
+export const updateManualContent = (id, data) => api.put(`/manuals-admin/${id}/content`, data);
+export const deleteManual = (id) => api.delete(`/manuals-admin/${id}`);
+export const seedManuals = () => api.post('/manuals-admin/seed');
+

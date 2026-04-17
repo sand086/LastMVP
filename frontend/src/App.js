@@ -18,6 +18,8 @@ import SystemErrors from './pages/SystemErrors';
 import SystemIntegrity from './pages/SystemIntegrity';
 import QualityCriteria from './pages/QualityCriteria';
 import AdminPage from './pages/AdminPage';
+import Manuals from './pages/Manuals';
+import ManualViewer from './pages/ManualViewer';
 import LumiChat from './components/LumiChat';
 import './App.css';
 
@@ -199,6 +201,24 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
                         <QualityCriteria />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/manuales" 
+                element={
+                    <ProtectedRoute>
+                        <Manuals />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/manuales/:slug" 
+                element={
+                    <ProtectedRoute>
+                        <ManualViewer />
                     </ProtectedRoute>
                 } 
             />
