@@ -184,7 +184,7 @@ async def get_quality_report(
         }
 
     packages = await db.packages.find(
-        {"journey_id": {"$in": journey_ids}, "evidence_score": {"$ne": None}},
+        {"journey_id": {"$in": journey_ids}, "$or": [{"ai_score": {"$ne": None}}, {"evidence_score": {"$ne": None}}]},
         {"_id": 0},
     ).to_list(50000)
 
@@ -208,7 +208,7 @@ async def get_quality_report(
     for pid, pd_data in providers_data.items():
         pkgs = pd_data["packages"]
         delivered_pkgs = [p for p in pkgs if p.get("evidence_type") in ("exitosa", "terceros")]
-        scores = [p["evidence_score"] for p in pkgs]
+        scores = [p.get("ai_score") if p.get("ai_score") is not None else p["evidence_score"] for p in pkgs if p.get("ai_score") is not None or p.get("evidence_score") is not None]
         complete = sum(1 for s in scores if s == 100)
         partial = sum(1 for s in scores if 60 <= s < 100)
         incomplete = sum(1 for s in scores if s < 60)
@@ -224,14 +224,18 @@ async def get_quality_report(
             "avg_score": avg,
         })
 
+    def _eff(pkg):
+        return pkg.get("ai_score") if pkg.get("ai_score") is not None else pkg.get("evidence_score", 0)
+
     type_map = {}
     for pkg in packages:
         et = pkg.get("evidence_type", "desconocido")
         if et not in type_map:
             type_map[et] = {"count": 0, "scores": [], "perfect": 0}
         type_map[et]["count"] += 1
-        type_map[et]["scores"].append(pkg["evidence_score"])
-        if pkg["evidence_score"] == 100:
+        s = _eff(pkg)
+        type_map[et]["scores"].append(s)
+        if s == 100:
             type_map[et]["perfect"] += 1
 
     by_type = []
@@ -243,7 +247,7 @@ async def get_quality_report(
             "avg_score": round(sum(data["scores"]) / len(data["scores"]), 1) if data["scores"] else 0,
         })
 
-    worst = sorted(packages, key=lambda p: p.get("evidence_score", 999))[:5]
+    worst = sorted(packages, key=lambda p: _eff(p))[:5]
     worst_packages = []
     for pkg in worst:
         pid = journey_provider_map.get(pkg.get("journey_id"), "unknown")
@@ -251,12 +255,12 @@ async def get_quality_report(
         worst_packages.append({
             "tracking_number": pkg.get("tracking_number") or pkg.get("order_reference_id"),
             "provider_name": pname,
-            "score": pkg["evidence_score"],
+            "score": _eff(pkg),
             "missing": pkg.get("evidence_detail", {}).get("missing_items", []),
             "tracking_url": pkg.get("tracking_url"),
         })
 
-    all_scores = [p["evidence_score"] for p in packages]
+    all_scores = [_eff(p) for p in packages]
     summary = {
         "avg_score": round(sum(all_scores) / len(all_scores), 1) if all_scores else 0,
         "total_evaluated": len(all_scores),
@@ -292,7 +296,10 @@ async def export_quality_report(
     providers_col = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(100)}
 
     packages = await db.packages.find(
-        {"journey_id": {"$in": journey_ids}, "evidence_score": {"$ne": None, "$lt": 100}},
+        {"journey_id": {"$in": journey_ids}, "$or": [
+            {"ai_score": {"$ne": None, "$lt": 100}},
+            {"evidence_score": {"$ne": None, "$lt": 100}, "ai_score": None},
+        ]},
         {"_id": 0},
     ).to_list(50000)
 
@@ -302,12 +309,13 @@ async def export_quality_report(
         for pkg in packages:
             j = journey_map.get(pkg.get("journey_id"), {})
             pid = j.get("provider_id", "")
+            eff_score = pkg.get("ai_score") if pkg.get("ai_score") is not None else pkg.get("evidence_score", 0)
             rows.append({
                 "Fecha": j.get("date", ""),
                 "Guía": pkg.get("tracking_number") or pkg.get("order_reference_id", ""),
                 "Proveedor": providers_col.get(pid, j.get("provider_name", pid)),
                 "Tipo de entrega": pkg.get("evidence_type", ""),
-                "Score": pkg.get("evidence_score", 0),
+                "Score": eff_score,
                 "Evidencias faltantes": ", ".join(pkg.get("evidence_detail", {}).get("missing_items", [])),
                 "Fotos": pkg.get("kosmo_proof_count", 0),
                 "Nota del mensajero": pkg.get("kosmo_driver_note", ""),
@@ -812,7 +820,9 @@ async def report_packages(
             "cosmo_status": pkg.get("cosmo_status", ""),
             "failure_reason": pkg.get("failure_reason", ""),
             "delivery_attempt": pkg.get("delivery_attempt", 1),
-            "evidence_score": pkg.get("evidence_score"),
+            "evidence_score": pkg.get("ai_score") if pkg.get("ai_score") is not None else pkg.get("evidence_score"),
+            "evidence_score_rules": pkg.get("evidence_score"),
+            "ai_score": pkg.get("ai_score"),
             "evidence_type": pkg.get("evidence_type"),
             "kosmo_proof_count": pkg.get("kosmo_proof_count", 0),
             "reviewed_by": pkg.get("reviewed_by"),
