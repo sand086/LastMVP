@@ -225,7 +225,7 @@ def _build_provider_sheet(wb, provider_name, rows_data, sla_packages=40):
 # ═══════════════════════════════════════════════════
 def _build_incidencias_sheet(wb, incidents_data, comments_data):
     ws = wb.create_sheet("Incidencias a cobro")
-    headers = ["#", "RUTA", "Operador", "Guías", "Tipo", "Severidad", "Imputabilidad", "Descripción", "Estado", "MONTO"]
+    headers = ["#", "RUTA", "Proveedor", "Operador", "Guías", "Tipo", "Severidad", "Imputabilidad", "Descripción", "Estado", "MONTO"]
     for c, h in enumerate(headers, 1):
         _write_header_cell(ws, 1, c, h)
 
@@ -234,16 +234,17 @@ def _build_incidencias_sheet(wb, incidents_data, comments_data):
     for inc in incidents_data:
         _write_data_cell(ws, row_idx, 1, row_idx - 1)
         _write_data_cell(ws, row_idx, 2, inc.get("route_id", ""))
-        _write_data_cell(ws, row_idx, 3, inc.get("driver", ""))
-        _write_data_cell(ws, row_idx, 4, inc.get("guide", ""))
-        _write_data_cell(ws, row_idx, 5, inc.get("tipo", ""))
-        _write_data_cell(ws, row_idx, 6, inc.get("severidad", ""))
-        _write_data_cell(ws, row_idx, 7, inc.get("imputabilidad", ""))
-        _write_data_cell(ws, row_idx, 8, inc.get("descripcion", ""))
+        _write_data_cell(ws, row_idx, 3, inc.get("proveedor", ""))
+        _write_data_cell(ws, row_idx, 4, inc.get("driver", ""))
+        _write_data_cell(ws, row_idx, 5, inc.get("guide", ""))
+        _write_data_cell(ws, row_idx, 6, inc.get("tipo", ""))
+        _write_data_cell(ws, row_idx, 7, inc.get("severidad", ""))
+        _write_data_cell(ws, row_idx, 8, inc.get("imputabilidad", ""))
+        _write_data_cell(ws, row_idx, 9, inc.get("descripcion", ""))
         estado = inc.get("estado", "")
         estado_label = {"open": "Abierta", "resolved": "Resuelta", "dismissed": "Descartada"}.get(estado, estado)
-        _write_data_cell(ws, row_idx, 9, estado_label)
-        _write_data_cell(ws, row_idx, 10, inc.get("amount", ""), fmt='$#,##0.00')
+        _write_data_cell(ws, row_idx, 10, estado_label)
+        _write_data_cell(ws, row_idx, 11, inc.get("amount", ""), fmt='$#,##0.00')
         row_idx += 1
 
     # From AI comments — parse guides with evidence issues
@@ -256,14 +257,15 @@ def _build_incidencias_sheet(wb, incidents_data, comments_data):
             if len(line) < 30 and not line.startswith("No se") and not line.startswith("Sin"):
                 _write_data_cell(ws, row_idx, 1, row_idx - 1)
                 _write_data_cell(ws, row_idx, 2, cd.get("order_id", ""))
-                _write_data_cell(ws, row_idx, 3, cd.get("driver", ""))
-                _write_data_cell(ws, row_idx, 4, line)
-                _write_data_cell(ws, row_idx, 5, "Evidencia IA")
-                _write_data_cell(ws, row_idx, 6, "")
+                _write_data_cell(ws, row_idx, 3, cd.get("proveedor", ""))
+                _write_data_cell(ws, row_idx, 4, cd.get("driver", ""))
+                _write_data_cell(ws, row_idx, 5, line)
+                _write_data_cell(ws, row_idx, 6, "Evidencia IA")
                 _write_data_cell(ws, row_idx, 7, "")
-                _write_data_cell(ws, row_idx, 8, comments[:120])
-                _write_data_cell(ws, row_idx, 9, "")
-                _write_data_cell(ws, row_idx, 10, "", fmt='$#,##0.00')
+                _write_data_cell(ws, row_idx, 8, "")
+                _write_data_cell(ws, row_idx, 9, comments[:120])
+                _write_data_cell(ws, row_idx, 10, "")
+                _write_data_cell(ws, row_idx, 11, "", fmt='$#,##0.00')
                 row_idx += 1
 
     if row_idx == 2:
@@ -392,6 +394,7 @@ async def _fetch_incidents_for_export(db, all_rows):
         matching_row = next((r for r in all_rows if r.get("journey_id") == inc.get("journey_id")), {})
         incidents_data.append({
             "route_id": matching_row.get("order_id", ""),
+            "proveedor": matching_row.get("proveedor", ""),
             "driver": matching_row.get("driver", ""),
             "guide": inc.get("tracking_number", inc.get("description", "")),
             "amount": inc.get("amount", inc.get("cost", "")),

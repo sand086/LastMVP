@@ -259,12 +259,19 @@ async def _build_report_row(j: dict, prov: dict) -> dict:
     # Quality score from packages
     pkgs = await db.packages.find(
         {"journey_id": j["id"], "evidence_score": {"$ne": None}},
-        {"_id": 0, "evidence_score": 1}
+        {"_id": 0, "evidence_score": 1, "status": 1}
     ).to_list(1000)
     scores = [p["evidence_score"] for p in pkgs]
     score_ia = round(sum(scores) / len(scores)) if scores else None
     delivered = j.get("packages_delivered", 0)
-    with_evidence = sum(1 for s in scores if s == 100)
+    failed = j.get("packages_failed", 0)
+    completed = delivered + failed
+    # Evidence: count packages (delivered+failed) with score == 100
+    completed_with_evidence = sum(
+        1 for p in pkgs
+        if p.get("evidence_score") == 100 and p.get("status") in ("delivered", "failed")
+    )
+    completed_without_evidence = max(0, completed - completed_with_evidence)
 
     arrival = start_data.get("arrival_time", "")
     departure = close_data.get("departure_time", "")
@@ -296,11 +303,11 @@ async def _build_report_row(j: dict, prov: dict) -> dict:
         "hora_inicio_backup": j.get("backup_start_time"),
         "horas_laboradas_backup": None,
         "total_paquetes": j.get("packages_total", 0),
-        "completados": delivered,
+        "completados": completed,
         "cancelados": j.get("packages_cancelled", 0),
-        "pendientes": j.get("packages_pending", j.get("packages_total", 0) - delivered - j.get("packages_failed", 0)),
-        "con_evidencia": with_evidence,
-        "sin_evidencia": max(0, delivered - with_evidence),
+        "pendientes": j.get("packages_pending", j.get("packages_total", 0) - completed),
+        "con_evidencia": completed_with_evidence,
+        "sin_evidencia": completed_without_evidence,
         "score_ia": score_ia,
         "comentarios": j.get("comments", ""),
         "journey_id": j["id"],
