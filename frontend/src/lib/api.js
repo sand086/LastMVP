@@ -265,6 +265,7 @@ export const updateDriver = (id, data) => api.patch(`/drivers/${id}`, data);
 export const populateDrivers = () => api.post('/drivers/populate');
 export const getVehicleTypes = () => api.get('/drivers/vehicle-types');
 export const createProviderInline = (data) => api.post('/providers/inline', data);
+export const updateDeliveryNotes = (file) => { const fd = new FormData(); fd.append('file', file); return api.post('/upload/update-notes', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); };
 
 
 // Manuals (Knowledge Hub)

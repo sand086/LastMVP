@@ -404,3 +404,96 @@ async def delete_messenger_mapping(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Mapping no encontrado")
     return {"message": "Asignación eliminada"}
+
+
+# ═══════════════════════════════════════════════════
+# Update delivery notes from history-orders CSV
+# ═══════════════════════════════════════════════════
+@router.post("/upload/update-notes")
+async def update_delivery_notes(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """
+    Upsert failure_reason_note and note_from_driver from a history-orders CSV/XLSX.
+    Matches on order_reference_id (tracking_number). Idempotent.
+    """
+    if not file.filename.endswith(('.csv', '.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Solo archivos CSV o XLSX")
+
+    contents = await file.read()
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al leer archivo: {e}")
+
+    # Require at least order_reference_id column
+    id_col = None
+    for candidate in ["order_reference_id", "tracking_number", "order_id"]:
+        if candidate in df.columns:
+            id_col = candidate
+            break
+    if not id_col:
+        raise HTTPException(status_code=400, detail="Columna de identificador no encontrada. Se requiere: order_reference_id, tracking_number u order_id")
+
+    # Check which note columns exist
+    has_failure_note = "failure_reason_note" in df.columns
+    has_driver_note = "note_from_driver" in df.columns
+    has_failure_reason = "failure_reason" in df.columns
+    if not has_failure_note and not has_driver_note:
+        raise HTTPException(status_code=400, detail="El archivo no contiene columnas failure_reason_note ni note_from_driver")
+
+    total = 0
+    updated = 0
+    not_found = 0
+    errors = 0
+
+    for _, row in df.iterrows():
+        total += 1
+        tracking = str(row.get(id_col, "")).strip()
+        if not tracking or tracking == "nan":
+            errors += 1
+            continue
+
+        # Build update fields — only non-empty values
+        update_fields = {}
+        if has_failure_note:
+            val = str(row.get("failure_reason_note", "")).strip()
+            if val and val != "nan":
+                update_fields["failure_reason_note"] = val
+        if has_driver_note:
+            val = str(row.get("note_from_driver", "")).strip()
+            if val and val != "nan":
+                update_fields["note_from_driver"] = val
+        if has_failure_reason:
+            val = str(row.get("failure_reason", "")).strip()
+            if val and val != "nan":
+                update_fields["failure_reason"] = val
+
+        if not update_fields:
+            continue
+
+        # Match by order_reference_id or tracking_number
+        result = await db.packages.update_many(
+            {"$or": [
+                {"order_reference_id": tracking},
+                {"tracking_number": tracking},
+            ]},
+            {"$set": update_fields},
+        )
+        if result.matched_count > 0:
+            updated += result.modified_count or result.matched_count
+        else:
+            not_found += 1
+
+    return {
+        "message": f"Notas actualizadas: {updated} registros",
+        "total_rows": total,
+        "updated": updated,
+        "not_found": not_found,
+        "errors": errors,
+        "columns_processed": [c for c in ["failure_reason_note", "note_from_driver", "failure_reason"] if c in df.columns],
+    }

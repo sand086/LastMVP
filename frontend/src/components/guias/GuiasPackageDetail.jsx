@@ -49,6 +49,15 @@ const GuiasPackageDetail = ({
                 ) : <p className="text-xs text-slate-400">Sin fotos disponibles</p>}
                 {pkg.delivery_note && <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2">{pkg.delivery_note}</p>}
                 {pkg.kosmo_driver_note && !pkg.delivery_note && <p className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2">{pkg.kosmo_driver_note}</p>}
+                {pkg.note_from_driver && (
+                    <div className="bg-blue-50 border border-blue-200 rounded p-2">
+                        <p className="text-[10px] text-blue-500 font-medium uppercase tracking-wider mb-0.5">Nota del driver</p>
+                        <p className="text-xs text-blue-800">{pkg.note_from_driver}</p>
+                    </div>
+                )}
+                {!pkg.note_from_driver && !pkg.kosmo_driver_note && !pkg.delivery_note && (
+                    <p className="text-xs text-slate-400 italic">Sin nota del driver</p>
+                )}
                 {(pkg.failure_reason || pkg.failure_reason_note) && (
                     <div className="bg-red-50 border border-red-200 rounded p-2 space-y-1">
                         {pkg.failure_reason && <p className="text-xs font-medium text-red-700">Motivo: {pkg.failure_reason.replace(/_/g, ' ')}</p>}

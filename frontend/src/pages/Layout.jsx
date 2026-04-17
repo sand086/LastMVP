@@ -10,6 +10,7 @@ import {
     getMessengerMappings,
     getUploadHistory,
     createProviderInline,
+    updateDeliveryNotes,
 } from '../lib/api';
 import { formatDate } from '../lib/utils';
 import { Button } from '../components/ui/button';
@@ -33,7 +34,8 @@ import {
     Users,
     ChevronRight,
     Link as LinkIcon,
-    ExternalLink
+    ExternalLink,
+    FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -108,6 +110,12 @@ const Layout = () => {
     const [currentPendingIdx, setCurrentPendingIdx] = useState(-1);
     const [pendingProviderForm, setPendingProviderForm] = useState({ name: '', contact_name: '', rfc: '' });
     const [creatingPendingProvider, setCreatingPendingProvider] = useState(false);
+
+    // Update notes section
+    const [notesFile, setNotesFile] = useState(null);
+    const [notesUploading, setNotesUploading] = useState(false);
+    const [notesResult, setNotesResult] = useState(null);
+    const notesFileRef = useRef(null);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -383,6 +391,28 @@ const Layout = () => {
         setRouteData(null);
         if (routeFileRef.current) routeFileRef.current.value = '';
         toast.info('Carga cancelada');
+    };
+
+    // Update delivery notes handler
+    const handleUploadNotes = async (file) => {
+        if (!file) return;
+        setNotesFile(file);
+        setNotesUploading(true);
+        setNotesResult(null);
+        try {
+            const res = await updateDeliveryNotes(file);
+            setNotesResult(res.data);
+            if (res.data.updated > 0) {
+                toast.success(`${res.data.updated} registros actualizados`);
+            } else {
+                toast.info('No se encontraron registros para actualizar');
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al actualizar notas');
+            setNotesResult({ error: err.response?.data?.detail || 'Error' });
+        } finally {
+            setNotesUploading(false);
+        }
     };
 
     if (!canEdit()) {
@@ -850,6 +880,58 @@ const Layout = () => {
                             </CardContent>
                         </Card>
                     )}
+
+                    {/* Update Delivery Notes Section */}
+                    <Card className="border-slate-200">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="font-heading text-lg flex items-center gap-2">
+                                <FileText className="w-5 h-5 text-blue-500" />
+                                Actualizar notas de entrega
+                            </CardTitle>
+                            <p className="text-xs text-slate-500">
+                                Sube un archivo history-orders para actualizar failure_reason_note y note_from_driver sin afectar otros campos.
+                            </p>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            <div className="flex items-center gap-3">
+                                <div className="flex-1">
+                                    <Input
+                                        ref={notesFileRef}
+                                        type="file"
+                                        accept=".csv,.xlsx,.xls"
+                                        onChange={(e) => handleUploadNotes(e.target.files[0])}
+                                        disabled={notesUploading}
+                                        data-testid="notes-file-input"
+                                    />
+                                    <p className="text-xs text-slate-400 mt-1">Formato: history-orders-aaaa-mm-dd.csv (requiere columnas order_reference_id + failure_reason_note o note_from_driver)</p>
+                                </div>
+                                {notesUploading && <Loader2 className="w-5 h-5 animate-spin text-blue-500" />}
+                            </div>
+                            {notesResult && !notesResult.error && (
+                                <div className="grid grid-cols-4 gap-3 bg-slate-50 rounded-lg p-3" data-testid="notes-result">
+                                    <div className="text-center">
+                                        <p className="text-lg font-mono font-bold text-slate-700">{notesResult.total_rows}</p>
+                                        <p className="text-xs text-slate-500">Filas en archivo</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-lg font-mono font-bold text-emerald-600">{notesResult.updated}</p>
+                                        <p className="text-xs text-slate-500">Actualizados</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-lg font-mono font-bold text-amber-600">{notesResult.not_found}</p>
+                                        <p className="text-xs text-slate-500">No encontrados</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-lg font-mono font-bold text-red-600">{notesResult.errors}</p>
+                                        <p className="text-xs text-slate-500">Errores</p>
+                                    </div>
+                                </div>
+                            )}
+                            {notesResult?.error && (
+                                <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{notesResult.error}</p>
+                            )}
+                        </CardContent>
+                    </Card>
 
                     {/* Upload History */}
                     <Card>
