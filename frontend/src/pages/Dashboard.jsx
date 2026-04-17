@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSortableTable } from '../lib/useSortableTable';
+import { KPICard } from '../components/dashboard/KPICard';
+import { RoutesTable } from '../components/dashboard/RoutesTable';
 import { useWebSocket } from '../lib/useWebSocket';
 import { 
     getDashboardStats, 
@@ -61,103 +63,6 @@ const T = {
 };
 
 /* ─── KPI Card ─── */
-const KPICard = ({ title, value, subtitle, icon: Icon, accentColor, accentBg, loading, testId }) => (
-    <div
-        style={{
-            background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
-            padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-            transition: 'box-shadow 0.2s',
-        }}
-        className="lm-kpi-card"
-        data-testid={testId}
-    >
-        <div>
-            <p style={{ fontSize: 12, fontWeight: 500, color: T.textTer, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-                {title}
-            </p>
-            {loading ? (
-                <div style={{ height: 32, width: 80, background: T.surface2, borderRadius: 4, animation: 'pulse 1.5s infinite' }} />
-            ) : (
-                <p style={{ fontSize: 28, fontWeight: 600, color: T.textPri, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.1 }}>
-                    {value}
-                </p>
-            )}
-            <p style={{ fontSize: 13, color: T.textSec, marginTop: 4 }}>{subtitle}</p>
-        </div>
-        <div style={{ width: 44, height: 44, borderRadius: T.radiusSm, background: accentBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Icon style={{ width: 22, height: 22, color: accentColor }} strokeWidth={1.5} />
-        </div>
-    </div>
-);
-
-/* ─── Sortable Routes Table ─── */
-const RoutesTable = ({ journeys }) => {
-    const { sortedData, SortHeader } = useSortableTable(journeys);
-    return (
-        <div className="overflow-x-auto">
-            <table className="lm-table" style={{ width: '100%' }}>
-                <thead>
-                    <tr>
-                        <SortHeader field="order_id">Order ID</SortHeader>
-                        <SortHeader field="date">Fecha</SortHeader>
-                        <SortHeader field="client_name">Cliente</SortHeader>
-                        <SortHeader field="provider_name">Proveedor</SortHeader>
-                        <SortHeader field="driver_name">Driver</SortHeader>
-                        <SortHeader field="packages_total">Paquetes</SortHeader>
-                        <SortHeader field="packages_delivered">Progreso</SortHeader>
-                        <SortHeader field="open_incidents_count">Incid.</SortHeader>
-                        <SortHeader field="status">Estado</SortHeader>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {sortedData.map((j) => {
-                        const rate = calculateDeliveryRate(j.packages_delivered, j.packages_total);
-                        const pc = getProgressColor(rate);
-                        return (
-                            <tr key={j.id} data-testid={`journey-row-${j.id}`}>
-                                <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: '#1D4ED8', maxWidth: 110 }} className="truncate" title={j.order_id}>
-                                    {j.order_id || <span style={{ color: T.textTer }}>—</span>}
-                                </td>
-                                <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 13 }}>{formatDate(j.date)}</td>
-                                <td>{j.client_name}</td>
-                                <td>{j.provider_name}</td>
-                                <td style={{ fontSize: 13 }}>
-                                    {j.driver_name
-                                        ? <span>{j.driver_name.length > 20 ? j.driver_name.split(' ').slice(0, 1).join(' ') + ' ' + (j.driver_name.split(' ')[1]?.[0] || '') + '.' : j.driver_name}</span>
-                                        : <span style={{ color: T.textTer, fontStyle: 'italic' }}>Sin asignar</span>}
-                                </td>
-                                <td style={{ fontFamily: "'DM Mono', monospace" }}>{j.packages_delivered}/{j.packages_total}</td>
-                                <td style={{ width: 130 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <Progress value={rate} className="h-2 flex-1" indicatorClassName={pc} />
-                                        <span style={{ fontSize: 12, fontFamily: "'DM Mono', monospace", width: 36, textAlign: 'right' }}>{rate}%</span>
-                                    </div>
-                                </td>
-                                <td>
-                                    {j.open_incidents_count > 0
-                                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: T.amber }}><AlertTriangle style={{ width: 15, height: 15 }} />{j.open_incidents_count}</span>
-                                        : <span style={{ color: T.textTer }}>0</span>}
-                                </td>
-                                <td>
-                                    <span className={`status-badge ${getStatusColor(j.status)}`}>{getStatusLabel(j.status)}</span>
-                                </td>
-                                <td>
-                                    <Link to={`/journeys/${j.id}`}>
-                                        <button className="lm-btn-ghost" data-testid={`view-journey-${j.id}`}>
-                                            <Eye style={{ width: 15, height: 15, marginRight: 4 }} />Ver detalle
-                                        </button>
-                                    </Link>
-                                </td>
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
-        </div>
-    );
-};
-
 /* ─────────────── DASHBOARD ─────────────── */
 const Dashboard = () => {
     const { canEdit, hasRole } = useAuth();

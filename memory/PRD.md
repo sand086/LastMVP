@@ -121,6 +121,9 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Auto-Audit Report: Generated /app/memory/AUDIT_REPORT.md + Applied P0 fixes (TTL indexes, audit_log cleanup) - Done 2026-04-16
 - [x] Code Quality Review: Empty catches (30+ fixed), XSS verified (DOMPurify already in place), hook deps, test credentials centralized, webpack 0 warnings - Done 2026-04-16
 - [x] Platform Manuals (Knowledge Hub) Fase 1: Index + Viewer + CRUD API + 6 seed manuals - Done 2026-04-17
+- [x] Sidebar colapsable (solo iconos) con persistencia en localStorage - Done 2026-04-17
+- [x] P1 Split componentes >500L: Dashboard(-95L), QualityTabV2(-65L), Reports(-57L), Settings(-726L) - Done 2026-04-17
+- [ ] Split Layout.jsx (1062L) — wizard steps a sub-componentes (P3)
 - [x] Liquidacion fixes: +Proveedor en Incidencias, Completados=delivered+failed, evidencia incluye failed - Done 2026-04-17
 - [x] Update delivery notes: POST /upload/update-notes + note_from_driver in GuiasPackageDetail - Done 2026-04-17
 - [ ] Split Layout.jsx (980L) into sub-components (P3)
