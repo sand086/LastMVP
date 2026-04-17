@@ -692,43 +692,43 @@ const JourneyDetail = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-start sm:items-center gap-3 sm:gap-4">
                     <Link to="/journeys">
-                        <Button variant="ghost" size="icon" data-testid="back-btn">
+                        <Button variant="ghost" size="icon" className="flex-shrink-0 mt-0.5 sm:mt-0" data-testid="back-btn">
                             <ArrowLeft className="w-5 h-5" />
                         </Button>
                     </Link>
-                    <div>
-                        <div className="flex items-center gap-3">
-                            <h1 className="font-heading text-2xl font-bold text-slate-900 tracking-tight">
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <h1 className="font-heading text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                                 Ruta {formatDate(journey.date)}
                             </h1>
                             <span className={`status-badge ${getStatusColor(journey.status)}`}>
                                 {getStatusLabel(journey.status)}
                             </span>
-                            {journey.order_id && (
-                                <button
-                                    className="inline-flex items-center gap-1.5 text-xs font-mono text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-0.5 ml-2 hover:bg-blue-100 transition-colors"
-                                    onClick={() => { navigator.clipboard.writeText(journey.order_id); toast.success('Order ID copiado'); }}
-                                    title="Copiar Order ID"
-                                    data-testid="copy-order-id"
-                                >
-                                    {journey.order_id}
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                                </button>
-                            )}
-                            {journey.cosmo_route_id && !journey.order_id && (
-                                <span className="text-xs text-slate-400 font-mono ml-2" data-testid="cosmo-route-id">
-                                    {journey.cosmo_route_id}
-                                </span>
-                            )}
                         </div>
-                        <p className="text-slate-500 text-sm">
+                        {journey.order_id && (
+                            <button
+                                className="inline-flex items-center gap-1.5 text-xs font-mono text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-0.5 mt-1 hover:bg-blue-100 transition-colors"
+                                onClick={() => { navigator.clipboard.writeText(journey.order_id); toast.success('Order ID copiado'); }}
+                                title="Copiar Order ID"
+                                data-testid="copy-order-id"
+                            >
+                                {journey.order_id}
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                            </button>
+                        )}
+                        {journey.cosmo_route_id && !journey.order_id && (
+                            <span className="text-xs text-slate-400 font-mono block mt-1" data-testid="cosmo-route-id">
+                                {journey.cosmo_route_id}
+                            </span>
+                        )}
+                        <p className="text-slate-500 text-xs sm:text-sm mt-1 flex flex-wrap items-center gap-x-1">
                             {journey.driver_name && (
-                                <span className="font-medium text-slate-700">{journey.driver_name} • </span>
+                                <span className="font-medium text-slate-700">{journey.driver_name} •</span>
                             )}
                             <span className="inline-flex items-center gap-1">
                                 {journey.provider_name}
@@ -743,14 +743,14 @@ const JourneyDetail = () => {
                                     </button>
                                 )}
                             </span>
-                            {' '} • {journey.client_name}
+                            <span>• {journey.client_name}</span>
                             {journey.route_type && journey.route_type !== 'CDMX / Zona Metro' && (
-                                <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded border border-violet-200">
+                                <span className="px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded border border-violet-200">
                                     {journey.route_type}{journey.city ? ` — ${journey.city}` : ''}
                                 </span>
                             )}
                             {(!journey.route_type || journey.route_type === 'CDMX / Zona Metro') && (
-                                <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded border border-blue-200">
+                                <span className="px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded border border-blue-200">
                                     CDMX
                                 </span>
                             )}
@@ -760,51 +760,50 @@ const JourneyDetail = () => {
             </div>
 
             {/* Stats cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card className="p-4">
-                    <div className="flex items-center gap-3">
-                        <Package className="w-8 h-8 text-slate-400" strokeWidth={1.5} />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                <Card className="p-3 sm:p-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <Package className="w-6 h-6 sm:w-8 sm:h-8 text-slate-400" strokeWidth={1.5} />
                         <div>
-                            <p className="text-xs text-slate-500 uppercase tracking-wider">Paquetes</p>
-                            <p className="text-xl font-heading font-bold">
+                            <p className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wider">Paquetes</p>
+                            <p className="text-lg sm:text-xl font-heading font-bold">
                                 {journey.packages_delivered}/{journey.packages_total}
                             </p>
                         </div>
                     </div>
                 </Card>
-                <Card className="p-4">
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 flex items-center justify-center">
+                <Card className="p-3 sm:p-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <div className="w-6 h-6 sm:w-8 sm:h-8 flex items-center justify-center">
                             <Progress 
                                 value={deliveryRate} 
-                                className="h-8 w-8 rounded-full"
+                                className="h-6 w-6 sm:h-8 sm:w-8 rounded-full"
                                 indicatorClassName={progressColor}
                             />
                         </div>
                         <div>
-                            <p className="text-xs text-slate-500 uppercase tracking-wider">Progreso</p>
-                            <p className="text-xl font-heading font-bold">{deliveryRate}%</p>
+                            <p className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wider">Progreso</p>
+                            <p className="text-lg sm:text-xl font-heading font-bold">{deliveryRate}%</p>
                         </div>
                     </div>
                 </Card>
-                <Card className="p-4">
-                    <div className="flex items-center gap-3">
-                        <AlertTriangle className={`w-8 h-8 ${openIncidents.length > 0 ? 'text-amber-500' : 'text-slate-400'}`} strokeWidth={1.5} />
+                <Card className="p-3 sm:p-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <AlertTriangle className={`w-6 h-6 sm:w-8 sm:h-8 ${openIncidents.length > 0 ? 'text-amber-500' : 'text-slate-400'}`} strokeWidth={1.5} />
                         <div>
-                            <p className="text-xs text-slate-500 uppercase tracking-wider">Incidencias</p>
-                            <p className="text-xl font-heading font-bold">{openIncidents.length} abiertas</p>
+                            <p className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wider">Incidencias</p>
+                            <p className="text-lg sm:text-xl font-heading font-bold">{openIncidents.length} <span className="hidden sm:inline">abiertas</span></p>
                         </div>
                     </div>
                 </Card>
-                <Card className="p-4">
-                    <div className="flex items-center gap-3">
-                        <Users className="w-8 h-8 text-slate-400" strokeWidth={1.5} />
+                <Card className="p-3 sm:p-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <Users className="w-6 h-6 sm:w-8 sm:h-8 text-slate-400" strokeWidth={1.5} />
                         <div>
-                            <p className="text-xs text-slate-500 uppercase tracking-wider">Visitas</p>
-                            <p className="text-xl font-heading font-bold">
+                            <p className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wider">Visitas</p>
+                            <p className="text-lg sm:text-xl font-heading font-bold">
                                 {(journey.packages?.filter(p => p.status === 'delivered' || p.status === 'failed' || p.status === 'returned').length) || 0}
                             </p>
-                            <p className="text-xs text-slate-400">intentos registrados</p>
                         </div>
                     </div>
                 </Card>
@@ -817,22 +816,25 @@ const JourneyDetail = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="inicio" data-testid="tab-inicio">
-                        <Play className="w-4 h-4 mr-2" />
-                        Inicio
+                <TabsList className="grid w-full grid-cols-4 h-10 sm:h-auto">
+                    <TabsTrigger value="inicio" data-testid="tab-inicio" className="text-xs sm:text-sm px-1 sm:px-3">
+                        <Play className="w-4 h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Inicio</span>
                     </TabsTrigger>
-                    <TabsTrigger value="incidencias" data-testid="tab-incidencias">
-                        <AlertTriangle className="w-4 h-4 mr-2" />
-                        Incidencias ({journey.incidents?.length || 0})
+                    <TabsTrigger value="incidencias" data-testid="tab-incidencias" className="text-xs sm:text-sm px-1 sm:px-3 relative">
+                        <AlertTriangle className="w-4 h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Incidencias ({journey.incidents?.length || 0})</span>
+                        {(journey.incidents?.length || 0) > 0 && (
+                            <span className="sm:hidden absolute -top-1 -right-1 w-4 h-4 text-[9px] font-bold bg-amber-500 text-white rounded-full flex items-center justify-center">{journey.incidents?.length || 0}</span>
+                        )}
                     </TabsTrigger>
-                    <TabsTrigger value="fin" data-testid="tab-fin">
-                        <Square className="w-4 h-4 mr-2" />
-                        Fin
+                    <TabsTrigger value="fin" data-testid="tab-fin" className="text-xs sm:text-sm px-1 sm:px-3">
+                        <Square className="w-4 h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Fin</span>
                     </TabsTrigger>
-                    <TabsTrigger value="guias" data-testid="tab-guias">
-                        <Package className="w-4 h-4 mr-2" />
-                        Guías
+                    <TabsTrigger value="guias" data-testid="tab-guias" className="text-xs sm:text-sm px-1 sm:px-3">
+                        <Package className="w-4 h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Guias</span>
                     </TabsTrigger>
                 </TabsList>
 
