@@ -119,6 +119,23 @@ const ApiDocumentation = () => {
 
     const getToken = () => '(httpOnly cookie - autenticación automática)';
 
+    // Fetch a visible token for API documentation / Power BI integration
+    const [visibleToken, setVisibleToken] = useState('');
+    useEffect(() => {
+        const fetchToken = async () => {
+            try {
+                const { default: api } = await import('../lib/api');
+                const res = await api.post('/auth/api-token');
+                setVisibleToken(res.data.access_token || '');
+            } catch (err) {
+                console.error('Failed to fetch API token:', err);
+            }
+        };
+        fetchToken();
+    }, []);
+
+    const getDisplayToken = () => visibleToken || '(token no disponible - inicia sesion)';
+
     const generateCurlCommand = (endpoint) => {
         const params = [];
         if (dateFrom) params.push(`date_from=${format(dateFrom, 'yyyy-MM-dd')}`);
@@ -128,7 +145,7 @@ const ApiDocumentation = () => {
         const queryString = params.length > 0 ? `?${params.join('&')}` : '';
         
         return `curl -X GET "${API_URL}/api/reports/${endpoint}${queryString}" \\
-  -H "Authorization: Bearer ${getToken().substring(0, 20)}..." \\
+  -H "Authorization: Bearer ${getDisplayToken().substring(0, 20)}..." \\
   -H "Content-Type: application/json"`;
     };
 
@@ -271,14 +288,16 @@ print(df.head())`;
                             </p>
                             <div className="bg-slate-900 rounded-sm p-4 overflow-x-auto">
                                 <code className="text-sm text-emerald-400">
-                                    Authorization: Bearer {getToken().substring(0, 40)}...
+                                    Authorization: Bearer {visibleToken ? visibleToken.substring(0, 40) + '...' : '(cargando token...)'}
                                 </code>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => handleCopy(getToken(), 'token')}
+                                    onClick={() => handleCopy(visibleToken, 'token')}
+                                    disabled={!visibleToken}
+                                    data-testid="copy-token-btn"
                                 >
                                     {copied === 'token' ? <Check className="w-4 h-4 mr-1" /> : <Copy className="w-4 h-4 mr-1" />}
                                     Copiar Token

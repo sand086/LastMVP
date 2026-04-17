@@ -98,6 +98,13 @@ async def get_me(user: dict = Depends(get_current_user)):
     return user
 
 
+@router.post("/auth/api-token")
+async def get_api_token(user: dict = Depends(get_current_user)):
+    """Generate a fresh access token for API documentation / Power BI use."""
+    token = create_token(user["id"], user["email"], user["role"])
+    return {"access_token": token, "token_type": "bearer", "expires_in_hours": 8}
+
+
 @router.post("/auth/logout")
 async def logout(request: StarletteRequest):
     """Logout: revoke token + clear httpOnly cookie."""
