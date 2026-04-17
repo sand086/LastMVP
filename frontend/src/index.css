@@ -220,3 +220,14 @@ code, .mono {
         display: contents !important;
     }
 }
+
+/* ─── Mobile responsive ─── */
+@media (max-width: 639px) {
+    .data-table, .lm-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .data-table th, .lm-table th { white-space: nowrap; font-size: 11px; padding: 6px 8px; }
+    .data-table td, .lm-table td { white-space: nowrap; font-size: 12px; padding: 6px 8px; }
+    .lm-kpi-card { padding: 14px !important; }
+    .lm-kpi-card p:first-of-type { font-size: 11px !important; }
+    .status-badge { font-size: 10px !important; padding: 2px 6px !important; }
+}
+

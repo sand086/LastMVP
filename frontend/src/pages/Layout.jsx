@@ -40,6 +40,8 @@ import {
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { WizardSteps } from '../components/layout/WizardSteps';
+import { UpdateNotesSection } from '../components/layout/UpdateNotesSection';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -450,36 +452,7 @@ const Layout = () => {
             </div>
 
             {/* Steps indicator */}
-            <div className="flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-sm">
-                <div className={`flex items-center gap-2 ${currentStep >= 1 ? 'text-slate-900' : 'text-slate-400'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                        currentStep > 1 ? 'bg-emerald-100 text-emerald-700' : 
-                        currentStep === 1 ? 'bg-slate-900 text-white' : 'bg-slate-200'
-                    }`}>
-                        {currentStep > 1 ? <CheckCircle2 className="w-5 h-5" /> : '1'}
-                    </div>
-                    <span className="font-medium">History Orders</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-slate-300" />
-                <div className={`flex items-center gap-2 ${currentStep >= 2 ? 'text-slate-900' : 'text-slate-400'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                        currentStep > 2 ? 'bg-emerald-100 text-emerald-700' : 
-                        currentStep === 2 ? 'bg-slate-900 text-white' : 'bg-slate-200'
-                    }`}>
-                        {currentStep > 2 ? <CheckCircle2 className="w-5 h-5" /> : '2'}
-                    </div>
-                    <span className="font-medium">Route Summary</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-slate-300" />
-                <div className={`flex items-center gap-2 ${currentStep >= 3 ? 'text-slate-900' : 'text-slate-400'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                        currentStep === 3 ? 'bg-slate-900 text-white' : 'bg-slate-200'
-                    }`}>
-                        3
-                    </div>
-                    <span className="font-medium">Configurar y Crear</span>
-                </div>
-            </div>
+            <WizardSteps currentStep={currentStep} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Main upload area */}
@@ -882,56 +855,12 @@ const Layout = () => {
                     )}
 
                     {/* Update Delivery Notes Section */}
-                    <Card className="border-slate-200">
-                        <CardHeader className="pb-3">
-                            <CardTitle className="font-heading text-lg flex items-center gap-2">
-                                <FileText className="w-5 h-5 text-blue-500" />
-                                Actualizar notas de entrega
-                            </CardTitle>
-                            <p className="text-xs text-slate-500">
-                                Sube un archivo history-orders para actualizar failure_reason_note y note_from_driver sin afectar otros campos.
-                            </p>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                            <div className="flex items-center gap-3">
-                                <div className="flex-1">
-                                    <Input
-                                        ref={notesFileRef}
-                                        type="file"
-                                        accept=".csv,.xlsx,.xls"
-                                        onChange={(e) => handleUploadNotes(e.target.files[0])}
-                                        disabled={notesUploading}
-                                        data-testid="notes-file-input"
-                                    />
-                                    <p className="text-xs text-slate-400 mt-1">Formato: history-orders-aaaa-mm-dd.csv (requiere columnas order_reference_id + failure_reason_note o note_from_driver)</p>
-                                </div>
-                                {notesUploading && <Loader2 className="w-5 h-5 animate-spin text-blue-500" />}
-                            </div>
-                            {notesResult && !notesResult.error && (
-                                <div className="grid grid-cols-4 gap-3 bg-slate-50 rounded-lg p-3" data-testid="notes-result">
-                                    <div className="text-center">
-                                        <p className="text-lg font-mono font-bold text-slate-700">{notesResult.total_rows}</p>
-                                        <p className="text-xs text-slate-500">Filas en archivo</p>
-                                    </div>
-                                    <div className="text-center">
-                                        <p className="text-lg font-mono font-bold text-emerald-600">{notesResult.updated}</p>
-                                        <p className="text-xs text-slate-500">Actualizados</p>
-                                    </div>
-                                    <div className="text-center">
-                                        <p className="text-lg font-mono font-bold text-amber-600">{notesResult.not_found}</p>
-                                        <p className="text-xs text-slate-500">No encontrados</p>
-                                    </div>
-                                    <div className="text-center">
-                                        <p className="text-lg font-mono font-bold text-red-600">{notesResult.errors}</p>
-                                        <p className="text-xs text-slate-500">Errores</p>
-                                    </div>
-                                </div>
-                            )}
-                            {notesResult?.error && (
-                                <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{notesResult.error}</p>
-                            )}
-                        </CardContent>
-                    </Card>
+                    <UpdateNotesSection
+                        notesFileRef={notesFileRef}
+                        notesUploading={notesUploading}
+                        notesResult={notesResult}
+                        onUpload={handleUploadNotes}
+                    />
 
                     {/* Upload History */}
                     <Card>
