@@ -578,7 +578,9 @@ async def evaluate_single_package_for_journey(
 
 
 async def evaluate_packages_by_ids(db: AsyncIOMotorDatabase, package_ids: list, journey_ids: set = None):
-    """Evaluate evidence for specific packages (used after sync) - rule-based for speed."""
+    """Evaluate evidence for specific packages (used after sync) - rule-based for speed.
+    IMPORTANT: Preserves AI evaluations — only applies rules to packages NOT evaluated by AI.
+    """
     if not package_ids:
         return
 
@@ -600,6 +602,10 @@ async def evaluate_packages_by_ids(db: AsyncIOMotorDatabase, package_ids: list, 
     }
 
     for pkg in packages:
+        # Skip packages already evaluated by AI — preserve their detailed analysis
+        if pkg.get("evidence_method") == "ai" and pkg.get("evidence_detail"):
+            continue
+
         tn = (pkg.get("tracking_number") or "").strip().lower()
         has_incident = tn in incident_tracking_numbers if tn else False
         result = calculate_evidence_score_rules(pkg, has_incident)
