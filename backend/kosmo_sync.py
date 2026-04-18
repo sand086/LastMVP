@@ -208,6 +208,8 @@ def _build_sync_query(journey_ids_filter: list = None, freshness_minutes: int = 
     """
     now = datetime.now(timezone.utc)
     freshness_cutoff = now - timedelta(minutes=freshness_minutes)
+    # Terminal packages get re-scraped every 15 min to catch late Kosmo updates
+    terminal_refresh_cutoff = now - timedelta(minutes=15)
 
     base_or = [
         # Active packages not recently scraped
@@ -223,7 +225,7 @@ def _build_sync_query(journey_ids_filter: list = None, freshness_minutes: int = 
              {"kosmo_scraped_at": None},
              {"kosmo_scraped_at": {"$exists": False}},
          ]},
-        # Terminal packages missing proof
+        # Terminal packages missing proof — rescrape after freshness cutoff
         {"status": {"$in": ["delivered", "failed"]},
          "$or": [
              {"kosmo_proof_count": 0},
@@ -231,6 +233,10 @@ def _build_sync_query(journey_ids_filter: list = None, freshness_minutes: int = 
              {"kosmo_proof_count": {"$exists": False}},
          ],
          "kosmo_scraped_at": {"$lt": freshness_cutoff.isoformat()}},
+        # Terminal packages WITH proof — periodic refresh to catch late Kosmo updates
+        {"status": {"$in": ["delivered", "failed"]},
+         "kosmo_proof_count": {"$gt": 0},
+         "kosmo_scraped_at": {"$lt": terminal_refresh_cutoff.isoformat()}},
         # Unknown status packages
         {"kosmo_status_raw": {"$in": ["unknown", None]},
          "kosmo_scraped_at": {"$lt": freshness_cutoff.isoformat()}},
@@ -472,17 +478,22 @@ async def _adaptive_periodic_sync(db: AsyncIOMotorDatabase):
                 continue
 
             now = datetime.now(timezone.utc)
+            three_days_ago = (now - timedelta(days=3)).strftime("%Y-%m-%d")
 
             # Find journeys that are due for sync
+            # Include active routes + recently closed routes (last 3 days)
             due_journeys = await db.journeys.find(
-                {
-                    "status": {"$in": ["scheduled", "in_progress"]},
-                    "$or": [
+                {"$and": [
+                    {"$or": [
+                        {"status": {"$in": ["scheduled", "in_progress"]}},
+                        {"status": "closed", "date": {"$gte": three_days_ago}},
+                    ]},
+                    {"$or": [
                         {"next_sync_at": {"$exists": False}},
                         {"next_sync_at": None},
                         {"next_sync_at": {"$lte": now.isoformat()}},
-                    ],
-                },
+                    ]},
+                ]},
                 {"_id": 0, "id": 1, "date": 1},
             ).sort("next_sync_at", 1).to_list(MAX_JOURNEYS_PER_CYCLE)
 
