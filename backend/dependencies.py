@@ -64,9 +64,9 @@ security = HTTPBearer(auto_error=False)
 
 COOKIE_NAME = "lm_access_token"
 COOKIE_MAX_AGE = JWT_EXPIRY_HOURS * 3600
-COOKIE_SECURE = True
+COOKIE_SECURE = os.environ.get("ENVIRONMENT", "production") != "development"
 COOKIE_HTTPONLY = True
-COOKIE_SAMESITE = "lax"
+COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax")
 COOKIE_PATH = "/api"
 
 # ==================== AUTH HELPERS ====================

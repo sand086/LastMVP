@@ -120,22 +120,30 @@ async def websocket_dashboard(websocket: WebSocket):
 app.add_middleware(AuditMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
-ALLOWED_ORIGINS = [
-    o.strip() for o in
-    os.environ.get("CORS_ORIGINS",
-        "https://lastmile-mvp.preview.emergentagent.com"
-    ).split(",")
-    if o.strip() and o.strip() != "*"
-] or ["https://lastmile-mvp.preview.emergentagent.com"]
+_cors_env = os.environ.get("CORS_ORIGINS", "https://lastmile-mvp.preview.emergentagent.com")
+_is_wildcard = _cors_env.strip() == "*"
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
-    max_age=600,
-)
+if _is_wildcard:
+    # Dynamic origin matching — allows any origin while supporting credentials
+    ALLOWED_ORIGINS = ["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origin_regex=r"https?://.*",
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+        max_age=600,
+    )
+else:
+    ALLOWED_ORIGINS = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+        max_age=600,
+    )
 
 # ==================== STARTUP / SHUTDOWN ====================
 
