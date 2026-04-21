@@ -199,6 +199,7 @@ const JourneyDetail = () => {
         severity: '',
         tracking_number: '',
         action_taken: '',
+        comentario_asesor: '',
     });
     const [incidentSubmitting, setIncidentSubmitting] = useState(false);
     const [showPackagesList, setShowPackagesList] = useState(false);
@@ -328,11 +329,12 @@ const JourneyDetail = () => {
     const handleRegisterIncidentFromGuias = (pkg) => {
         setIncidentForm({
             occurred_at: new Date().toISOString().slice(0, 16),
-            incident_type: 'Evidencia Insuficiente',
+            incident_type: '',
             description: `Incidencia registrada desde Guias para paquete ${pkg.tracking_number || pkg.order_reference_id || ''}`,
-            severity: 'Media',
+            severity: 'Medio',
             tracking_number: pkg.tracking_number || pkg.order_reference_id || '',
             action_taken: '',
+            comentario_asesor: '',
             source: 'guias',
         });
         setEditingIncident(null);
@@ -480,6 +482,7 @@ const JourneyDetail = () => {
                 tracking_number: incident.tracking_number || '',
                 action_taken: incident.action_taken || '',
                 imputability: incident.imputability || 'Por definir',
+                comentario_asesor: incident.comentario_asesor || '',
             });
         } else {
             setEditingIncident(null);
@@ -491,9 +494,19 @@ const JourneyDetail = () => {
                 tracking_number: '',
                 action_taken: '',
                 imputability: 'Por definir',
+                comentario_asesor: '',
             });
         }
         setShowIncidentModal(true);
+    };
+
+    // Cuando cambia el tipo de incidencia, limpiar comentario_asesor si ya no es 'otro'
+    const handleIncidentTypeChange = (newType) => {
+        setIncidentForm(prev => ({
+            ...prev,
+            incident_type: newType,
+            comentario_asesor: newType === 'otro' ? prev.comentario_asesor : '',
+        }));
     };
 
     const handleSaveIncident = async () => {
@@ -501,24 +514,36 @@ const JourneyDetail = () => {
             toast.error('Completa los campos requeridos');
             return;
         }
+        if (incidentForm.incident_type === 'otro' && !(incidentForm.comentario_asesor || '').trim()) {
+            toast.error('Describe brevemente el tipo de incidencia.');
+            return;
+        }
 
         setIncidentSubmitting(true);
         try {
+            // Solo enviar comentario_asesor cuando el tipo es 'otro'
+            const payload = { ...incidentForm };
+            if (payload.incident_type !== 'otro') {
+                payload.comentario_asesor = null;
+            } else {
+                payload.comentario_asesor = (payload.comentario_asesor || '').trim();
+            }
+
             if (editingIncident) {
-                await updateIncident(editingIncident.id, incidentForm);
+                await updateIncident(editingIncident.id, payload);
                 toast.success('Incidencia actualizada');
             } else {
                 await createIncident({
-                    ...incidentForm,
+                    ...payload,
                     journey_id: id,
-                    source: incidentForm.source || 'incidencias',
+                    source: payload.source || 'incidencias',
                 });
                 toast.success('Incidencia registrada');
             }
             setShowIncidentModal(false);
             fetchJourney();
         } catch (error) {
-            toast.error('Error al guardar incidencia');
+            toast.error(error?.response?.data?.detail || 'Error al guardar incidencia');
         } finally {
             setIncidentSubmitting(false);
         }
@@ -945,18 +970,57 @@ const JourneyDetail = () => {
                             <Label>Tipo de incidencia *</Label>
                             <Select
                                 value={incidentForm.incident_type}
-                                onValueChange={(v) => setIncidentForm({ ...incidentForm, incident_type: v })}
+                                onValueChange={handleIncidentTypeChange}
                             >
                                 <SelectTrigger data-testid="incident-type-select">
                                     <SelectValue placeholder="Seleccionar tipo" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="max-w-[min(92vw,560px)]">
                                     {INCIDENT_TYPES.map((t) => (
-                                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                                        <SelectItem
+                                            key={t.value}
+                                            value={t.value}
+                                            data-testid={`incident-type-option-${t.value}`}
+                                            className="whitespace-normal"
+                                        >
+                                            {t.label}
+                                        </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
                         </div>
+                        {incidentForm.incident_type === 'otro' && (
+                            <div
+                                className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-200"
+                                data-testid="incident-comentario-asesor-wrapper"
+                            >
+                                <Label htmlFor="comentario-asesor">Comentario del asesor *</Label>
+                                <Textarea
+                                    id="comentario-asesor"
+                                    value={incidentForm.comentario_asesor}
+                                    onChange={(e) =>
+                                        setIncidentForm({
+                                            ...incidentForm,
+                                            comentario_asesor: e.target.value.slice(0, 500),
+                                        })
+                                    }
+                                    placeholder="Describe brevemente el tipo de incidencia (hasta 500 caracteres)"
+                                    rows={2}
+                                    maxLength={500}
+                                    data-testid="incident-comentario-asesor-textarea"
+                                />
+                                <div className="flex items-center justify-between text-xs">
+                                    {!(incidentForm.comentario_asesor || '').trim() ? (
+                                        <p className="text-red-600" data-testid="comentario-asesor-error">
+                                            Describe brevemente el tipo de incidencia.
+                                        </p>
+                                    ) : <span />}
+                                    <span className="text-slate-400">
+                                        {(incidentForm.comentario_asesor || '').length}/500
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                         <div className="space-y-2">
                             <Label>Descripción *</Label>
                             <Textarea
@@ -1020,7 +1084,17 @@ const JourneyDetail = () => {
                         <Button variant="outline" onClick={() => setShowIncidentModal(false)}>
                             Cancelar
                         </Button>
-                        <Button onClick={handleSaveIncident} disabled={incidentSubmitting} data-testid="save-incident-btn">
+                        <Button
+                            onClick={handleSaveIncident}
+                            disabled={
+                                incidentSubmitting ||
+                                !incidentForm.incident_type ||
+                                !incidentForm.severity ||
+                                !(incidentForm.description || '').trim() ||
+                                (incidentForm.incident_type === 'otro' && !(incidentForm.comentario_asesor || '').trim())
+                            }
+                            data-testid="save-incident-btn"
+                        >
                             {incidentSubmitting ? (
                                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                             ) : null}

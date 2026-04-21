@@ -213,18 +213,23 @@ export function downloadFile(blob, filename) {
 }
 
 export const INCIDENT_TYPES = [
-    'Tiempo excesivo por entrega',
-    'Driver sin movimiento',
-    'Evidencia incorrecta',
-    'Evidencia Insuficiente',
-    'Paquete dañado',
-    'Destinatario ausente',
-    'Dirección no encontrada',
-    'Accidente o incidente vehicular',
-    'Llanta ponchada',
-    'Problema en Cosmo',
-    'Otro',
+    { value: 'evidencia_incidencia_incorrecta', label: 'No se comparte evidencia de incidencia correctamente' },
+    { value: 'autorizacion_tercero_incorrecta', label: 'No se comparte autorización de entrega a tercero correctamente' },
+    { value: 'evidencia_entrega_incorrecta', label: 'No se comparte evidencia de entrega correcta' },
+    { value: 'notas_incorrectas', label: 'La información en notas es incorrecta / incompleta' },
+    { value: 'otro', label: 'Otro' },
 ];
+
+// Map para buscar labels por valor. Si el valor no está en el catálogo nuevo
+// (incidencias históricas con catálogo viejo), se muestra tal cual.
+const INCIDENT_TYPE_LABELS = Object.fromEntries(
+    INCIDENT_TYPES.map(t => [t.value, t.label])
+);
+
+export const getIncidentTypeLabel = (value) => {
+    if (!value) return '—';
+    return INCIDENT_TYPE_LABELS[value] || value;
+};
 
 export const FUEL_LEVELS = [
     'Lleno',

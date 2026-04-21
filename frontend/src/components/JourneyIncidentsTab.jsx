@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { 
     Plus, Pencil, Trash2, Download, Loader2, CheckCircle2, CheckCheck, Camera,
 } from 'lucide-react';
-import { formatTime, getStatusColor, getStatusLabel, getSeverityColor, getImputabilityColor } from '../lib/utils';
+import { formatTime, getStatusColor, getStatusLabel, getSeverityColor, getImputabilityColor, getIncidentTypeLabel } from '../lib/utils';
 
 export const JourneyIncidentsTab = ({
     journey,
@@ -89,7 +89,9 @@ export const JourneyIncidentsTab = ({
                                         </td>
                                         <td>
                                             <div className="flex items-center gap-1.5">
-                                                {incident.incident_type}
+                                                <span title={getIncidentTypeLabel(incident.incident_type)}>
+                                                    {getIncidentTypeLabel(incident.incident_type)}
+                                                </span>
                                                 {incident.source === 'guias' && (
                                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 uppercase tracking-wide whitespace-nowrap" data-testid={`source-badge-${incident.id}`}>Desde Guias</span>
                                                 )}

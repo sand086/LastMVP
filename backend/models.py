@@ -143,6 +143,7 @@ class IncidentBase(BaseModel):
     action_taken: Optional[str] = None
     imputability: Optional[str] = "Por definir"
     source: Optional[str] = "incidencias"
+    comentario_asesor: Optional[str] = None  # Requerido cuando incident_type == 'otro'
 
 class IncidentCreate(IncidentBase):
     pass

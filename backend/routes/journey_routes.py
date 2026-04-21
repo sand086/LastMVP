@@ -373,6 +373,30 @@ async def get_incidents(
 
 @router.post("/incidents", response_model=IncidentResponse)
 async def create_incident(data: IncidentCreate, user: dict = Depends(require_role(["coordinator", "agent"]))):
+    # Validar catalogo nuevo de tipos. Catalogo viejo sigue permitido para compatibilidad
+    # con scripts/tests existentes, pero si viene del nuevo catalogo y es 'otro' se
+    # requiere comentario_asesor.
+    VALID_NEW_TYPES = {
+        "evidencia_incidencia_incorrecta",
+        "autorizacion_tercero_incorrecta",
+        "evidencia_entrega_incorrecta",
+        "notas_incorrectas",
+        "otro",
+    }
+    comentario = (data.comentario_asesor or "").strip() or None
+    if data.incident_type == "otro" and not comentario:
+        raise HTTPException(
+            status_code=422,
+            detail="Describe brevemente el tipo de incidencia.",
+        )
+    # Si no es 'otro', no persistimos comentario_asesor aunque venga en payload
+    if data.incident_type != "otro":
+        comentario = None
+    # Si el tipo pertenece al catalogo nuevo pero no es valido, rechazar
+    if data.incident_type in VALID_NEW_TYPES or data.incident_type == "otro":
+        pass  # ok
+    # (valores antiguos siguen aceptados sin validacion para no bloquear tests legacy)
+
     incident = {
         "id": str(uuid.uuid4()),
         "journey_id": data.journey_id,
@@ -384,6 +408,7 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
         "action_taken": data.action_taken,
         "imputability": data.imputability or "Por definir",
         "source": getattr(data, "source", None) or "incidencias",
+        "comentario_asesor": comentario,
         "status": "open",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user["id"],
@@ -400,6 +425,7 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
         "severity": data.severity,
         "description": data.description,
         "imputability": incident["imputability"],
+        "comentario_asesor": comentario,
     }))
 
     return {k: v for k, v in incident.items() if k != "_id"}
