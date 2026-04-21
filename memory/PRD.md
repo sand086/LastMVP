@@ -129,6 +129,7 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - [x] Liquidacion fixes: +Proveedor en Incidencias, Completados=delivered+failed, evidencia incluye failed - Done 2026-04-17
 - [x] Update delivery notes: POST /upload/update-notes + note_from_driver in GuiasPackageDetail - Done 2026-04-17
 - [x] AI Eval Worker & Monitor de Procesos: MongoDB-backed queue, background worker + cron sweep, /api/ai-evaluation/* routes, /monitor page with access control (coordinator/developer), Progress indicatorClassName support - Done 2026-04-21
+- [x] Catalogo estandarizado de Tipos de incidencia (5 enum values) + campo condicional comentario_asesor (requerido con 'otro', max 500 chars) + manual actualizado - Done 2026-04-21
 - [ ] Split Layout.jsx (980L) into sub-components (P3)
 - [ ] Mobile-optimized views for field agents (P2)
 - [ ] Export journey details to PDF (P2)
