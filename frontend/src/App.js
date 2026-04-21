@@ -20,6 +20,7 @@ import QualityCriteria from './pages/QualityCriteria';
 import AdminPage from './pages/AdminPage';
 import Manuals from './pages/Manuals';
 import ManualViewer from './pages/ManualViewer';
+import MonitorProcesos from './pages/MonitorProcesos';
 import LumiChat from './components/LumiChat';
 import './App.css';
 
@@ -219,6 +220,15 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute>
                         <ManualViewer />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/monitor" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer']}>
+                        <MonitorProcesos />
                     </ProtectedRoute>
                 } 
             />

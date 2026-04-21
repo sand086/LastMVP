@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 43 - Monitor de Procesos (AI Evaluation Jobs) tested end-to-end. Backend: 20/21 pytest cases passed, 1 skipped (no ineligible package in DB). Frontend: /monitor UI verified for Dev, access control enforced for Agent/Proveedor (sidebar hidden + redirect + toast).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ai_eval_monitor.py",
+    "/app/test_reports/pytest/iter43_ai_eval.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SSE endpoint uses double-quoted string-escaped JSON in f-string; works but fragile — consider json.dumps() for safety against injection/formatting in status values.",
+    "cancel_job returns generic 400 even when job doesn't exist at all; differentiating 404 vs 400 (wrong state) would improve client UX.",
+    "list_jobs fecha_hasta concat '<date>T23:59:59' assumes fecha_creacion stored as ISO string — confirmed matches enqueue_job which stores isoformat(). OK.",
+    "server.py still uses deprecated @app.on_event('startup'/'shutdown') — recommend migrating to lifespan context manager (FastAPI 0.110+) to avoid deprecation warning in logs.",
+    "WebSocket /api/ws/dashboard failing on every page load (console warning) — unrelated to Monitor feature but recurring noise; worth a separate fix."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ai_eval_monitor.py"
+  ],
+  "success_rate": {
+    "backend": "100% of executed (20/20 passed, 1 skipped)",
+    "frontend": "100% (all Monitor IA flows verified)"
+  },
+  "test_credentials": {
+    "developer": "dev@me.mx / LastMile2026",
+    "coordinator": "yael@me.mx / LastMile2026",
+    "agent": "agente@me.mx / LastMile2026",
+    "proveedor": "proveedor@me.mx / LastMile2026"
+  },
+  "seed_data_creation": "None — one manual job was enqueued during test via POST /api/ai-evaluation/jobs/manual using an existing journey, which became visible in Monitor IA UI (MX-XScH4jJZYt, 0/31, Evaluando, 81%).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "features_verified": {
+    "backend_auth": "PASSED — unauth 401; agent/proveedor 403 on POST /manual; agent 403 on DELETE; agent 200 on GET /jobs",
+    "backend_list_jobs": "PASSED — structure {data,total,page,pages}; status/trigger/date filters; 'all' bypass",
+    "backend_get_job": "PASSED — 404 on unknown id; returns guias_detail for real job",
+    "backend_create_manual": "PASSED — 404 on invalid route_id; 200 with real journey, creates DB row, GET verifies persistence",
+    "backend_create_manual_guia": "PASSED (404 path). 400 ineligible path skipped (no in-progress package in DB, not a bug)",
+    "backend_cancel_job": "PASSED — 400 when not En_Cola / not found",
+    "backend_sse_stream": "PASSED — returns text/event-stream content-type",
+    "backend_worker_startup": "PASSED — server.py lifespan calls start_ai_eval_worker; indexes for ai_evaluation_jobs (route_id, status, fecha_creacion, priority+fecha) created at startup",
+    "frontend_dev_access": "PASSED — /monitor loads, data-testid=monitor-procesos-page present, sidebar 'Monitor IA' highlighted (bg-slate-900)",
+    "frontend_filters_and_refresh": "PASSED — filter-status, filter-trigger, filter-route, refresh-jobs-btn all render and interactive",
+    "frontend_job_row_rendering": "PASSED — job-row-{id} renders with progress bar + % + status badge (Evaluando, 81% from live job)",
+    "frontend_agent_access_control": "PASSED — Monitor IA hidden from sidebar; direct /monitor nav → redirect to / + toast 'Sin permisos'",
+    "frontend_proveedor_access_control": "PASSED — same as agent",
+    "regression_auth": "PASSED — login sets lm_access_token httpOnly cookie, logout, /auth/me, /journeys, /health all OK"
+  },
+  "context_for_next_testing_agent": "Monitor de Procesos fully validated. Backend test file /app/backend/tests/test_ai_eval_monitor.py can be reused for regression. During testing, a real job was enqueued on journey MX-XScH4jJZYt (31 guias) which transitioned En_Cola→Evaluando automatically — worker polling confirmed working every 10s. The ineligible-guia 400 path couldn't be exercised because /packages/search only surfaces delivered/failed packages in current DB; not a bug.",
+  "rca of the issue": "No bugs found."
+}
