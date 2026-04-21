@@ -13,6 +13,7 @@ import os
 from dependencies import db, limiter, mongo_client
 from middleware import AuditMiddleware, SecurityHeadersMiddleware
 from kosmo_sync import start_periodic_sync, stop_periodic_sync, close_http_client
+from ai_eval_worker import start_ai_eval_worker, stop_ai_eval_worker
 from ws_manager import ws_manager
 
 from routes import (
@@ -32,6 +33,7 @@ from routes import (
     kosmo_router,
     driver_router,
     manual_router,
+    ai_eval_router,
 )
 
 # Configure logging
@@ -89,6 +91,7 @@ api_router.include_router(admin_module_router)
 api_router.include_router(kosmo_router)
 api_router.include_router(driver_router)
 api_router.include_router(manual_router)
+api_router.include_router(ai_eval_router)
 
 app.include_router(api_router)
 
@@ -226,6 +229,12 @@ async def startup_event():
     await db.incidents.create_index([("status", 1), ("severity", 1)], background=True)
     await db.token_usage_log.create_index([("client_id", 1), ("timestamp", -1)], background=True)
 
+    # AI Evaluation indexes
+    await db.ai_evaluation_jobs.create_index("route_id", background=True)
+    await db.ai_evaluation_jobs.create_index("status", background=True)
+    await db.ai_evaluation_jobs.create_index("fecha_creacion", background=True)
+    await db.ai_evaluation_jobs.create_index([("priority", -1), ("fecha_creacion", 1)], background=True)
+
     logger.info("Production indexes created/verified")
 
     # Auto-migrate: set order_id = cosmo_route_id for journeys missing order_id
@@ -244,10 +253,12 @@ async def startup_event():
         logger.info(f"Auto-migrated order_id for {migrated.modified_count} journeys")
 
     start_periodic_sync(db)
+    start_ai_eval_worker(db)
 
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     stop_periodic_sync()
+    stop_ai_eval_worker()
     await close_http_client()
     mongo_client.close()

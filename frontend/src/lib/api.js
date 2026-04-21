@@ -279,3 +279,11 @@ export const updateManualContent = (id, data) => api.put(`/manuals-admin/${id}/c
 export const deleteManual = (id) => api.delete(`/manuals-admin/${id}`);
 export const seedManuals = () => api.post('/manuals-admin/seed');
 
+
+// AI Evaluation Jobs (Monitor de Procesos)
+export const getAiEvalJobs = (params) => api.get('/ai-evaluation/jobs', { params });
+export const getAiEvalJob = (jobId) => api.get(`/ai-evaluation/jobs/${jobId}`);
+export const createAiEvalJobManual = (data) => api.post('/ai-evaluation/jobs/manual', data);
+export const createAiEvalJobGuia = (data) => api.post('/ai-evaluation/jobs/manual/guia', data);
+export const cancelAiEvalJob = (jobId) => api.delete(`/ai-evaluation/jobs/${jobId}`);
+
