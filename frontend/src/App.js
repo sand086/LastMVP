@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
+import React, { useEffect, Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
@@ -7,22 +7,30 @@ import DashboardLayout from './components/DashboardLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Journeys from './pages/Journeys';
-import JourneyDetail from './pages/JourneyDetail';
-import Layout from './pages/Layout';
-import Settings from './pages/Settings';
-import ApiDocumentation from './pages/ApiDocumentation';
-import Reports from './pages/Reports';
-import SystemHealth from './pages/SystemHealth';
-import SystemLogs from './pages/SystemLogs';
-import SystemErrors from './pages/SystemErrors';
-import SystemIntegrity from './pages/SystemIntegrity';
-import QualityCriteria from './pages/QualityCriteria';
-import AdminPage from './pages/AdminPage';
-import Manuals from './pages/Manuals';
-import ManualViewer from './pages/ManualViewer';
-import MonitorProcesos from './pages/MonitorProcesos';
+// Lazy-loaded routes (code-split for faster initial bundle)
+const JourneyDetail = lazy(() => import('./pages/JourneyDetail'));
+const Layout = lazy(() => import('./pages/Layout'));
+const Settings = lazy(() => import('./pages/Settings'));
+const ApiDocumentation = lazy(() => import('./pages/ApiDocumentation'));
+const Reports = lazy(() => import('./pages/Reports'));
+const SystemHealth = lazy(() => import('./pages/SystemHealth'));
+const SystemLogs = lazy(() => import('./pages/SystemLogs'));
+const SystemErrors = lazy(() => import('./pages/SystemErrors'));
+const SystemIntegrity = lazy(() => import('./pages/SystemIntegrity'));
+const QualityCriteria = lazy(() => import('./pages/QualityCriteria'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
+const Manuals = lazy(() => import('./pages/Manuals'));
+const ManualViewer = lazy(() => import('./pages/ManualViewer'));
+const MonitorProcesos = lazy(() => import('./pages/MonitorProcesos'));
 import LumiChat from './components/LumiChat';
 import './App.css';
+
+// Fallback UI while lazy chunks load
+const PageLoader = () => (
+    <div className="flex items-center justify-center py-24" data-testid="page-loader">
+        <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
+    </div>
+);
 
 // Protected route wrapper
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -76,7 +84,8 @@ const PublicRoute = ({ children }) => {
 
 function AppRoutes() {
     return (
-        <Routes>
+        <Suspense fallback={<PageLoader />}>
+            <Routes>
             {/* Public routes */}
             <Route 
                 path="/login" 
@@ -235,7 +244,8 @@ function AppRoutes() {
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            </Routes>
+        </Suspense>
     );
 }
 

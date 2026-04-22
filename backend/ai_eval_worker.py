@@ -123,88 +123,66 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str) -> dict:
         return {"status": "Error", "tokens": 0, "error": str(e)[:200]}
 
 
-async def _process_job(db: AsyncIOMotorDatabase, job: dict):
-    """Process a single evaluation job — batch packages within the route."""
-    job_id = job["job_id"]
-    now = datetime.now(timezone.utc)
-
-    await db.ai_evaluation_jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {"status": "Evaluando", "fecha_inicio": now.isoformat()}},
-    )
-
-    guias = job.get("guias_detail", [])
-    total = len(guias)
-    evaluated = 0
-    errors = 0
-    total_tokens = 0
-
-    # Process in batches
-    for batch_start in range(0, total, BATCH_SIZE_PER_ROUTE):
-        batch = guias[batch_start:batch_start + BATCH_SIZE_PER_ROUTE]
-
-        # Mark batch as evaluating
-        for g in batch:
-            await db.ai_evaluation_jobs.update_one(
-                {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
-                {"$set": {"guias_detail.$.status": "Evaluando"}},
-            )
-
-        # Execute batch concurrently
-        tasks = [_evaluate_single_guia(db, g["guia_id"], job_id) for g in batch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for g, result in zip(batch, results):
-            if isinstance(result, Exception):
-                result = {"status": "Error", "tokens": 0, "error": str(result)[:200]}
-
-            if result["status"] == "Error" and g.get("retries", 0) < MAX_RETRIES:
-                # Retry with backoff
-                retry_num = g.get("retries", 0) + 1
-                wait = RETRY_BACKOFF_BASE * (4 ** (retry_num - 1))
-                await asyncio.sleep(min(wait, 16))
-                retry_result = await _evaluate_single_guia(db, g["guia_id"], job_id)
-                if retry_result["status"] != "Error":
-                    result = retry_result
-
-                await db.ai_evaluation_jobs.update_one(
-                    {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
-                    {"$set": {"guias_detail.$.retries": retry_num}},
-                )
-
-            if result["status"] == "Evaluada":
-                evaluated += 1
-            else:
-                errors += 1
-
-            total_tokens += result.get("tokens", 0)
-
-            await db.ai_evaluation_jobs.update_one(
-                {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
-                {"$set": {
-                    "guias_detail.$.status": result["status"],
-                    "guias_detail.$.tokens": result.get("tokens", 0),
-                    "guias_detail.$.error": result.get("error"),
-                }},
-            )
-
-        # Update job progress
-        progress = round((evaluated + errors) / total * 100) if total > 0 else 0
+async def _evaluate_batch_with_retry(db, batch: list, job_id: str) -> list:
+    """Ejecuta un batch de guias en paralelo, con reintentos por guia fallida.
+    Actualiza el progreso por guia en el job. Retorna lista de results paralelos al batch."""
+    # Marcar batch como 'Evaluando'
+    for g in batch:
         await db.ai_evaluation_jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {
-                "guias_evaluadas": evaluated,
-                "guias_con_error": errors,
-                "progress_percent": progress,
-                "tokens_consumidos": total_tokens,
-            }},
+            {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
+            {"$set": {"guias_detail.$.status": "Evaluando"}},
         )
 
-    # Finalize job
-    end_time = datetime.now(timezone.utc)
-    duration = (end_time - now).total_seconds()
-    final_status = "Evaluada" if errors == 0 else ("Parcial" if evaluated > 0 else "Error")
+    tasks = [_evaluate_single_guia(db, g["guia_id"], job_id) for g in batch]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    normalized = []
+    for g, result in zip(batch, results):
+        if isinstance(result, Exception):
+            result = {"status": "Error", "tokens": 0, "error": str(result)[:200]}
+
+        # Reintentar en caso de error (con backoff exponencial, max 16s)
+        if result["status"] == "Error" and g.get("retries", 0) < MAX_RETRIES:
+            retry_num = g.get("retries", 0) + 1
+            wait = min(RETRY_BACKOFF_BASE * (4 ** (retry_num - 1)), 16)
+            await asyncio.sleep(wait)
+            retry_result = await _evaluate_single_guia(db, g["guia_id"], job_id)
+            if retry_result["status"] != "Error":
+                result = retry_result
+            await db.ai_evaluation_jobs.update_one(
+                {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
+                {"$set": {"guias_detail.$.retries": retry_num}},
+            )
+
+        normalized.append(result)
+        await db.ai_evaluation_jobs.update_one(
+            {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
+            {"$set": {
+                "guias_detail.$.status": result["status"],
+                "guias_detail.$.tokens": result.get("tokens", 0),
+                "guias_detail.$.error": result.get("error"),
+            }},
+        )
+    return normalized
+
+
+async def _update_job_progress(db, job_id: str, evaluated: int, errors: int, total: int, total_tokens: int):
+    progress = round((evaluated + errors) / total * 100) if total > 0 else 0
+    await db.ai_evaluation_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "guias_evaluadas": evaluated,
+            "guias_con_error": errors,
+            "progress_percent": progress,
+            "tokens_consumidos": total_tokens,
+        }},
+    )
+
+
+async def _finalize_job(db, job_id: str, start: datetime, evaluated: int, errors: int, total: int, total_tokens: int):
+    end_time = datetime.now(timezone.utc)
+    duration = (end_time - start).total_seconds()
+    final_status = "Evaluada" if errors == 0 else ("Parcial" if evaluated > 0 else "Error")
     await db.ai_evaluation_jobs.update_one(
         {"job_id": job_id},
         {"$set": {
@@ -219,6 +197,38 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
     )
     logger.info(f"Job {job_id} finished: {final_status} ({evaluated}/{total}, {errors} errors, {total_tokens} tokens, {round(duration)}s)")
     return final_status
+
+
+async def _process_job(db: AsyncIOMotorDatabase, job: dict):
+    """Procesa un evaluation job — orquesta batches y actualiza progreso."""
+    job_id = job["job_id"]
+    start = datetime.now(timezone.utc)
+
+    await db.ai_evaluation_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {"status": "Evaluando", "fecha_inicio": start.isoformat()}},
+    )
+
+    guias = job.get("guias_detail", [])
+    total = len(guias)
+    evaluated = 0
+    errors = 0
+    total_tokens = 0
+
+    for batch_start in range(0, total, BATCH_SIZE_PER_ROUTE):
+        batch = guias[batch_start:batch_start + BATCH_SIZE_PER_ROUTE]
+        results = await _evaluate_batch_with_retry(db, batch, job_id)
+
+        for result in results:
+            if result["status"] == "Evaluada":
+                evaluated += 1
+            else:
+                errors += 1
+            total_tokens += result.get("tokens", 0)
+
+        await _update_job_progress(db, job_id, evaluated, errors, total, total_tokens)
+
+    return await _finalize_job(db, job_id, start, evaluated, errors, total, total_tokens)
 
 
 async def _worker_loop(db: AsyncIOMotorDatabase):

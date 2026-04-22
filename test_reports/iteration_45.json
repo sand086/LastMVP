@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 45 — Regression testing for P2+P3 refactors (React.lazy + ApiDocumentation split + ai_eval_worker._process_job helper extraction). Backend: 6/7 pytest pass, 1 SKIPPED gracefully (worker saturated by pre-existing 'Evaluando' jobs from prior restarts — NOT a refactor regression; enqueue contract still verified). Frontend: /documentation tabs all render (tab-docs, tab-sandbox, tab-examples), sandbox query executes, Power BI + Python code blocks present, all 7 lazy-loaded routes load without blank page. No new console errors introduced by refactor.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "AI Eval Worker (operational)", "issue": "Three 'Evaluando' jobs from 2026-04-22T03:27 are stuck (orphaned by backend restart); they consume all MAX_ROUTES_CONCURRENT=3 slots preventing new jobs from being processed. The refactor did not introduce this; however the worker lacks startup recovery logic to reset/requeue orphan Evaluando jobs on boot. Recommend: on start_ai_eval_worker, reset any status='Evaluando' jobs older than N minutes back to 'En_Cola' (idempotent resume)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ApiDocumentation.handleCopy", "issue": "navigator.clipboard.writeText() called without .catch(); in browser contexts lacking permission (e.g., Playwright default) an uncaught NotAllowedError triggers the React dev error overlay. Real users unaffected (user-gesture grants permission), but recommend wrapping in try/catch + toast fallback.", "selector": "[data-testid=copy-token-btn]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration45_refactor_regression.py",
+    "/app/test_reports/pytest/pytest_results_iter45.xml"
+  ],
+  "action_items": [
+    "(LOW) Wrap navigator.clipboard.writeText() in try/catch in ApiDocumentation.handleCopy to avoid uncaught promise rejection in restricted contexts.",
+    "(MEDIUM, operational, not refactor-related) Add orphan-job recovery in ai_eval_worker.start_ai_eval_worker: on startup, UPDATE ai_evaluation_jobs SET status='En_Cola' WHERE status='Evaluando' AND fecha_inicio < now-30min. Currently 3 such jobs are blocking all manual enqueues from ever being processed.",
+    "(Pre-existing, not refactor) Multiple pages emit React 'duplicate key' warnings on navigation — should be tracked separately."
+  ],
+  "critical_code_review_comments": [
+    "ai_eval_worker.py refactor is clean: _process_job now 28L, each helper has a single responsibility (batch+retry / progress / finalize). Same public behavior preserved (same status strings 'En_Cola' -> 'Evaluando' -> 'Evaluada'/'Parcial'/'Error', same progress_percent 0..100, same guias_detail updates). No dead code introduced.",
+    "ApiDocumentation.jsx refactor is clean: 270L orchestrator + DocsTab(201L) + SandboxTab(146L) + ExamplesTab(92L). Props are explicit (no implicit context passing). Minor note: handleCopy, generateCurlCommand, generatePowerBiCode, generatePythonCode could be extracted to a helpers module to further reduce orchestrator complexity.",
+    "App.js Suspense wrapper placement is correct — single top-level <Suspense fallback={<PageLoader />}> wrapping <Routes> means any lazy route load shows the same loader. Good.",
+    "No server-side validation added for comentario_asesor max_length=500 on IncidentBase (flagged in iter-44; still unaddressed — orthogonal to current refactor)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration45_refactor_regression.py (new)"
+  ],
+  "success_rate": {"backend": "86% (6/7 pass, 1 skip due to pre-existing queue saturation — 0 failures)", "frontend": "100% (documentation tabs, lazy routes, sandbox query, examples code blocks all work)"},
+  "test_credentials": "yael@me.mx / LastMile2026 (Coordinator)",
+  "seed_data_creation": "1 TEST_-prefixed incident on journey 86a2ba7f-eecd-4533-a542-57436571ea5d (auto-cleaned via DELETE in same test). 2 new AI eval jobs enqueued on same journey — these remain in En_Cola status and will process when worker queue drains (harmless). No production data modified.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Refactor is safe — no regressions found. Backend test file: /app/backend/tests/test_iteration45_refactor_regression.py covers 1) report schema endpoint (DocsTab dep), 2) auth/api-token (visibleToken), 3) /api/reports/journeys (SandboxTab dep), 4) manual-job no-eligible graceful path, 5) manual-job force_reevaluate status transitions contract (skips if queue saturated), 6+7) incident catalog 'otro' validation regression. IMPORTANT payload key for /api/incidents is 'incident_type' (NOT 'type') and 'occurred_at' is required. The stuck Evaluando jobs in the db (3 of them from 2026-04-22T03:27) need main-agent-level cleanup or a startup recovery patch to unblock the worker — until then, manual AI-eval jobs will remain in En_Cola indefinitely.",
+  "rca of the issue": "NOT a refactor bug. Root cause of test_manual_job_force_reevaluate_and_status_transitions skip: MAX_ROUTES_CONCURRENT=3 and db has 3 orphaned 'Evaluando' jobs from a prior backend restart (fecha_inicio exists but process was killed before finalize). The worker_loop correctly refuses to take new jobs when running count >= limit, so new En_Cola jobs never get picked up. Mitigation: add on-boot SQL equivalent: db.ai_evaluation_jobs.update_many({'status':'Evaluando','fecha_inicio': {'$lt': now_minus_30min}}, {'$set':{'status':'En_Cola'}}) inside start_ai_eval_worker(). Refactor itself preserves all public contracts: enqueue still creates guias_detail with status='En_Cola', tokens=0, retries=0; status transitions still go En_Cola -> Evaluando -> terminal; fecha_termino/duracion_segundos still set by _finalize_job."
+}
