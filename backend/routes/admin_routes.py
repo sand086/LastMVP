@@ -251,6 +251,16 @@ async def cleanup_routes_packages(
 
     # Legacy path: no filter → delete all
     if not data.date_from and not data.date_to:
+        # Cancelar todos los jobs activos primero
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cancel_all = await db.ai_evaluation_jobs.update_many(
+            {"status": {"$in": ["En_Cola", "Evaluando"]}},
+            {"$set": {
+                "status": "Error",
+                "fecha_termino": now_iso,
+                "error_detail": "Cancelado por limpieza total de rutas/pedidos.",
+            }},
+        )
         j_del = await db.journeys.delete_many({})
         p_del = await db.packages.delete_many({})
         i_del = await db.incidents.delete_many({})
@@ -265,6 +275,7 @@ async def cleanup_routes_packages(
                 "ai_evaluation_jobs": aij_del.deleted_count,
                 "route_edits": redit_del.deleted_count,
             },
+            "cancelled_active_jobs": cancel_all.modified_count or 0,
         }
 
     if not journey_ids:
@@ -272,6 +283,18 @@ async def cleanup_routes_packages(
             "message": "No hay rutas en el rango seleccionado",
             "deleted": {"journeys": 0, "packages": 0, "incidents": 0, "ai_evaluation_jobs": 0, "route_edits": 0},
         }
+
+    # Cancelar jobs activos de esas rutas ANTES de eliminar, para detener el worker
+    # en el próximo batch y evitar gasto IA adicional.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cancel_result = await db.ai_evaluation_jobs.update_many(
+        {"route_id": {"$in": journey_ids}, "status": {"$in": ["En_Cola", "Evaluando"]}},
+        {"$set": {
+            "status": "Error",
+            "fecha_termino": now_iso,
+            "error_detail": "Cancelado por limpieza de rutas/pedidos.",
+        }},
+    )
 
     j_del = await db.journeys.delete_many(jquery)
     p_del = await db.packages.delete_many({"journey_id": {"$in": journey_ids}})
@@ -289,4 +312,5 @@ async def cleanup_routes_packages(
             "ai_evaluation_jobs": aij_del.deleted_count,
             "route_edits": redit_del.deleted_count,
         },
+        "cancelled_active_jobs": cancel_result.modified_count or 0,
     }

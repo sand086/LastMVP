@@ -94,7 +94,8 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str) -> dict:
     try:
         pkg = await db.packages.find_one({"id": pkg_id}, {"_id": 0})
         if not pkg:
-            return {"status": "Error", "tokens": 0, "error": "Paquete no encontrado"}
+            # Guía eliminada: NO reintentar (el retry no la va a resucitar)
+            return {"status": "Error", "tokens": 0, "error": "Paquete eliminado", "_skip_retry": True}
         if pkg.get("status") not in ("delivered", "failed"):
             return {"status": "Error", "tokens": 0, "error": f"Status no final: {pkg.get('status')}"}
 
@@ -169,7 +170,8 @@ async def _evaluate_batch_with_retry(db, batch: list, job_id: str) -> list:
             result = {"status": "Error", "tokens": 0, "error": str(result)[:200]}
 
         # Reintentar en caso de error (con backoff exponencial, max 16s)
-        if result["status"] == "Error" and g.get("retries", 0) < MAX_RETRIES:
+        # Skip retry para errores terminales (paquete eliminado)
+        if result["status"] == "Error" and not result.get("_skip_retry") and g.get("retries", 0) < MAX_RETRIES:
             retry_num = g.get("retries", 0) + 1
             wait = min(RETRY_BACKOFF_BASE * (4 ** (retry_num - 1)), 16)
             await asyncio.sleep(wait)
@@ -255,6 +257,39 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
     total_tokens = 0
 
     for batch_start in range(0, total, BATCH_SIZE_PER_ROUTE):
+        # Guard 1: ¿sigue existiendo la ruta? Si fue eliminada (limpieza), abortar
+        # para no seguir gastando créditos IA.
+        route_exists = await db.journeys.find_one({"id": job["route_id"]}, {"_id": 0, "id": 1})
+        if not route_exists:
+            logger.warning(f"Job {job_id} aborted: route {job['route_id'][:12]} no longer exists (deleted during cleanup)")
+            # Marcar las guías restantes como Error con motivo claro
+            remaining = guias[batch_start:]
+            for g in remaining:
+                await db.ai_evaluation_jobs.update_one(
+                    {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
+                    {"$set": {
+                        "guias_detail.$.status": "Error",
+                        "guias_detail.$.error": "Ruta eliminada durante evaluación",
+                    }},
+                )
+                errors += 1
+            # Finalizar con error_detail explícito
+            end_time = datetime.now(timezone.utc)
+            await db.ai_evaluation_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "status": "Parcial" if evaluated > 0 else "Error",
+                    "fecha_termino": end_time.isoformat(),
+                    "duracion_segundos": round((end_time - start).total_seconds()),
+                    "progress_percent": 100,
+                    "guias_evaluadas": evaluated,
+                    "guias_con_error": errors,
+                    "tokens_consumidos": total_tokens,
+                    "error_detail": "Evaluación interrumpida: la ruta fue eliminada durante la limpieza de datos.",
+                }},
+            )
+            return "Aborted"
+
         batch = guias[batch_start:batch_start + BATCH_SIZE_PER_ROUTE]
         results = await _evaluate_batch_with_retry(db, batch, job_id)
 
