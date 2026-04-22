@@ -55,10 +55,18 @@ const ApiDocumentation = () => {
     }, []);
 
     const handleCopy = (text, id) => {
-        navigator.clipboard.writeText(text);
-        setCopied(id);
-        toast.success('Copiado al portapapeles');
-        setTimeout(() => setCopied(null), 2000);
+        try {
+            const result = navigator.clipboard?.writeText(text);
+            if (result && typeof result.then === 'function') {
+                result.catch((err) => console.warn('Clipboard write failed:', err));
+            }
+            setCopied(id);
+            toast.success('Copiado al portapapeles');
+            setTimeout(() => setCopied(null), 2000);
+        } catch (err) {
+            console.warn('Clipboard API not available:', err);
+            toast.error('No se pudo copiar al portapapeles');
+        }
     };
 
     const handleRunSandbox = async () => {

@@ -6,7 +6,7 @@ import os
 import asyncio
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
@@ -308,8 +308,26 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
             logger.error(f"AI eval cron error: {e}")
 
 
+async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
+    """Recupera jobs 'Evaluando' huerfanos cuyo backend fue reiniciado.
+    Si un job lleva >30 min en 'Evaluando' lo regresamos a 'En_Cola' para que el
+    worker lo retome desde el inicio. Idempotente."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    result = await db.ai_evaluation_jobs.update_many(
+        {"status": "Evaluando", "$or": [
+            {"fecha_inicio": {"$lt": cutoff}},
+            {"fecha_inicio": None},
+        ]},
+        {"$set": {"status": "En_Cola"}},
+    )
+    if result.modified_count > 0:
+        logger.warning(f"AI Eval worker: recovered {result.modified_count} orphan Evaluando jobs → En_Cola")
+
+
 def start_ai_eval_worker(db: AsyncIOMotorDatabase):
     global _worker_task, _cron_task
+    # Recuperacion de jobs huerfanos (backend restart con jobs a medio evaluar)
+    asyncio.create_task(_recover_orphan_jobs(db))
     _worker_task = asyncio.create_task(_worker_loop(db))
     _cron_task = asyncio.create_task(_cron_sweep(db))
     logger.info(f"AI Eval worker started (max {MAX_ROUTES_CONCURRENT} concurrent, batch {BATCH_SIZE_PER_ROUTE}, cron every {CRON_INTERVAL_MINUTES}min)")
