@@ -8,7 +8,17 @@ export function useGuiasMetrics(packages, reviewOverrides, segment) {
     const mergedPackages = useMemo(() => {
         return (packages || []).map((p) => {
             const override = reviewOverrides[p.id];
-            return override ? { ...p, ...override } : p;
+            const base = override ? { ...p, ...override } : p;
+            // Normaliza alias ai_* ← ia_*/evidence_* (backend persiste los segundos)
+            // Soluciona inconsistencia ES/EN acumulada.
+            return {
+                ...base,
+                ai_score: base.ai_score ?? base.evidence_score ?? null,
+                ai_errors: base.ai_errors ?? base.ia_errors ?? [],
+                ai_confidence: base.ai_confidence ?? base.ia_confidence ?? null,
+                ai_feedback: base.ai_feedback ?? base.ia_feedback ?? '',
+                ai_severity: base.ai_severity ?? base.ia_severity ?? {},
+            };
         });
     }, [packages, reviewOverrides]);
 
