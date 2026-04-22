@@ -15,3 +15,4 @@ from .kosmo_routes import router as kosmo_router
 from .driver_routes import router as driver_router
 from .manual_routes import router as manual_router
 from .ai_eval_routes import router as ai_eval_router
+from .architecture_routes import router as architecture_router

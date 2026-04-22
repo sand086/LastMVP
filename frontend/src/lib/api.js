@@ -287,3 +287,11 @@ export const createAiEvalJobManual = (data) => api.post('/ai-evaluation/jobs/man
 export const createAiEvalJobGuia = (data) => api.post('/ai-evaluation/jobs/manual/guia', data);
 export const cancelAiEvalJob = (jobId) => api.delete(`/ai-evaluation/jobs/${jobId}`);
 
+
+// ── Architecture (live auto-generated documentation) ──────────────
+export const getArchitectureSnapshot = () => api.get('/architecture/snapshot');
+export const regenerateArchitecture = () => api.post('/architecture/regenerate');
+export const getArchitectureHistory = (limit = 20) => api.get(`/architecture/history?limit=${limit}`);
+export const getArchitectureSnapshotById = (id) => api.get(`/architecture/snapshot/${id}`);
+export const getArchitectureDiff = (fromId, toId) => api.get(`/architecture/diff?from_id=${fromId}&to_id=${toId}`);
+export const getArchitectureChangelog = (limit = 50) => api.get(`/architecture/changelog?limit=${limit}`);

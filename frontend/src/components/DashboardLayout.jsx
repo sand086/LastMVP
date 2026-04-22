@@ -5,7 +5,7 @@ import api from '../lib/api';
 import { 
     LayoutDashboard, Truck, Upload, Settings, LogOut, Bell, User,
     ChevronDown, Code, FileText, Activity, ScrollText, Bug,
-    ShieldCheck, ClipboardCheck, Cpu, BookOpen, Radar,
+    ShieldCheck, ClipboardCheck, Cpu, BookOpen, Radar, Layers,
     PanelLeftClose, PanelLeftOpen, Menu, X,
 } from 'lucide-react';
 import {
@@ -24,6 +24,7 @@ const navItems = [
     { path: '/quality-criteria', label: 'Criterios Calidad', icon: ClipboardCheck, roles: ['coordinator', 'developer'] },
     { path: '/admin', label: 'Admin IA', icon: Cpu, roles: ['developer', 'executive', 'ejecutivo', 'coordinator'] },
     { path: '/monitor', label: 'Monitor IA', icon: Radar, roles: ['coordinator', 'developer'] },
+    { path: '/arquitectura', label: 'Arquitectura', icon: Layers, roles: ['developer', 'executive'] },
     { path: '/manuales', label: 'Manuales', icon: BookOpen, roles: ['agent', 'coordinator', 'executive', 'developer', 'proveedor'] },
 ];
 

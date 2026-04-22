@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 48 testing for 'Arquitectura Viva' feature (auto-documentation of codebase). Backend: 15/15 pytest pass covering GET /api/architecture/snapshot (auto-generates on first call, accessible by all authenticated roles), POST /api/architecture/regenerate RBAC (developer=200, coordinator=403, agent=403), regenerate-twice-same-hash=unchanged, GET /history & /changelog paginated envelope (data,total,page,pages), GET /snapshot/{id} with 404, GET /diff?from&to with 404 and valid-ids flow, stats contract thresholds (collections=33≥30, endpoints=169≥150, frontend_routes=20≥15, pages=18>0, components>0, modules≥10, integrations=4≥3), antipatterns always-present-list with {severity,type,description,collection|path}. Frontend: /arquitectura as dev@me.mx renders architecture-page, snapshot-meta ('22 abr 2026 06:19 · 6970b4941577f53a'), 6 stat cards visually (COLECCIONES 33, ENDPOINTS 169, RUTAS FE 20, PÁGINAS 18, INTEGRACIONES 4, ANTIPATRONES 7), all 5 tabs (tab-arch-overview/data/flows/modules/changelog) switchable. Mermaid diagrams system-diagram, data-diagram, flow-diagram all render SVG. regenerate-snapshot-btn visible for dev; click → toast 'Sin cambios estructurales detectados'. collections-table (Datos), modules-table (Módulos), antipatterns-list (Datos, not Módulos), changelog-list (Changelog) all present. Access control verified: yael@me.mx (coordinator) and agente@me.mx (agent) do NOT see 'Arquitectura' sidebar item; navigating to /arquitectura redirects to / with toast 'Sin permisos — No tienes acceso a esta sección'. Regression: /monitor and /documentation still render without error-boundary as dev. Zero critical issues detected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration48_architecture.py",
+    "/app/test_reports/pytest/pytest_results_iter48.xml"
+  ],
+  "action_items": [
+    "(LOW / testability enhancement) StatCard components in /app/frontend/src/pages/Architecture.jsx (lines 199-221) render 6 KPI cards without individual data-testid attributes (expected: stat-collections, stat-endpoints, stat-frontend-routes, stat-pages, stat-integrations, stat-antipatterns). The cards render correctly and values match backend stats (33/169/20/18/4/7), but adding data-testid to each StatCard would improve test reliability. Non-blocking."
+  ],
+  "critical_code_review_comments": [
+    "architecture_routes.py is clean and well-structured. RBAC correctly applied via require_role(['developer','executive']) on POST /regenerate, while GETs use plain get_current_user.",
+    "Short-circuit on unchanged content_hash avoids unnecessary DB writes and changelog pollution — good optimization.",
+    "Housekeeping keeps last 20 snapshots (count_documents then delete_many) — uses _id which is pymongo ObjectId, correct.",
+    "Both /history and /changelog use pagination_utils.paginated_response() consistently with the rest of the app (iteration 47 refactor).",
+    "Snapshot content_hash persists across requests, and second regenerate within same code state correctly returns status=unchanged (verified via test_regenerate_twice_unchanged).",
+    "Antipatterns auto-detected (7 multi-layer writes) are legitimate per agent context — each entry has required {severity,type,description,collection} fields.",
+    "ProtectedRoute allowedRoles=['developer','executive'] properly redirects coordinator/agent to / with 'Sin permisos' toast — verified live.",
+    "Sidebar visibility correctly gated by role — coordinator/agent do not see 'Arquitectura' entry."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration48_architecture.py (NEW — 15 tests covering snapshot structure + RBAC + envelope + diff + changelog)"
+  ],
+  "success_rate": {"backend": "100% (15/15 pass, 0 failures, 0 skips)", "frontend": "100% (page renders, all 5 tabs work, 3 Mermaid SVGs, regenerate toast, RBAC redirect for coord+agent, /monitor + /documentation regression clean)"},
+  "test_credentials": "dev@me.mx / LastMile2026 (developer), yael@me.mx / LastMile2026 (coordinator), agente@me.mx / LastMile2026 (agent) — all verified working",
+  "seed_data_creation": "None — relies on auto-generated architecture snapshot on first call. Tests regenerate up to 2x which may create 1 new snapshot if codebase changed (housekeeping keeps last 20).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration48_architecture.py provides _login() helper for all 4 roles and _h(tok) bearer auth shortcut. Note: snapshot fields (collections/endpoints/modules/integrations/frontend_routes) are DICTS keyed by name, not lists — assertions use isinstance(x, (list, dict)). The antipatterns-list testid lives on the Datos tab (line 167 of Architecture.jsx), NOT on the Módulos tab. Stats contract thresholds used: collections≥30, endpoints≥150, frontend_routes≥15, modules≥10, integrations≥3. Preview URL: https://lastmile-mvp.preview.emergentagent.com",
+  "rca of the issue": "N/A — no issues found. Feature ships clean."
+}

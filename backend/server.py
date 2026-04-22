@@ -35,6 +35,7 @@ from routes import (
     driver_router,
     manual_router,
     ai_eval_router,
+    architecture_router,
 )
 
 # Configure logging
@@ -108,6 +109,7 @@ api_router.include_router(kosmo_router)
 api_router.include_router(driver_router)
 api_router.include_router(manual_router)
 api_router.include_router(ai_eval_router)
+api_router.include_router(architecture_router)
 
 app.include_router(api_router)
 
