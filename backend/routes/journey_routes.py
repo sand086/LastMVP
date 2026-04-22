@@ -922,18 +922,33 @@ async def evaluate_package_evidence(
 
 @router.post("/journeys/{journey_id}/evaluate-evidence-all")
 async def evaluate_all_evidence(journey_id: str, user: dict = Depends(get_current_user)):
+    from ai_eval_worker import enqueue_job
+
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
 
-    async def _background_ai_evaluation():
-        try:
-            await evaluate_packages_for_journey(db, journey_id, use_ai=True)
-            logger.info(f"AI evidence evaluation completed for journey {journey_id}")
-        except Exception as e:
-            logger.error(f"AI evidence evaluation failed for journey {journey_id}: {e}")
+    # Enqueue job en el worker centralizado para que aparezca en Monitor IA
+    # y respete MAX_ROUTES_CONCURRENT, reintentos, orphan recovery, etc.
+    result = await enqueue_job(
+        db,
+        route_id=journey_id,
+        triggered_by="user_manual",
+        triggered_by_user=user.get("id"),
+        priority="NORMAL",
+        force_reevaluate=False,
+    )
 
-    asyncio.create_task(_background_ai_evaluation())
+    # Si no hay guias elegibles, caer al evaluador sincrono legacy como fallback
+    # para que el usuario vea actualizacion inmediata en guias ya evaluadas.
+    if not result or not result.get("job_id"):
+        async def _background_ai_evaluation():
+            try:
+                await evaluate_packages_for_journey(db, journey_id, use_ai=True)
+                logger.info(f"AI evidence evaluation completed for journey {journey_id}")
+            except Exception as e:
+                logger.error(f"AI evidence evaluation failed for journey {journey_id}: {e}")
+        asyncio.create_task(_background_ai_evaluation())
 
     packages = await db.packages.find(
         {"journey_id": journey_id, "evidence_score": {"$ne": None}},
@@ -943,7 +958,13 @@ async def evaluate_all_evidence(journey_id: str, user: dict = Depends(get_curren
     ai_count = sum(1 for p in packages if p.get("evidence_method") == "ai")
     return {
         "status": "started",
-        "message": "Evaluación IA iniciada en segundo plano. Recargue la página en unos momentos.",
+        "message": (
+            f"Evaluacion IA encolada ({result.get('total', 0)} guias) - visible en Monitor IA"
+            if result and result.get("job_id")
+            else "Evaluacion IA iniciada en segundo plano"
+        ),
+        "job_id": result.get("job_id") if result else None,
+        "total_enqueued": result.get("total", 0) if result else 0,
         "current_stats": {
             "evaluated": len(scores),
             "ai_evaluated": ai_count,

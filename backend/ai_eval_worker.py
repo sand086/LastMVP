@@ -16,7 +16,7 @@ MAX_ROUTES_CONCURRENT = int(os.environ.get("AI_EVAL_MAX_ROUTES_CONCURRENT", "3")
 BATCH_SIZE_PER_ROUTE = int(os.environ.get("AI_EVAL_BATCH_SIZE_PER_ROUTE", "5"))
 MAX_RETRIES = int(os.environ.get("AI_EVAL_MAX_RETRIES", "3"))
 RETRY_BACKOFF_BASE = int(os.environ.get("AI_EVAL_RETRY_BACKOFF_BASE", "1"))
-TIMEOUT_PER_GUIA = int(os.environ.get("AI_EVAL_TIMEOUT_PER_GUIA", "30"))
+TIMEOUT_PER_GUIA = int(os.environ.get("AI_EVAL_TIMEOUT_PER_GUIA", "90"))
 CRON_INTERVAL_MINUTES = int(os.environ.get("AI_EVAL_CRON_INTERVAL_MINUTES", "30"))
 WORKER_POLL_SECONDS = 10
 
@@ -98,23 +98,40 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str) -> dict:
         if pkg.get("status") not in ("delivered", "failed"):
             return {"status": "Error", "tokens": 0, "error": f"Status no final: {pkg.get('status')}"}
 
+        # Detectar si el paquete tiene incidencia asociada (mismo tracking_number)
+        has_incident = False
+        tracking = (pkg.get("tracking_number") or "").strip()
+        if tracking:
+            incident = await db.incidents.find_one(
+                {"tracking_number": tracking},
+                {"_id": 0, "id": 1},
+            )
+            has_incident = incident is not None
+
         result = await asyncio.wait_for(
-            evaluate_single_package_ai(db, pkg),
+            evaluate_single_package_ai(pkg, has_incident),
             timeout=TIMEOUT_PER_GUIA,
         )
 
+        if result and "error" in result and not result.get("evidence_score"):
+            return {"status": "Error", "tokens": 0, "error": result.get("error", "Evaluacion fallo")[:200]}
+
+        # Persistir el resultado completo (evidence_score, ai_errors, confidence, etc.)
         tokens = result.get("tokens_used", 0) if result else 0
         eval_count = (pkg.get("ai_evaluation", {}).get("evaluation_count", 0) or 0) + 1
 
-        await db.packages.update_one(
-            {"id": pkg_id},
-            {"$set": {
-                "ai_evaluation.status": "Evaluada",
-                "ai_evaluation.last_evaluated_at": datetime.now(timezone.utc).isoformat(),
-                "ai_evaluation.evaluation_count": eval_count,
-                "ai_evaluation.last_job_id": job_id,
-            }},
-        )
+        update_fields = {
+            "ai_evaluation.status": "Evaluada",
+            "ai_evaluation.last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "ai_evaluation.evaluation_count": eval_count,
+            "ai_evaluation.last_job_id": job_id,
+        }
+        # Merge evaluation result fields (evidence_score, ai_errors, ai_observations, etc.)
+        for k, v in (result or {}).items():
+            if k not in ("tokens_used", "error"):
+                update_fields[k] = v
+
+        await db.packages.update_one({"id": pkg_id}, {"$set": update_fields})
         return {"status": "Evaluada", "tokens": tokens, "error": None}
 
     except asyncio.TimeoutError:

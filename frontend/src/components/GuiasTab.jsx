@@ -232,8 +232,14 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
         setEvaluatingAll(true);
         setAiEvalProgress({ status: 'starting', total: 0, evaluated: 0, errors: 0 });
         try {
-            await evaluateAllEvidence(journey.id);
-            toast.success('Evaluación IA iniciada en segundo plano');
+            const res = await evaluateAllEvidence(journey.id);
+            const total = res?.data?.total_enqueued ?? 0;
+            const jobId = res?.data?.job_id;
+            if (jobId) {
+                toast.success(`Evaluacion IA encolada (${total} guias) — seguimiento en Monitor IA`);
+            } else {
+                toast.success('Evaluacion IA iniciada en segundo plano');
+            }
             startPolling();
         } catch (err) {
             toast.error(err.response?.data?.detail || 'Error al evaluar con IA');
