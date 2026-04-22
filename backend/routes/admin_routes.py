@@ -2,8 +2,10 @@
 Admin routes: seed data, cleanup, upload history.
 """
 import uuid
+from typing import Optional
 from fastapi import APIRouter, Depends
 from datetime import datetime, timezone, timedelta
+from pydantic import BaseModel
 
 from dependencies import db, get_current_user, require_role, hash_password
 
@@ -168,12 +170,123 @@ async def seed_database():
 
 # ==================== CLEANUP ====================
 
-@router.post("/cleanup/routes-packages")
-async def cleanup_routes_packages(user: dict = Depends(require_role(["coordinator", "developer"]))):
-    j_del = await db.journeys.delete_many({})
-    p_del = await db.packages.delete_many({})
-    i_del = await db.incidents.delete_many({})
+class CleanupRequest(BaseModel):
+    date_from: Optional[str] = None  # YYYY-MM-DD (inclusive)
+    date_to: Optional[str] = None    # YYYY-MM-DD (inclusive)
+    dry_run: bool = False
+
+
+def _build_journey_date_query(date_from: Optional[str], date_to: Optional[str]) -> dict:
+    """Build a MongoDB query on the journey.date string field using YYYY-MM-DD bounds.
+    journey.date may be in formats like '2026-03-24 16:47:36.697000' or '2026-03-24'.
+    Comparing lexicographically on prefix works since the format is sortable."""
+    if not date_from and not date_to:
+        return {}
+    cond = {}
+    if date_from:
+        cond["$gte"] = date_from
+    if date_to:
+        # Include whole day: add sentinel that's > any timestamp of that day
+        cond["$lt"] = date_to + "\uffff"
+    return {"date": cond}
+
+
+@router.get("/cleanup/routes-packages/preview")
+async def cleanup_preview(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Conteo de qué se eliminaría con los filtros dados. No borra nada."""
+    jquery = _build_journey_date_query(date_from, date_to)
+    journey_count = await db.journeys.count_documents(jquery)
+    if journey_count == 0:
+        return {
+            "journeys": 0, "packages": 0, "incidents": 0,
+            "ai_evaluation_jobs": 0, "route_edits": 0, "training_samples": 0,
+            "date_from": date_from, "date_to": date_to,
+        }
+    journey_ids = [j["id"] async for j in db.journeys.find(jquery, {"_id": 0, "id": 1})]
+    pkg_count = await db.packages.count_documents({"journey_id": {"$in": journey_ids}})
+    inc_count = await db.incidents.count_documents({"journey_id": {"$in": journey_ids}})
+    aij_count = await db.ai_evaluation_jobs.count_documents({"route_id": {"$in": journey_ids}})
+    redit_count = await db.route_edits.count_documents({"journey_id": {"$in": journey_ids}})
+    tsamp_count = await db.training_samples.count_documents({"journey_id": {"$in": journey_ids}})
     return {
-        "message": "Datos limpiados",
-        "deleted": {"journeys": j_del.deleted_count, "packages": p_del.deleted_count, "incidents": i_del.deleted_count},
+        "journeys": journey_count,
+        "packages": pkg_count,
+        "incidents": inc_count,
+        "ai_evaluation_jobs": aij_count,
+        "route_edits": redit_count,
+        "training_samples": tsamp_count,
+        "date_from": date_from,
+        "date_to": date_to,
+    }
+
+
+@router.post("/cleanup/routes-packages")
+async def cleanup_routes_packages(
+    data: CleanupRequest = CleanupRequest(),
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Elimina rutas, paquetes, incidencias y jobs IA relacionados.
+    Sin date_from/date_to borra TODO (comportamiento legacy). Con rango borra solo
+    journeys cuya fecha de operación caiga en [date_from, date_to]."""
+    jquery = _build_journey_date_query(data.date_from, data.date_to)
+
+    # Fetch target journey IDs
+    journey_ids = [j["id"] async for j in db.journeys.find(jquery, {"_id": 0, "id": 1})]
+
+    if data.dry_run:
+        pkg_count = await db.packages.count_documents({"journey_id": {"$in": journey_ids}}) if journey_ids else 0
+        inc_count = await db.incidents.count_documents({"journey_id": {"$in": journey_ids}}) if journey_ids else 0
+        return {
+            "message": "Dry run — sin cambios",
+            "would_delete": {
+                "journeys": len(journey_ids),
+                "packages": pkg_count,
+                "incidents": inc_count,
+            },
+        }
+
+    # Legacy path: no filter → delete all
+    if not data.date_from and not data.date_to:
+        j_del = await db.journeys.delete_many({})
+        p_del = await db.packages.delete_many({})
+        i_del = await db.incidents.delete_many({})
+        aij_del = await db.ai_evaluation_jobs.delete_many({})
+        redit_del = await db.route_edits.delete_many({})
+        return {
+            "message": "Datos limpiados (todo)",
+            "deleted": {
+                "journeys": j_del.deleted_count,
+                "packages": p_del.deleted_count,
+                "incidents": i_del.deleted_count,
+                "ai_evaluation_jobs": aij_del.deleted_count,
+                "route_edits": redit_del.deleted_count,
+            },
+        }
+
+    if not journey_ids:
+        return {
+            "message": "No hay rutas en el rango seleccionado",
+            "deleted": {"journeys": 0, "packages": 0, "incidents": 0, "ai_evaluation_jobs": 0, "route_edits": 0},
+        }
+
+    j_del = await db.journeys.delete_many(jquery)
+    p_del = await db.packages.delete_many({"journey_id": {"$in": journey_ids}})
+    i_del = await db.incidents.delete_many({"journey_id": {"$in": journey_ids}})
+    aij_del = await db.ai_evaluation_jobs.delete_many({"route_id": {"$in": journey_ids}})
+    redit_del = await db.route_edits.delete_many({"journey_id": {"$in": journey_ids}})
+    return {
+        "message": f"Datos limpiados del rango {data.date_from or '…'} → {data.date_to or '…'}",
+        "date_from": data.date_from,
+        "date_to": data.date_to,
+        "deleted": {
+            "journeys": j_del.deleted_count,
+            "packages": p_del.deleted_count,
+            "incidents": i_del.deleted_count,
+            "ai_evaluation_jobs": aij_del.deleted_count,
+            "route_edits": redit_del.deleted_count,
+        },
     }

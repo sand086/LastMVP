@@ -192,7 +192,8 @@ export const updateProvider = (id, data) => api.put(`/providers/${id}`, data);
 export const deleteProvider = (id) => api.delete(`/providers/${id}`);
 
 // Cleanup
-export const cleanupRoutesPackages = () => api.post('/cleanup/routes-packages');
+export const cleanupRoutesPackages = (params) => api.post('/cleanup/routes-packages', params || {});
+export const cleanupRoutesPackagesPreview = (params) => api.get('/cleanup/routes-packages/preview', { params });
 
 // Analytics / Heatmap
 export const getHeatmapData = (params) => api.get('/analytics/heatmap', { params });

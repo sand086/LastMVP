@@ -6,7 +6,7 @@ import {
     changePasswordByAdmin, getPasswordResetRequests, dismissPasswordResetRequest,
     getClients, createClient, updateClient, deleteClient,
     getProviders, createProvider, updateProvider, deleteProvider,
-    seedDatabase, cleanupRoutesPackages
+    seedDatabase, cleanupRoutesPackages, cleanupRoutesPackagesPreview
 } from '../lib/api';
 import api from '../lib/api';
 import { formatDateTime } from '../lib/utils';
@@ -26,9 +26,13 @@ import {
 } from '../components/ui/alert-dialog';
 import { 
     Users, Building2, Truck, Shield, Database, Trash2, Key, Bell,
-    Loader2, X, Globe, Settings2,
+    Loader2, X, Globe, Settings2, Calendar as CalendarIcon, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { Calendar } from '../components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { WebhooksTab } from '../components/WebhooksTab';
 import { SettingsUsersTab } from '../components/settings/SettingsUsersTab';
 import { SettingsClientsTab } from '../components/settings/SettingsClientsTab';
@@ -85,8 +89,14 @@ const Settings = () => {
     const [searchClients, setSearchClients] = useState('');
     const [searchProviders, setSearchProviders] = useState('');
 
-    // Cleanup
+    // Cleanup — with date range filter
     const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+    const [cleanupFrom, setCleanupFrom] = useState(null);
+    const [cleanupTo, setCleanupTo] = useState(null);
+    const [cleanupScope, setCleanupScope] = useState('range'); // 'range' | 'all'
+    const [cleanupPreview, setCleanupPreview] = useState(null);
+    const [cleanupPreviewLoading, setCleanupPreviewLoading] = useState(false);
+    const [cleanupRunning, setCleanupRunning] = useState(false);
 
     // Sortable tables
     const filteredUsers = users.filter(u => !searchUsers || u.name?.toLowerCase().includes(searchUsers.toLowerCase()) || u.email?.toLowerCase().includes(searchUsers.toLowerCase()));
@@ -212,10 +222,61 @@ const Settings = () => {
     };
 
     const handleCleanupData = async () => {
-        setShowCleanupConfirm(false);
-        try { const res = await cleanupRoutesPackages(); const d = res.data.deleted; toast.success(`Limpieza completada: ${d.journeys} rutas, ${d.packages} paquetes, ${d.incidents} incidencias eliminadas`); }
-        catch { toast.error('Error al limpiar datos'); }
+        if (cleanupRunning) return;
+        const useRange = cleanupScope === 'range';
+        if (useRange && (!cleanupFrom || !cleanupTo)) {
+            toast.error('Selecciona ambas fechas del rango');
+            return;
+        }
+        setCleanupRunning(true);
+        try {
+            const payload = useRange
+                ? { date_from: format(cleanupFrom, 'yyyy-MM-dd'), date_to: format(cleanupTo, 'yyyy-MM-dd') }
+                : {};
+            const res = await cleanupRoutesPackages(payload);
+            const d = res.data.deleted;
+            toast.success(`Limpieza completada: ${d.journeys} rutas, ${d.packages} paquetes, ${d.incidents} incidencias, ${d.ai_evaluation_jobs || 0} jobs IA eliminados`);
+            setShowCleanupConfirm(false);
+            setCleanupPreview(null);
+            setCleanupFrom(null);
+            setCleanupTo(null);
+        } catch {
+            toast.error('Error al limpiar datos');
+        } finally {
+            setCleanupRunning(false);
+        }
     };
+
+    const handleCleanupPreview = async () => {
+        if (cleanupScope === 'range' && (!cleanupFrom || !cleanupTo)) {
+            toast.error('Selecciona ambas fechas del rango');
+            return;
+        }
+        setCleanupPreviewLoading(true);
+        try {
+            const params = cleanupScope === 'range'
+                ? { date_from: format(cleanupFrom, 'yyyy-MM-dd'), date_to: format(cleanupTo, 'yyyy-MM-dd') }
+                : {};
+            const res = await cleanupRoutesPackagesPreview(params);
+            setCleanupPreview(res.data);
+        } catch {
+            toast.error('Error al obtener conteo');
+            setCleanupPreview(null);
+        } finally {
+            setCleanupPreviewLoading(false);
+        }
+    };
+
+    // Auto-refresh preview when dates/scope change
+    useEffect(() => {
+        if (!showCleanupConfirm) { setCleanupPreview(null); return; }
+        if (cleanupScope === 'all' || (cleanupFrom && cleanupTo)) {
+            handleCleanupPreview();
+        } else {
+            setCleanupPreview(null);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showCleanupConfirm, cleanupScope, cleanupFrom, cleanupTo]);
 
     if (!isCoordinator()) {
         return (
@@ -407,13 +468,132 @@ const Settings = () => {
                 </AlertDialogContent>
             </AlertDialog>
 
-            {/* Cleanup Confirm */}
-            <AlertDialog open={showCleanupConfirm} onOpenChange={setShowCleanupConfirm}>
-                <AlertDialogContent>
-                    <AlertDialogHeader><AlertDialogTitle className="font-heading text-red-700">Eliminar todas las rutas y paquetes?</AlertDialogTitle><AlertDialogDescription>Esta accion eliminara permanentemente todas las rutas, paquetes e incidencias de la base de datos. Los usuarios, clientes y proveedores NO se veran afectados. Esta accion no se puede deshacer.</AlertDialogDescription></AlertDialogHeader>
-                    <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleCleanupData} className="bg-red-600 hover:bg-red-700" data-testid="confirm-cleanup-btn">Si, eliminar todo</AlertDialogAction></AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
+            {/* Cleanup Dialog with date range selector */}
+            <Dialog open={showCleanupConfirm} onOpenChange={setShowCleanupConfirm}>
+                <DialogContent className="max-w-lg" data-testid="cleanup-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-red-700 flex items-center gap-2">
+                            <Trash2 className="w-5 h-5" />
+                            Limpiar rutas y pedidos
+                        </DialogTitle>
+                        <DialogDescription>
+                            Eliminará rutas, paquetes, incidencias y jobs IA asociados. Los usuarios, clientes y proveedores NO se ven afectados. <strong>Esta acción no se puede deshacer.</strong>
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        {/* Scope selector */}
+                        <div className="space-y-2">
+                            <Label>Alcance</Label>
+                            <div className="flex gap-2">
+                                <Button
+                                    type="button"
+                                    variant={cleanupScope === 'range' ? 'default' : 'outline'}
+                                    size="sm"
+                                    onClick={() => setCleanupScope('range')}
+                                    data-testid="cleanup-scope-range"
+                                    className="flex-1"
+                                >
+                                    Por rango de fechas
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant={cleanupScope === 'all' ? 'default' : 'outline'}
+                                    size="sm"
+                                    onClick={() => setCleanupScope('all')}
+                                    data-testid="cleanup-scope-all"
+                                    className="flex-1"
+                                >
+                                    Todo (sin filtro)
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* Date range pickers (only when scope=range) */}
+                        {cleanupScope === 'range' && (
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <Label className="text-xs">Desde</Label>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button variant="outline" className="w-full justify-start text-left font-normal" data-testid="cleanup-date-from">
+                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                {cleanupFrom ? format(cleanupFrom, 'dd MMM yyyy', { locale: es }) : 'Seleccionar'}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar mode="single" selected={cleanupFrom} onSelect={setCleanupFrom} initialFocus disabled={(d) => cleanupTo && d > cleanupTo} />
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-xs">Hasta</Label>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button variant="outline" className="w-full justify-start text-left font-normal" data-testid="cleanup-date-to">
+                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                {cleanupTo ? format(cleanupTo, 'dd MMM yyyy', { locale: es }) : 'Seleccionar'}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar mode="single" selected={cleanupTo} onSelect={setCleanupTo} initialFocus disabled={(d) => cleanupFrom && d < cleanupFrom} />
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Preview counts */}
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="cleanup-preview">
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-xs font-medium text-slate-700 uppercase tracking-wider">Se eliminará</p>
+                                {cleanupPreviewLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
+                            </div>
+                            {cleanupPreview ? (
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                    <div className="flex justify-between"><span className="text-slate-600">Rutas</span><span className="font-mono font-semibold">{cleanupPreview.journeys}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-600">Paquetes</span><span className="font-mono font-semibold">{cleanupPreview.packages}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-600">Incidencias</span><span className="font-mono font-semibold">{cleanupPreview.incidents}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-600">Jobs IA</span><span className="font-mono font-semibold">{cleanupPreview.ai_evaluation_jobs}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-600">Ediciones de ruta</span><span className="font-mono font-semibold">{cleanupPreview.route_edits}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-600">Muestras entrenamiento</span><span className="font-mono font-semibold">{cleanupPreview.training_samples}</span></div>
+                                </div>
+                            ) : (
+                                <p className="text-xs text-slate-400 italic">
+                                    {cleanupScope === 'range' ? 'Selecciona ambas fechas para ver el conteo' : 'Cargando conteo…'}
+                                </p>
+                            )}
+                        </div>
+
+                        {cleanupPreview && cleanupPreview.journeys === 0 && (
+                            <div className="flex items-start gap-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">
+                                <AlertTriangle className="w-4 h-4 shrink-0" />
+                                <span>No hay datos en el rango seleccionado.</span>
+                            </div>
+                        )}
+
+                        {cleanupPreview && cleanupPreview.journeys > 0 && (
+                            <div className="flex items-start gap-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                                <AlertTriangle className="w-4 h-4 shrink-0" />
+                                <span>Acción irreversible. Se eliminará toda la data anterior listada.</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowCleanupConfirm(false)} data-testid="cleanup-cancel-btn">Cancelar</Button>
+                        <Button
+                            onClick={handleCleanupData}
+                            disabled={cleanupRunning || (cleanupScope === 'range' && (!cleanupFrom || !cleanupTo)) || (cleanupPreview && cleanupPreview.journeys === 0)}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            data-testid="confirm-cleanup-btn"
+                        >
+                            {cleanupRunning && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            {cleanupScope === 'range' ? 'Eliminar del rango' : 'Eliminar todo'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };
