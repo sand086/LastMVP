@@ -327,14 +327,14 @@ def _build_user_context(tracking: str, status: str, driver_note: str, image_coun
     return context
 
 
-async def _log_ai_token_usage(tracking: str, context: str, response_text: str, system_prompt: str) -> None:
+async def _log_ai_token_usage(tracking: str, context: str, response_text: str, system_prompt: str, model_alias: str) -> None:
     """Log AI token usage (non-blocking, swallows errors)."""
     try:
         from token_logger import log_token_usage
         await log_token_usage(
             db=_get_db(),
             entregable="evaluacion",
-            modelo="claude-sonnet-4-5",
+            modelo=f"claude-{model_alias}",
             referencia=tracking,
             input_text=context,
             output_text=response_text or "",
@@ -347,10 +347,16 @@ async def _log_ai_token_usage(tracking: str, context: str, response_text: str, s
 async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver_note: str) -> Optional[dict]:
     """Send images to AI Vision and return parsed result."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    from ai_eval_config import get_ai_eval_config, MODEL_MAP
 
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         raise ValueError("EMERGENT_LLM_KEY not configured")
+
+    db = _get_db()
+    cfg = await get_ai_eval_config(db)
+    model_alias = cfg["model"]
+    model_id = MODEL_MAP.get(model_alias, MODEL_MAP["haiku-4-5"])
 
     system_prompt = await _get_system_prompt()
     training_context = await _get_training_context()
@@ -360,14 +366,14 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
         session_id=f"evidence-eval-{uuid.uuid4().hex[:8]}",
         system_message=system_prompt,
     )
-    chat.with_model("anthropic", "claude-sonnet-4-5-20250929")
+    chat.with_model("anthropic", model_id)
 
     context = _build_user_context(tracking, status, driver_note, len(valid_images), training_context)
     file_contents = [ImageContent(image_base64=img) for img in valid_images]
     user_msg = UserMessage(text=context, file_contents=file_contents)
     response_text = await chat.send_message(user_msg)
 
-    await _log_ai_token_usage(tracking, context, response_text, system_prompt)
+    await _log_ai_token_usage(tracking, context, response_text, system_prompt, model_alias)
 
     return _parse_ai_response(response_text)
 

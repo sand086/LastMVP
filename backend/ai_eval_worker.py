@@ -9,16 +9,17 @@ import logging
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from ai_eval_config import get_ai_eval_config
+
 logger = logging.getLogger(__name__)
 
-# Config from env
-MAX_ROUTES_CONCURRENT = int(os.environ.get("AI_EVAL_MAX_ROUTES_CONCURRENT", "3"))
-BATCH_SIZE_PER_ROUTE = int(os.environ.get("AI_EVAL_BATCH_SIZE_PER_ROUTE", "5"))
-MAX_RETRIES = int(os.environ.get("AI_EVAL_MAX_RETRIES", "3"))
+# Static config (env-only, rarely changed)
 RETRY_BACKOFF_BASE = int(os.environ.get("AI_EVAL_RETRY_BACKOFF_BASE", "1"))
-TIMEOUT_PER_GUIA = int(os.environ.get("AI_EVAL_TIMEOUT_PER_GUIA", "90"))
 CRON_INTERVAL_MINUTES = int(os.environ.get("AI_EVAL_CRON_INTERVAL_MINUTES", "30"))
 WORKER_POLL_SECONDS = 10
+
+# Dynamic config (read from DB at start of each job):
+#   timeout_per_guia, max_routes_concurrent, batch_size_per_route, max_retries, model
 
 _worker_task = None
 _cron_task = None
@@ -88,7 +89,7 @@ async def enqueue_job(
     return {"job_id": job_id, "route_name": route_name, "total": len(packages), "priority": priority}
 
 
-async def _evaluate_single_guia(db, pkg_id: str, job_id: str) -> dict:
+async def _evaluate_single_guia(db, pkg_id: str, job_id: str, timeout_s: int) -> dict:
     """Evaluate a single package using the existing AI evaluation engine."""
     from evidence_scoring import evaluate_single_package_ai
     try:
@@ -111,7 +112,7 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str) -> dict:
 
         result = await asyncio.wait_for(
             evaluate_single_package_ai(pkg, has_incident),
-            timeout=TIMEOUT_PER_GUIA,
+            timeout=timeout_s,
         )
 
         if result and "error" in result and not result.get("evidence_score"):
@@ -136,7 +137,7 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str) -> dict:
         return {"status": "Evaluada", "tokens": tokens, "error": None}
 
     except asyncio.TimeoutError:
-        return {"status": "Error", "tokens": 0, "error": f"Timeout ({TIMEOUT_PER_GUIA}s)"}
+        return {"status": "Error", "tokens": 0, "error": f"Timeout ({timeout_s}s)"}
     except Exception as e:
         msg = str(e)
         # Detectar errores comunes y devolver mensajes claros
@@ -151,7 +152,7 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str) -> dict:
         return {"status": "Error", "tokens": 0, "error": friendly}
 
 
-async def _evaluate_batch_with_retry(db, batch: list, job_id: str) -> list:
+async def _evaluate_batch_with_retry(db, batch: list, job_id: str, timeout_s: int, max_retries: int) -> list:
     """Ejecuta un batch de guias en paralelo, con reintentos por guia fallida.
     Actualiza el progreso por guia en el job. Retorna lista de results paralelos al batch."""
     # Marcar batch como 'Evaluando'
@@ -161,7 +162,7 @@ async def _evaluate_batch_with_retry(db, batch: list, job_id: str) -> list:
             {"$set": {"guias_detail.$.status": "Evaluando"}},
         )
 
-    tasks = [_evaluate_single_guia(db, g["guia_id"], job_id) for g in batch]
+    tasks = [_evaluate_single_guia(db, g["guia_id"], job_id, timeout_s) for g in batch]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     normalized = []
@@ -171,11 +172,11 @@ async def _evaluate_batch_with_retry(db, batch: list, job_id: str) -> list:
 
         # Reintentar en caso de error (con backoff exponencial, max 16s)
         # Skip retry para errores terminales (paquete eliminado)
-        if result["status"] == "Error" and not result.get("_skip_retry") and g.get("retries", 0) < MAX_RETRIES:
+        if result["status"] == "Error" and not result.get("_skip_retry") and g.get("retries", 0) < max_retries:
             retry_num = g.get("retries", 0) + 1
             wait = min(RETRY_BACKOFF_BASE * (4 ** (retry_num - 1)), 16)
             await asyncio.sleep(wait)
-            retry_result = await _evaluate_single_guia(db, g["guia_id"], job_id)
+            retry_result = await _evaluate_single_guia(db, g["guia_id"], job_id, timeout_s)
             if retry_result["status"] != "Error":
                 result = retry_result
             await db.ai_evaluation_jobs.update_one(
@@ -245,9 +246,20 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
     job_id = job["job_id"]
     start = datetime.now(timezone.utc)
 
+    # Lee config dinámico (model/timeout/batch/retries) una vez por job.
+    cfg = await get_ai_eval_config(db)
+    batch_size = cfg["batch_size_per_route"]
+    timeout_s = cfg["timeout_per_guia"]
+    max_retries = cfg["max_retries"]
+
     await db.ai_evaluation_jobs.update_one(
         {"job_id": job_id},
-        {"$set": {"status": "Evaluando", "fecha_inicio": start.isoformat(), "last_progress_at": start.isoformat()}},
+        {"$set": {
+            "status": "Evaluando",
+            "fecha_inicio": start.isoformat(),
+            "last_progress_at": start.isoformat(),
+            "model_used": cfg["model"],
+        }},
     )
 
     guias = job.get("guias_detail", [])
@@ -256,7 +268,7 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
     errors = 0
     total_tokens = 0
 
-    for batch_start in range(0, total, BATCH_SIZE_PER_ROUTE):
+    for batch_start in range(0, total, batch_size):
         # Guard 1: ¿sigue existiendo la ruta? Si fue eliminada (limpieza), abortar
         # para no seguir gastando créditos IA.
         route_exists = await db.journeys.find_one({"id": job["route_id"]}, {"_id": 0, "id": 1})
@@ -290,8 +302,8 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
             )
             return "Aborted"
 
-        batch = guias[batch_start:batch_start + BATCH_SIZE_PER_ROUTE]
-        results = await _evaluate_batch_with_retry(db, batch, job_id)
+        batch = guias[batch_start:batch_start + batch_size]
+        results = await _evaluate_batch_with_retry(db, batch, job_id, timeout_s, max_retries)
 
         for result in results:
             if result["status"] == "Evaluada":
@@ -318,12 +330,16 @@ async def _worker_loop(db: AsyncIOMotorDatabase):
                 ticks_since_recovery = 0
                 await _recover_orphan_jobs(db)
 
+            # Lee concurrencia dinámica
+            cfg = await get_ai_eval_config(db)
+            max_concurrent = cfg["max_routes_concurrent"]
+
             # Count running jobs
             running = await db.ai_evaluation_jobs.count_documents({"status": "Evaluando"})
-            if running >= MAX_ROUTES_CONCURRENT:
+            if running >= max_concurrent:
                 continue
 
-            slots = MAX_ROUTES_CONCURRENT - running
+            slots = max_concurrent - running
 
             # Fetch next jobs: URGENT first, then FIFO by fecha_creacion
             jobs = await db.ai_evaluation_jobs.find(
@@ -430,7 +446,7 @@ def start_ai_eval_worker(db: AsyncIOMotorDatabase):
     asyncio.create_task(_recover_orphan_jobs(db))
     _worker_task = asyncio.create_task(_worker_loop(db))
     _cron_task = asyncio.create_task(_cron_sweep(db))
-    logger.info(f"AI Eval worker started (max {MAX_ROUTES_CONCURRENT} concurrent, batch {BATCH_SIZE_PER_ROUTE}, cron every {CRON_INTERVAL_MINUTES}min)")
+    logger.info(f"AI Eval worker started (config-driven; cron every {CRON_INTERVAL_MINUTES}min)")
 
 
 def stop_ai_eval_worker():

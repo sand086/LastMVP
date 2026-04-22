@@ -4,9 +4,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import TokenUsageTab from '../components/admin/TokenUsageTab';
 import RoutesReportTab from '../components/admin/RoutesReportTab';
 import CostConfigTab from '../components/admin/CostConfigTab';
+import ModelConfigTab from '../components/admin/ModelConfigTab';
 import api from '../lib/api';
 import { toast } from 'sonner';
-import { Cpu, FileSpreadsheet, Settings2, AlertTriangle } from 'lucide-react';
+import { Cpu, FileSpreadsheet, Settings2, AlertTriangle, Sparkles } from 'lucide-react';
 
 const T = {
     bg: '#F5F4F1', surface: '#FFFFFF', surface2: '#F0EFEC',
@@ -22,6 +23,7 @@ const TABS = [
     { key: 'tokens', label: 'Consumo de tokens', icon: Cpu },
     { key: 'routes', label: 'Reporte de rutas', sub: 'Cubbo ADM', icon: FileSpreadsheet },
     { key: 'config', label: 'Configuración de costos', icon: Settings2 },
+    { key: 'model', label: 'Motor IA', icon: Sparkles },
 ];
 
 export default function AdminPage() {
@@ -160,6 +162,7 @@ export default function AdminPage() {
                 {activeTab === 'tokens' && <TokenUsageTab summary={s} period={period} setPeriod={setPeriod} clientId={clientId} setClientId={setClientId} />}
                 {activeTab === 'routes' && <RoutesReportTab canEdit={canEdit} />}
                 {activeTab === 'config' && <CostConfigTab canEdit={canEdit} summary={s} onRefresh={fetchSummary} />}
+                {activeTab === 'model' && <ModelConfigTab canEdit={canEdit} />}
             </div>
     );
 }

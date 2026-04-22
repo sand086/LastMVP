@@ -11,6 +11,13 @@ import asyncio
 
 from dependencies import db, get_current_user, require_role
 from ai_eval_worker import enqueue_job
+from ai_eval_config import (
+    get_ai_eval_config,
+    set_ai_eval_config,
+    DEFAULTS as AI_EVAL_DEFAULTS,
+    VALID_BOUNDS as AI_EVAL_BOUNDS,
+    MODEL_MAP,
+)
 from pagination_utils import paginated_response
 
 logger = logging.getLogger(__name__)
@@ -288,3 +295,37 @@ async def stream_job(job_id: str, user: dict = Depends(get_current_user)):
             await asyncio.sleep(2)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+
+# ═══════════════ AI EVAL RUNTIME CONFIG ═══════════════
+
+class AiEvalConfigPatch(BaseModel):
+    model: Optional[str] = None               # 'haiku-4-5' | 'sonnet-4-5'
+    timeout_per_guia: Optional[int] = None    # 30–180
+    max_routes_concurrent: Optional[int] = None  # 1–5
+    batch_size_per_route: Optional[int] = None   # 1–10
+    max_retries: Optional[int] = None         # 0–5
+
+
+@router.get("/config")
+async def get_config(user: dict = Depends(require_role(["developer", "coordinator", "executive"]))):
+    cfg = await get_ai_eval_config(db, force_refresh=True)
+    return {
+        "config": cfg,
+        "defaults": AI_EVAL_DEFAULTS,
+        "bounds": {k: list(v) if isinstance(v, tuple) else v for k, v in AI_EVAL_BOUNDS.items()},
+        "model_map": MODEL_MAP,
+    }
+
+
+@router.put("/config")
+async def update_config(
+    patch: AiEvalConfigPatch,
+    user: dict = Depends(require_role(["developer", "coordinator"])),
+):
+    patch_dict = {k: v for k, v in patch.dict().items() if v is not None}
+    if not patch_dict:
+        raise HTTPException(status_code=400, detail="Debes enviar al menos un campo")
+    new_cfg = await set_ai_eval_config(db, patch_dict, user_email=user.get("email"))
+    return {"message": "Configuración actualizada", "config": new_cfg}
