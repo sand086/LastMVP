@@ -6,7 +6,6 @@ Tests: Health Dashboard, Performance Metrics, Log Viewer, Error Tracker,
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
@@ -174,7 +173,7 @@ class TestLogViewer:
         data = response.json()
         
         # Should have login events from our test logins
-        login_logs = [l for l in data["logs"] if l.get("action") == "login_success"]
+        login_logs = [log for log in data["logs"] if log.get("action") == "login_success"]
         assert len(login_logs) >= 0, "Login events should be logged"
         print(f"✓ Found {len(login_logs)} login events in audit logs")
     

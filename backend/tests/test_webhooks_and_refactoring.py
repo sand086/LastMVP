@@ -5,17 +5,16 @@ Tests: Webhook CRUD, Webhook test dispatch, System routes, Kosmo sync, Admin mod
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 AGENT_EMAIL = "agente@me.mx"
-AGENT_PASSWORD = "LastMile2026"
+AGENT_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 COORD_EMAIL = "yael@me.mx"
-COORD_PASSWORD = "LastMile2026"
+COORD_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 
 @pytest.fixture(scope="module")
@@ -93,7 +92,7 @@ class TestAuth:
         assert response.status_code == 200, f"Agent login failed: {response.text}"
         data = response.json()
         assert "access_token" in data
-        print(f"✓ Agent login successful")
+        print("✓ Agent login successful")
     
     def test_login_coordinator(self, api_client):
         """Test coordinator login returns access_token"""
@@ -104,7 +103,7 @@ class TestAuth:
         assert response.status_code == 200, f"Coordinator login failed: {response.text}"
         data = response.json()
         assert "access_token" in data
-        print(f"✓ Coordinator login successful")
+        print("✓ Coordinator login successful")
 
 
 class TestDashboard:
@@ -178,7 +177,7 @@ class TestWebhookCRUD:
         assert data["name"] == webhook_data["name"]
         assert data["url"] == webhook_data["url"]
         assert data["events"] == webhook_data["events"]
-        assert data["is_active"] == True
+        assert data["is_active"]
         assert "secret" in data, "Response missing 'secret'"
         assert len(data["secret"]) == 32, f"Secret should be 32 chars, got {len(data['secret'])}"
         
@@ -221,7 +220,7 @@ class TestWebhookCRUD:
         # Verify delivery result structure
         assert "status" in data, "Response missing 'status'"
         assert "attempts" in data, "Response missing 'attempts'"
-        assert data["is_test"] == True
+        assert data["is_test"]
         
         # httpbin.org/post should return 200
         if data["status"] == "success":
@@ -283,7 +282,7 @@ class TestWebhookCRUD:
         webhooks = response.json()
         webhook_ids = [w["id"] for w in webhooks]
         assert TestWebhookCRUD.created_webhook_id not in webhook_ids
-        print(f"✓ Verified webhook no longer exists")
+        print("✓ Verified webhook no longer exists")
 
 
 class TestSystemRoutes:
@@ -315,7 +314,7 @@ class TestSystemRoutes:
         assert "python_version" in data
         assert "mongo_host" in data
         assert "db_name" in data
-        print(f"✓ System config:")
+        print("✓ System config:")
         print(f"  - Backend: {data.get('backend_version', 'N/A')}")
         print(f"  - Python: {data.get('python_version', 'N/A')}")
         print(f"  - DB: {data.get('db_name', 'N/A')}")
@@ -353,7 +352,7 @@ class TestKosmoSyncRoutes:
         
         # Verify response structure
         assert "last_sync" in data or data.get("last_sync") is None
-        print(f"✓ Kosmo sync status:")
+        print("✓ Kosmo sync status:")
         print(f"  - Last sync: {data.get('last_sync', 'Never')}")
         print(f"  - Total checked: {data.get('total_checked', 0)}")
         print(f"  - Updated: {data.get('updated', 0)}")
@@ -372,7 +371,7 @@ class TestAdminModuleRoutes:
         # Verify response structure
         assert "by_entregable" in data
         assert "totals" in data
-        print(f"✓ Admin summary:")
+        print("✓ Admin summary:")
         print(f"  - Evaluaciones: {data.get('evaluaciones_count', 0)}")
         print(f"  - Lumi: {data.get('lumi_count', 0)}")
         print(f"  - Reportes: {data.get('reportes_count', 0)}")
@@ -398,7 +397,7 @@ class TestLumiChatRoute:
             print(f"✓ Lumi chat working: {data['reply'][:100]}...")
         else:
             # 500 is expected if LLM key is invalid or no data
-            print(f"⚠ Lumi chat returned 500 (expected if LLM key issue or no data)")
+            print("⚠ Lumi chat returned 500 (expected if LLM key issue or no data)")
             print(f"  - Response: {response.text[:200]}")
 
 
@@ -410,13 +409,13 @@ class TestAgentPermissions:
         response = agent_client.get(f"{BASE_URL}/api/webhooks")
         # Agent should be forbidden from webhook management
         assert response.status_code == 403, f"Expected 403, got {response.status_code}"
-        print(f"✓ Agent correctly denied access to webhooks (403)")
+        print("✓ Agent correctly denied access to webhooks (403)")
     
     def test_agent_can_list_webhook_events(self, agent_client):
         """Agent should be able to list webhook events (read-only)"""
         response = agent_client.get(f"{BASE_URL}/api/webhooks/events")
         assert response.status_code == 200, f"Agent should see events: {response.text}"
-        print(f"✓ Agent can view webhook events (200)")
+        print("✓ Agent can view webhook events (200)")
 
 
 class TestCleanup:
@@ -429,9 +428,9 @@ class TestCleanup:
             webhooks = response.json()
             for wh in webhooks:
                 if wh.get("name", "").startswith("TEST_"):
-                    del_response = authenticated_client.delete(f"{BASE_URL}/api/webhooks/{wh['id']}")
+                    authenticated_client.delete(f"{BASE_URL}/api/webhooks/{wh['id']}")
                     print(f"  Cleaned up: {wh['name']}")
-        print(f"✓ Cleanup complete")
+        print("✓ Cleanup complete")
 
 
 if __name__ == "__main__":

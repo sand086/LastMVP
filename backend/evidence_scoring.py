@@ -450,7 +450,6 @@ def _run_ai_eval_sync(journey_id: str, packages: list, incident_tracking_numbers
 
 async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incident_tracking_numbers: set):
     """Internal async function that runs in a separate thread's event loop."""
-    from dependencies import db as main_db
     from motor.motor_asyncio import AsyncIOMotorClient
     import os
 

@@ -16,9 +16,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 AGENT_EMAIL = "agente@me.mx"
-AGENT_PASSWORD = "LastMile2026"
+AGENT_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 # Known journey with scored data
 TEST_JOURNEY_ID = "778b38e3-4e68-4b85-ad74-24ae02fef468"

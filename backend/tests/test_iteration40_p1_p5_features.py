@@ -9,8 +9,7 @@ P5: Remove checklist + 32 Mexico states in route type
 import pytest
 import requests
 import os
-import jwt
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
@@ -18,11 +17,11 @@ if not BASE_URL:
 
 # Test credentials
 COORDINATOR_EMAIL = "yael@me.mx"
-COORDINATOR_PASSWORD = "LastMile2026"
+COORDINATOR_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 DEVELOPER_EMAIL = "dev@me.mx"
-DEVELOPER_PASSWORD = "LastMile2026"
+DEVELOPER_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 AGENT_EMAIL = "agente@me.mx"
-AGENT_PASSWORD = "LastMile2026"
+AGENT_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 
 class TestP1RefreshToken:

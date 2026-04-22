@@ -2,7 +2,7 @@
 Admin routes: seed data, cleanup, upload history.
 """
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from datetime import datetime, timezone, timedelta
 
 from dependencies import db, get_current_user, require_role, hash_password

@@ -1,7 +1,7 @@
 """
 Pydantic models for LastMile OS API.
 """
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 
 

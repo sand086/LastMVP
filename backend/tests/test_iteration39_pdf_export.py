@@ -23,7 +23,7 @@ def auth_session():
     # Login as coordinator
     login_response = session.post(f"{BASE_URL}/api/auth/login", json={
         "email": "yael@me.mx",
-        "password": "LastMile2026"
+        "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
     })
     assert login_response.status_code == 200, f"Login failed: {login_response.text}"
     token = login_response.json().get("access_token")  # Fixed: access_token not token
@@ -198,7 +198,7 @@ class TestReportsAPIForPDFExport:
         
         report_data = report_res.json()
         quality_data = quality_res.json()
-        attempts_data = attempts_res.json()
+        attempts_res.json()
         sla_data = sla_res.json()
         
         # Verify data exists for PDF pages
@@ -208,7 +208,7 @@ class TestReportsAPIForPDFExport:
         has_quality = quality_data.get("summary", {}).get("total_evaluated", 0) > 0
         has_sla = sla_data.get("consolidated", {}).get("actual") is not None
         
-        print(f"✓ PDF data completeness check:")
+        print("✓ PDF data completeness check:")
         print(f"  - Providers: {'✓' if has_providers else '✗'}")
         print(f"  - Drivers: {'✓' if has_drivers else '✗'}")
         print(f"  - Incidents: {'✓' if has_incidents else '✗'}")

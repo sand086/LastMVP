@@ -13,7 +13,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_EMAIL = "dev@me.mx"
-TEST_PASSWORD = "LastMile2026"
+TEST_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 # Date range with existing data
 DATE_FROM = "2026-03-01"

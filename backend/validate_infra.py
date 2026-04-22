@@ -136,7 +136,7 @@ print(f"\n  {verdict}  ({passed}/{total} checks OK)\n")
 
 # Save report
 with open("/app/infra_validation_results.md", "w") as f:
-    f.write(f"# LastMile OS — Validacion Infraestructura PROD\n")
+    f.write("# LastMile OS — Validacion Infraestructura PROD\n")
     f.write(f"**Fecha:** 2026-03-30\n**Veredicto:** {verdict}\n\n")
     f.write("| Estado | Check | Detalle |\n|---|---|---|\n")
     for icon, name, detail in results:

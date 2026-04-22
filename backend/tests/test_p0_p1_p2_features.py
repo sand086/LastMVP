@@ -5,8 +5,6 @@ Tests: CSV auto-filter, resolve-all incidents, package review, returned status, 
 import pytest
 import requests
 import os
-import io
-import csv
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
@@ -118,7 +116,7 @@ class TestP2KosmoSyncConfig:
         assert "updated" in data
         assert "errors" in data
         
-        print(f"✓ P2-10: Kosmo sync status endpoint working")
+        print("✓ P2-10: Kosmo sync status endpoint working")
     
     def test_kosmo_sync_trigger_endpoint(self, api_client):
         """POST /api/sync/tracking should trigger sync"""
@@ -212,7 +210,7 @@ class TestWhatsAppSummaryDriverName:
             
             # driver_name should be in the response (may be empty/None)
             assert "driver_name" in journey or journey.get("driver_name") is None
-            print(f"✓ P1-7: Journey detail includes driver_name for WhatsApp summary")
+            print("✓ P1-7: Journey detail includes driver_name for WhatsApp summary")
         else:
             print("✓ P1-7: Journey detail endpoint working (no journeys to verify)")
 

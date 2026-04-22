@@ -5,7 +5,7 @@ import asyncio
 import uuid
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime, timezone
 
 from dependencies import (

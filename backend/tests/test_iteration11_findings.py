@@ -13,7 +13,6 @@ Tests for:
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
@@ -160,10 +159,10 @@ class TestCreationDateParsing:
         # Check journeys have date field
         for journey in journeys[:5]:
             assert "date" in journey, f"Journey missing 'date' field: {journey.keys()}"
-            assert journey["date"], f"Journey date should not be empty"
+            assert journey["date"], "Journey date should not be empty"
             print(f"✓ Journey {journey['id'][:8]}... has date: {journey['date']}")
         
-        print(f"✓ All checked journeys have date field")
+        print("✓ All checked journeys have date field")
 
 
 class TestEvidenceQualityReEvaluation:
@@ -207,7 +206,7 @@ class TestEvidenceQualityReEvaluation:
                         if "evidence_score" in pkg:
                             packages_with_evidence += 1
                             # Verify evidence_type is also present
-                            assert "evidence_type" in pkg, f"Package has evidence_score but missing evidence_type"
+                            assert "evidence_type" in pkg, "Package has evidence_score but missing evidence_type"
         
         if delivered_packages_checked == 0:
             pytest.skip("No delivered packages found for testing")

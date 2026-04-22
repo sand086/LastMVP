@@ -17,9 +17,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 AGENT_EMAIL = "agente@me.mx"
-AGENT_PASSWORD = "LastMile2026"
+AGENT_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 INVALID_EMAIL = "invalid@test.com"
 INVALID_PASSWORD = "wrongpassword"
 
@@ -250,7 +250,7 @@ class TestPackageRescrape:
         
         # Verify response structure
         assert "success" in data
-        assert data["success"] == True
+        assert data["success"]
         assert "kosmo_status" in data
         assert "proof_count" in data
     

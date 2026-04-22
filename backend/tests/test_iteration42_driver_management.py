@@ -16,8 +16,8 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_CREDENTIALS = {
-    "developer": {"email": "dev@me.mx", "password": "LastMile2026"},
-    "coordinator": {"email": "yael@me.mx", "password": "LastMile2026"},
+    "developer": {"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")},
+    "coordinator": {"email": "yael@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")},
 }
 
 
@@ -250,7 +250,7 @@ class TestDriverManagementAPI:
         assert "id" in data, "Response should have 'id'"
         assert "name" in data, "Response should have 'name'"
         assert data["name"] == test_name
-        assert data.get("already_existed") == False, "New provider should not already exist"
+        assert not data.get("already_existed"), "New provider should not already exist"
         
         # Cleanup - delete the test provider
         self.session.delete(f"{BASE_URL}/api/providers/{data['id']}", cookies=self.cookies)
@@ -277,7 +277,7 @@ class TestDriverManagementAPI:
         assert second_resp.status_code == 200
         data = second_resp.json()
         assert data["id"] == first_id, "Should return same provider ID"
-        assert data.get("already_existed") == True
+        assert data.get("already_existed")
         
         # Cleanup
         self.session.delete(f"{BASE_URL}/api/providers/{first_id}", cookies=self.cookies)

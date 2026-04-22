@@ -2,7 +2,6 @@
 Admin Module — AI Consumption, Route Reporting, and Cost Configuration
 New router: /api/admin/...
 """
-import asyncio
 import io
 import logging
 import uuid
@@ -12,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from dependencies import db, get_current_user, require_role
+from dependencies import db, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin Module"])

@@ -20,7 +20,7 @@ def auth_token():
     """Get authentication token for coordinator user"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "yael@me.mx",
-        "password": "LastMile2026"
+        "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
     })
     if response.status_code == 200:
         data = response.json()

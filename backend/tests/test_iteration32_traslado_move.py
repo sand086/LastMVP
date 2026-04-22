@@ -25,7 +25,7 @@ class TestPulseConfigRequiredFields:
         """Login and get token"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("access_token")
@@ -50,7 +50,7 @@ class TestPulseConfigRequiredFields:
         assert "minute" in hora_limite, "hora_limite should have 'minute' field"
         
         print(f"pulse_config keys: {list(pulse_config.keys())}")
-        print(f"NOTE: traslado_primer_punto_default may still exist in DB but frontend ignores it")
+        print("NOTE: traslado_primer_punto_default may still exist in DB but frontend ignores it")
 
 
 class TestScheduledJourneyStartForm:
@@ -61,7 +61,7 @@ class TestScheduledJourneyStartForm:
         """Login and get token"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("access_token")
@@ -104,7 +104,7 @@ class TestPulseUtilsReadsTrasladoFromJourney:
         """Login and get token"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("access_token")

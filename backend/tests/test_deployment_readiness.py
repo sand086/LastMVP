@@ -239,7 +239,7 @@ class TestDashboardStats:
         assert response.status_code == 200
         data = response.json()
         assert data["date"] == "2026-03-23"
-        print(f"✓ Dashboard stats with date filter works")
+        print("✓ Dashboard stats with date filter works")
 
 
 class TestAuthMe:

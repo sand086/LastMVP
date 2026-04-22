@@ -25,11 +25,11 @@ class TestBugFixes:
     def setup(self):
         """Setup test fixtures"""
         self.dev_email = "dev@me.mx"
-        self.dev_password = "LastMile2026"
+        self.dev_password = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         self.coordinator_email = "yael@me.mx"
-        self.coordinator_password = "LastMile2026"
+        self.coordinator_password = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         self.agent_email = "agente@me.mx"
-        self.agent_password = "LastMile2026"
+        self.agent_password = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         
     def get_token(self, email, password):
         """Helper to get auth token"""
@@ -124,7 +124,7 @@ class TestBugFixes:
         # The fix should include scheduled journeys, not just closed
         # Per the bug report, should return 6 journeys for March 2026
         assert total >= 1, f"Expected at least 1 journey, got {total}"
-        print(f"BUG-003 PASS: Reports endpoint returns journeys with various statuses")
+        print("BUG-003 PASS: Reports endpoint returns journeys with various statuses")
 
     # ==================== BUG-004: Coordinator can POST training/samples ====================
     

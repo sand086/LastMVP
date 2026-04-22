@@ -10,12 +10,12 @@ from starlette.requests import Request as StarletteRequest
 
 from dependencies import (
     db, limiter, security, get_current_user, require_role,
-    hash_password, verify_password, verify_password_async, create_token, create_refresh_token,
+    hash_password, verify_password_async, create_token, create_refresh_token,
     JWT_SECRET, JWT_ALGORITHM,
     COOKIE_NAME, COOKIE_MAX_AGE, COOKIE_SECURE, COOKIE_HTTPONLY, COOKIE_SAMESITE, COOKIE_PATH,
 )
 from models import (
-    UserLogin, TokenResponse, PasswordResetRequestCreate, PasswordChangeByAdmin,
+    UserLogin, PasswordResetRequestCreate, PasswordChangeByAdmin,
 )
 from middleware import log_audit_event
 

@@ -9,10 +9,10 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/") or "https://lastmile-mvp.preview.emergentagent.com"
 API = f"{BASE_URL}/api"
 
-DEV = {"email": "dev@me.mx", "password": "LastMile2026"}
-COORD = {"email": "yael@me.mx", "password": "LastMile2026"}
-AGENT = {"email": "agente@me.mx", "password": "LastMile2026"}
-PROV = {"email": "proveedor@me.mx", "password": "LastMile2026"}
+DEV = {"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+COORD = {"email": "yael@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+AGENT = {"email": "agente@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+PROV = {"email": "proveedor@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
 
 
 def _login(creds):

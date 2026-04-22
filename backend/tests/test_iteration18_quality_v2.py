@@ -14,9 +14,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 COORD_EMAIL = "yael@me.mx"
-COORD_PASSWORD = "LastMile2026"
+COORD_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 
 class TestAuth:
@@ -182,7 +182,7 @@ class TestQualityCriteriaAPI:
         )
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
-        assert data["success"] == True
+        assert data["success"]
         assert data["section"] == "kpi_targets"
         
         # Verify change persisted
@@ -198,7 +198,7 @@ class TestQualityCriteriaAPI:
             json={"section": "kpi_targets", "value": new_kpi}
         )
         
-        print(f"✓ KPI targets update and restore successful")
+        print("✓ KPI targets update and restore successful")
 
 
 class TestQualityTabV2API:
@@ -269,7 +269,7 @@ class TestQualityTabV2API:
             
             print(f"✓ Packages quality: {len(data['packages'])} packages, total={data['total']}")
         else:
-            print(f"✓ Packages quality endpoint works (no packages with quality data)")
+            print("✓ Packages quality endpoint works (no packages with quality data)")
     
     def test_get_packages_quality_alerts_only(self, auth_headers, sample_journey_id):
         """GET /api/journeys/{journey_id}/packages-quality?alerts_only=true"""
@@ -369,8 +369,8 @@ class TestAPIDocumentation:
         data = response.json()
         
         for endpoint in data["endpoints"]:
-            assert "name" in endpoint, f"Missing name in endpoint"
-            assert "endpoint" in endpoint, f"Missing endpoint path"
+            assert "name" in endpoint, "Missing name in endpoint"
+            assert "endpoint" in endpoint, "Missing endpoint path"
             assert "method" in endpoint, f"Missing method in {endpoint.get('name')}"
             assert "description" in endpoint, f"Missing description in {endpoint.get('name')}"
         

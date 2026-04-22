@@ -2,7 +2,6 @@
 Quality Tab routes - Quality summary, training samples, and package review
 for the Journey Detail Quality tab redesign.
 """
-import asyncio
 import uuid
 import logging
 from datetime import datetime, timezone

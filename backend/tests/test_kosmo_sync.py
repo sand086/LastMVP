@@ -11,9 +11,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 AGENT_EMAIL = "agente@me.mx"
-AGENT_PASSWORD = "LastMile2026"
+AGENT_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 # Journey with Kosmo data
 KOSMO_JOURNEY_ID = "778b38e3-4e68-4b85-ad74-24ae02fef468"
@@ -209,7 +209,7 @@ class TestKosmoPackageData:
         
         for pkg in packages:
             if pkg.get("kosmo_status_raw") == "delivered":
-                assert pkg["status"] == "delivered", f"Kosmo delivered should map to delivered status"
+                assert pkg["status"] == "delivered", "Kosmo delivered should map to delivered status"
 
     def test_status_mapping_cancelled(self, dev_token):
         """Kosmo 'cancelled' status should map to 'failed'"""
@@ -222,7 +222,7 @@ class TestKosmoPackageData:
         
         for pkg in packages:
             if pkg.get("kosmo_status_raw") == "cancelled":
-                assert pkg["status"] == "failed", f"Kosmo cancelled should map to failed status"
+                assert pkg["status"] == "failed", "Kosmo cancelled should map to failed status"
 
 
 class TestSyncUpdatesStatus:
@@ -231,7 +231,7 @@ class TestSyncUpdatesStatus:
     def test_sync_updates_last_sync_timestamp(self, dev_token):
         """POST /api/sync/tracking should update last_sync timestamp"""
         # Get initial status
-        status_before = requests.get(
+        requests.get(
             f"{BASE_URL}/api/sync/status",
             headers={"Authorization": f"Bearer {dev_token}"}
         ).json()

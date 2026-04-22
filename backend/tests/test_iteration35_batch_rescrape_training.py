@@ -110,7 +110,7 @@ class TestQualitySettings:
         assert "model" in ia_config
         assert "enabled" in ia_config
         
-        print(f"✓ ia_config contains system_prompt field")
+        print("✓ ia_config contains system_prompt field")
         print(f"  - provider: {ia_config.get('provider')}")
         print(f"  - model: {ia_config.get('model')}")
         print(f"  - system_prompt length: {len(ia_config.get('system_prompt', ''))}")
@@ -145,7 +145,7 @@ class TestQualitySettings:
         new_ia_config = verify_response.json().get("ia_config", {})
         assert new_ia_config.get("system_prompt") == test_prompt, f"system_prompt not updated: {new_ia_config}"
         
-        print(f"✓ ia_config.system_prompt can be updated via PATCH")
+        print("✓ ia_config.system_prompt can be updated via PATCH")
 
 
 class TestBatchRescrape:
@@ -212,7 +212,7 @@ class TestBatchRescrape:
         
         # Verify total matches expected (all packages with tracking, not just 0-proof ones)
         actual_total = data.get("total", 0)
-        print(f"✓ Batch rescrape completed:")
+        print("✓ Batch rescrape completed:")
         print(f"  - Total scraped: {actual_total}")
         print(f"  - Recovered (0→N proofs): {data.get('recovered', 0)}")
         print(f"  - Updated proofs (N→M proofs): {data.get('updated_proofs', 0)}")
@@ -283,7 +283,7 @@ class TestPackageConfidence:
                 packages_with_zero_confidence += 1
                 print(f"  WARNING: Package {pkg.get('id')} has evidence but confidence=0")
         
-        print(f"✓ Confidence check:")
+        print("✓ Confidence check:")
         print(f"  - Packages with positive confidence: {packages_with_positive_confidence}")
         print(f"  - Packages with zero confidence: {packages_with_zero_confidence}")
         
@@ -398,7 +398,7 @@ class TestReviewAndTrainingSamples:
         data = response.json()
         
         # Verify ai_evaluation_incorrect is saved
-        assert data.get("ai_evaluation_incorrect") == True, f"ai_evaluation_incorrect not saved: {data}"
+        assert data.get("ai_evaluation_incorrect"), f"ai_evaluation_incorrect not saved: {data}"
         print(f"✓ ai_evaluation_incorrect saved correctly: {data.get('ai_evaluation_incorrect')}")
     
     def test_review_creates_training_sample(self, auth_headers, test_package_id):
@@ -423,10 +423,10 @@ class TestReviewAndTrainingSamples:
         # The training sample is created in the backend
         # We can verify by checking the package response includes the review data
         data = response.json()
-        assert data.get("manually_reviewed") == True
+        assert data.get("manually_reviewed")
         assert data.get("review_note") == unique_note or data.get("manually_reviewed_note") == unique_note
         
-        print(f"✓ Review completed, training sample should be created")
+        print("✓ Review completed, training sample should be created")
         print(f"  - Package ID: {test_package_id}")
         print(f"  - Note: {unique_note}")
         print(f"  - adjusted_score: {data.get('adjusted_score')}")
@@ -500,7 +500,7 @@ class TestConfidenceRecalculation:
         assert "discrepancies" in data, f"'discrepancies' not in response: {data.keys()}"
         assert "avg_confidence" in data, f"'avg_confidence' not in response: {data.keys()}"
         
-        print(f"✓ Confidence evaluation completed:")
+        print("✓ Confidence evaluation completed:")
         print(f"  - Evaluated: {data.get('evaluated')}")
         print(f"  - Discrepancies: {data.get('discrepancies')}")
         print(f"  - Avg confidence: {data.get('avg_confidence')}")
@@ -524,7 +524,7 @@ class TestConfidenceRecalculation:
             else:
                 packages_without_confidence += 1
         
-        print(f"✓ Confidence field check:")
+        print("✓ Confidence field check:")
         print(f"  - Packages with confidence: {packages_with_confidence}")
         print(f"  - Packages without confidence: {packages_without_confidence}")
         

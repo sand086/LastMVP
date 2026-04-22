@@ -24,7 +24,7 @@ class TestAuthAndSetup:
         """Get authentication token using coordinator credentials"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -41,7 +41,7 @@ class TestAuthAndSetup:
     def test_login_coordinator(self, auth_token):
         """Test coordinator login works"""
         assert auth_token is not None
-        print(f"SUCCESS: Coordinator login successful, token obtained")
+        print("SUCCESS: Coordinator login successful, token obtained")
 
 
 class TestAiEvalStatusEndpoint:
@@ -52,7 +52,7 @@ class TestAiEvalStatusEndpoint:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -115,7 +115,7 @@ class TestPackageEnrichmentWithSeverity:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -157,7 +157,7 @@ class TestPackageEnrichmentWithSeverity:
         for pkg in packages[:5]:  # Check first 5
             assert "ai_errors" in pkg, f"Package {pkg.get('id')} missing ai_errors field"
         
-        print(f"SUCCESS: All packages have ai_errors field")
+        print("SUCCESS: All packages have ai_errors field")
     
     def test_packages_have_ia_errors_raw_field(self, journey_with_packages):
         """Test that packages have ia_errors_raw field for severity mapping"""
@@ -168,7 +168,7 @@ class TestPackageEnrichmentWithSeverity:
         for pkg in packages[:5]:  # Check first 5
             assert "ia_errors_raw" in pkg, f"Package {pkg.get('id')} missing ia_errors_raw field"
         
-        print(f"SUCCESS: All packages have ia_errors_raw field")
+        print("SUCCESS: All packages have ia_errors_raw field")
     
     def test_packages_have_ia_severity_field(self, journey_with_packages):
         """Test that packages have ia_severity field for severity badges"""
@@ -179,7 +179,7 @@ class TestPackageEnrichmentWithSeverity:
         for pkg in packages[:5]:  # Check first 5
             assert "ia_severity" in pkg, f"Package {pkg.get('id')} missing ia_severity field"
         
-        print(f"SUCCESS: All packages have ia_severity field")
+        print("SUCCESS: All packages have ia_severity field")
     
     def test_packages_have_ai_score_field(self, journey_with_packages):
         """Test that packages have ai_score field"""
@@ -190,7 +190,7 @@ class TestPackageEnrichmentWithSeverity:
         for pkg in packages[:5]:  # Check first 5
             assert "ai_score" in pkg, f"Package {pkg.get('id')} missing ai_score field"
         
-        print(f"SUCCESS: All packages have ai_score field")
+        print("SUCCESS: All packages have ai_score field")
 
 
 class TestReviewPackageEndpoint:
@@ -201,7 +201,7 @@ class TestReviewPackageEndpoint:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -258,7 +258,7 @@ class TestReviewPackageEndpoint:
         data = response.json()
         
         # Verify response contains updated package data
-        assert data.get("manually_reviewed") == True, f"Package not marked as reviewed: {data}"
+        assert data.get("manually_reviewed"), f"Package not marked as reviewed: {data}"
         print(f"SUCCESS: Package {package_id} approved successfully")
     
     def test_review_package_reject(self, auth_headers, unreviewed_package):
@@ -291,7 +291,7 @@ class TestBulkStatusUpdate:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -369,7 +369,7 @@ class TestBulkStatusUpdate:
         )
         
         assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
-        print(f"SUCCESS: Invalid status correctly returns 400")
+        print("SUCCESS: Invalid status correctly returns 400")
 
 
 class TestEvaluateAllEndpoint:
@@ -380,7 +380,7 @@ class TestEvaluateAllEndpoint:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -428,7 +428,7 @@ class TestSegmentFilters:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -476,7 +476,7 @@ class TestSegmentFilters:
             for field in required_fields:
                 assert field in pkg, f"Package {pkg.get('id')} missing field: {field}"
         
-        print(f"SUCCESS: All packages have required fields for segment filters")
+        print("SUCCESS: All packages have required fields for segment filters")
     
     def test_discrepancy_field_structure(self, journey_with_packages):
         """Test that discrepancy field has correct structure"""
@@ -487,7 +487,7 @@ class TestSegmentFilters:
             if discrepancy:
                 assert "detected" in discrepancy, f"Discrepancy missing 'detected' field: {discrepancy}"
         
-        print(f"SUCCESS: Discrepancy field has correct structure")
+        print("SUCCESS: Discrepancy field has correct structure")
 
 
 if __name__ == "__main__":

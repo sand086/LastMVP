@@ -7,15 +7,14 @@ Test suite for P1, P2, P3 features:
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 COORDINATOR_EMAIL = "yael@me.mx"
-COORDINATOR_PASSWORD = "LastMile2026"
+COORDINATOR_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 AGENT_EMAIL = "agente@me.mx"
-AGENT_PASSWORD = "LastMile2026"
+AGENT_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 
 class TestAuth:

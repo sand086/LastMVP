@@ -16,9 +16,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 COORDINATOR_EMAIL = "yael@me.mx"
-COORDINATOR_PASSWORD = "LastMile2026"
+COORDINATOR_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 # Date range with data
 DATE_FROM = "2026-03-01"
@@ -113,7 +113,7 @@ class TestReportsAttempts:
             assert "count" in data[attempt_key], f"Missing count in {attempt_key}"
             assert "pct" in data[attempt_key], f"Missing pct in {attempt_key}"
         
-        print(f"✓ Attempts response structure valid")
+        print("✓ Attempts response structure valid")
         print(f"  - First attempt: {data['first_attempt']}")
         print(f"  - Second attempt: {data['second_attempt']}")
         print(f"  - Third attempt: {data['third_attempt']}")
@@ -167,7 +167,7 @@ class TestReportsSLA:
         assert "actual" in data["consolidated"], "Missing actual in consolidated"
         assert "target" in data["consolidated"], "Missing target in consolidated"
         
-        print(f"✓ SLA response structure valid")
+        print("✓ SLA response structure valid")
         print(f"  - Consolidated: {data['consolidated']}")
         print(f"  - Providers count: {len(data['by_provider'])}")
         print(f"  - Drivers count: {len(data['by_driver'])}")
@@ -222,7 +222,7 @@ class TestSLATargetsUpdate:
         )
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
-        assert data.get("success") == True, "Expected success=True"
+        assert data.get("success"), "Expected success=True"
         print("✓ Coordinator can update SLA targets")
     
     def test_sla_targets_persist(self, coordinator_token, dev_token):
@@ -321,7 +321,7 @@ class TestGenerateAIReport:
         assert "period" in data, "Missing period field"
         assert len(data["narrative"]) > 0, "Narrative should not be empty"
         
-        print(f"✓ AI report response structure valid")
+        print("✓ AI report response structure valid")
         print(f"  - Period: {data['period']}")
         print(f"  - Narrative length: {len(data['narrative'])} chars")
 
@@ -373,7 +373,7 @@ class TestLumiChat:
         assert "reply" in data, "Missing reply field"
         assert len(data["reply"]) > 0, "Reply should not be empty"
         
-        print(f"✓ Lumi response structure valid")
+        print("✓ Lumi response structure valid")
         print(f"  - Reply length: {len(data['reply'])} chars")
         print(f"  - Reply preview: {data['reply'][:100]}...")
     
@@ -440,7 +440,7 @@ class TestReportsGenerate:
         assert "total_packages" in data, "Missing total_packages"
         assert "total_delivered" in data, "Missing total_delivered"
         
-        print(f"✓ Report generation response structure valid")
+        print("✓ Report generation response structure valid")
         print(f"  - Delivery rate: {data['delivery_rate']}%")
         print(f"  - Total packages: {data['total_packages']}")
         print(f"  - Providers: {len(data['provider_metrics'])}")

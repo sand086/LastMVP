@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from dependencies import db, get_current_user, require_role
 from models import (
-    UserCreate, UserResponse, ClientBase, ClientResponse,
+    UserCreate, ClientBase, ClientResponse,
     ProviderBase, ProviderResponse,
 )
 from dependencies import hash_password

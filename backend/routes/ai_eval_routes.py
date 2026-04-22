@@ -2,7 +2,6 @@
 AI Evaluation Jobs — Monitor de Procesos API routes.
 """
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -137,7 +136,7 @@ async def stream_job(job_id: str, user: dict = Depends(get_current_user)):
                 {"job_id": job_id}, {"_id": 0, "status": 1, "progress_percent": 1, "guias_evaluadas": 1, "total_guias": 1, "guias_con_error": 1, "tokens_consumidos": 1}
             )
             if not job:
-                yield f"data: {{\"error\": \"Job no encontrado\"}}\n\n"
+                yield "data: {\"error\": \"Job no encontrado\"}\n\n"
                 break
 
             progress = job.get("progress_percent", 0)

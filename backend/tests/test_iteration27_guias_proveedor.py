@@ -14,10 +14,10 @@ import os
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-DEVELOPER_CREDS = {"email": "dev@me.mx", "password": "LastMile2026"}
-COORDINATOR_CREDS = {"email": "yael@me.mx", "password": "LastMile2026"}
-AGENT_CREDS = {"email": "agente@me.mx", "password": "LastMile2026"}
-PROVEEDOR_CREDS = {"email": "proveedor@me.mx", "password": "LastMile2026"}
+DEVELOPER_CREDS = {"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+COORDINATOR_CREDS = {"email": "yael@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+AGENT_CREDS = {"email": "agente@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+PROVEEDOR_CREDS = {"email": "proveedor@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
 
 
 class TestAuthEndpoints:
@@ -114,7 +114,7 @@ class TestPackageReviewEndpoint:
         )
         assert response.status_code == 200, f"Developer approve failed: {response.text}"
         data = response.json()
-        assert data.get("manually_reviewed") == True
+        assert data.get("manually_reviewed")
         print(f"✓ Developer approved package {sample_package_id}")
     
     def test_coordinator_can_approve_package(self, coordinator_token, sample_package_id):
@@ -145,7 +145,7 @@ class TestPackageReviewEndpoint:
         assert response.status_code == 200, f"Coordinator reject failed: {response.text}"
         data = response.json()
         assert data.get("rejection_reason") == "Test rejection note"
-        print(f"✓ Coordinator rejected package with note")
+        print("✓ Coordinator rejected package with note")
     
     def test_agent_cannot_review_package(self, agent_token, sample_package_id):
         """Agent should NOT be able to review packages (403)"""
@@ -159,7 +159,7 @@ class TestPackageReviewEndpoint:
             headers=headers
         )
         assert response.status_code == 403, f"Agent should get 403, got {response.status_code}"
-        print(f"✓ Agent correctly denied review access (403)")
+        print("✓ Agent correctly denied review access (403)")
     
     def test_proveedor_cannot_review_package(self, proveedor_token, sample_package_id):
         """Proveedor should NOT be able to review packages (403)"""
@@ -173,7 +173,7 @@ class TestPackageReviewEndpoint:
             headers=headers
         )
         assert response.status_code == 403, f"Proveedor should get 403, got {response.status_code}"
-        print(f"✓ Proveedor correctly denied review access (403)")
+        print("✓ Proveedor correctly denied review access (403)")
 
 
 class TestProveedorJourneyFiltering:
@@ -203,7 +203,7 @@ class TestProveedorJourneyFiltering:
         headers = {"Authorization": f"Bearer {proveedor_token}"}
         response = requests.get(f"{BASE_URL}/api/dashboard/stats", headers=headers)
         assert response.status_code == 200, f"Proveedor dashboard access failed: {response.text}"
-        print(f"✓ Proveedor can access dashboard stats")
+        print("✓ Proveedor can access dashboard stats")
     
     def test_proveedor_cannot_access_settings(self, proveedor_token):
         """Proveedor should NOT be able to access settings endpoints"""
@@ -326,7 +326,7 @@ class TestResyncAndEvaluateEndpoints:
         assert response.status_code == 200, f"Evaluate all failed: {response.text}"
         data = response.json()
         assert "status" in data or "message" in data
-        print(f"✓ Evaluate all evidence endpoint works")
+        print("✓ Evaluate all evidence endpoint works")
 
 
 class TestJourneyDetailEndpoint:
@@ -365,7 +365,7 @@ class TestJourneyDetailEndpoint:
             pkg = packages[0]
             # Check delivery_attempt field exists
             assert "delivery_attempt" in pkg, "Package should have delivery_attempt field"
-            print(f"✓ Journey detail has correct structure")
+            print("✓ Journey detail has correct structure")
             print(f"  Packages: {len(packages)}")
             print(f"  First package delivery_attempt: {pkg.get('delivery_attempt')}")
 
@@ -380,7 +380,7 @@ class TestSeedDataProveedorUser:
         data = response.json()
         assert data["user"]["role"] == "proveedor"
         assert data["user"]["email"] == "proveedor@me.mx"
-        print(f"✓ Proveedor user exists with correct role")
+        print("✓ Proveedor user exists with correct role")
         
         # Check if assigned_providers is set (from seed data)
         # This is stored in the user object but may not be returned in login response

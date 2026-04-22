@@ -63,7 +63,7 @@ class TestQualityCriteriaEndpoints:
         # First get current criteria
         get_res = self.session.get(f"{BASE_URL}/api/quality/criteria")
         assert get_res.status_code == 200
-        original_keywords = get_res.json().get("third_party_keywords", [])
+        get_res.json().get("third_party_keywords", [])
         
         # Update with new keywords
         new_keywords = ["vecino", "vigilante", "tercero", "familiar", "portero", "TEST_KEYWORD"]

@@ -14,9 +14,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEV_EMAIL = "dev@me.mx"
-DEV_PASSWORD = "LastMile2026"
+DEV_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 COORD_EMAIL = "yael@me.mx"
-COORD_PASSWORD = "LastMile2026"
+COORD_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 # Test data
 TEST_JOURNEY_ID = "771326fe-599b-4965-979c-e3095eba1908"
@@ -205,7 +205,7 @@ class TestAIEvidenceEvaluation:
             for field in expected_fields:
                 if field in data:
                     print(f"  - {field}: {data.get(field)}")
-            print(f"✓ Single package evaluation returned data")
+            print("✓ Single package evaluation returned data")
         else:
             print(f"✓ Endpoint responded with status {response.status_code}: {response.text[:200]}")
 
@@ -233,7 +233,7 @@ class TestAIEvidenceEvaluation:
                 print(f"  - ai_evaluated: {data.get('ai_evaluated')}")
             if "rules_evaluated" in data:
                 print(f"  - rules_evaluated: {data.get('rules_evaluated')}")
-            print(f"✓ Batch evaluation returned summary")
+            print("✓ Batch evaluation returned summary")
         else:
             print(f"✓ Endpoint responded with status {response.status_code}")
 
@@ -263,7 +263,7 @@ class TestJourneyDetailWithQuality:
                 if "kosmo_proof_count" in pkg:
                     print(f"  - kosmo_proof_count: {pkg.get('kosmo_proof_count')}")
             else:
-                print(f"✓ Journey found but no packages")
+                print("✓ Journey found but no packages")
         else:
             print(f"Journey not found or error: {response.status_code}")
 

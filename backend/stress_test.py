@@ -133,7 +133,7 @@ async def test_ia_endpoints(session, headers):
                 body = await r.read()
                 ms = round((time.perf_counter() - t0) * 1000)
                 return {"status": r.status, "ms": ms, "bytes": len(body)}
-        except Exception as e:
+        except Exception:
             return {"status": "ERR", "ms": -1}
 
     # 5 consultas Lumi en paralelo
@@ -226,7 +226,7 @@ async def test_export(session, headers):
         timed_get(session, BASE_URL + "/api/admin/summary", headers),
         timed_get(session, BASE_URL + "/api/sync/status", headers),
     )
-    wall_ms = round((time.perf_counter() - t_wall) * 1000)
+    round((time.perf_counter() - t_wall) * 1000)
     export_r = results[0]
     normal_ms = [r["ms"] for r in results[1:]]
     s = stats(normal_ms)
@@ -299,7 +299,7 @@ async def main():
             print("❌ FATAL: No se pudo obtener token de autenticación")
             return
         headers = {"Authorization": f"Bearer {token}"}
-        print(f"  ✅ Token obtenido correctamente")
+        print("  ✅ Token obtenido correctamente")
 
         # Ejecutar tests
         t1 = await test_baseline(session, headers)
@@ -307,10 +307,10 @@ async def main():
         t2b = await test_concurrent(session, headers, "/api/reports/kpis?period=current_month", 10)
         t2c = await test_concurrent(session, headers, "/api/dashboard/stats", 20)
         t3 = await test_ramp(session, headers)
-        t4 = await test_ia_endpoints(session, headers)
+        await test_ia_endpoints(session, headers)
         t5 = await test_sustained(session, headers, duration_s=60, rps=3)
         t6 = await test_export(session, headers)
-        t7 = await test_filters(session, headers)
+        await test_filters(session, headers)
         t8 = await test_auth_load(session)
 
     # ─── GENERAR REPORTE ──────────────────────────────────────────
@@ -396,7 +396,7 @@ async def main():
 
     print(f"\n{'=' * 70}")
     print(f"  {verdict}")
-    print(f"  Reporte guardado: /app/stress_test_results.md")
+    print("  Reporte guardado: /app/stress_test_results.md")
     print(f"{'=' * 70}\n")
 
 if __name__ == "__main__":

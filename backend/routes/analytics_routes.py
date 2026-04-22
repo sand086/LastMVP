@@ -1115,7 +1115,8 @@ async def report_attempts(
         second = failed
         third = pending
 
-    pct = lambda n: round(n / total * 100) if total > 0 else 0
+    def pct(n):
+        return round(n / total * 100) if total > 0 else 0
 
     # Retry causes from incidents or package data
     incidents = await db.incidents.find(
@@ -1302,7 +1303,7 @@ async def generate_ai_report(
 
     journey_ids = [j["id"] for j in journeys]
     providers_map = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
-    clients_map = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
+    {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
     incidents = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
 
     # Build structured data for AI

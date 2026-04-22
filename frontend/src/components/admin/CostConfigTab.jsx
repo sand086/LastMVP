@@ -247,7 +247,7 @@ export default function CostConfigTab({ canEdit, summary, onRefresh }) {
                             </div>
                         ))}
                         <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: T.radiusSm, background: T.surface2 }}>
-                            <p style={{ fontSize: 11, color: T.textSec }}><strong>{fmtNum(evalCount || 1842)}</strong> entregas/mes</p>
+                            <p style={{ fontSize: 11, color: T.textSec }}><strong>{fmtNum(evalData.count || 1842)}</strong> entregas/mes</p>
                             <p style={{ fontSize: 16, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: T.textPri, marginTop: 4 }}>
                                 ${summary?.totals?.cost_usd || '34.82'} USD
                             </p>

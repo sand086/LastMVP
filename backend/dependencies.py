@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List
 
 from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 from starlette.requests import Request
 from motor.motor_asyncio import AsyncIOMotorClient
 from slowapi import Limiter

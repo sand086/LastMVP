@@ -12,11 +12,11 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 DEVELOPER_EMAIL = "dev@me.mx"
-DEVELOPER_PASSWORD = "LastMile2026"
+DEVELOPER_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 COORDINATOR_EMAIL = "yael@me.mx"
-COORDINATOR_PASSWORD = "LastMile2026"
+COORDINATOR_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 AGENT_EMAIL = "agente@me.mx"
-AGENT_PASSWORD = "LastMile2026"
+AGENT_PASSWORD = os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
 
 
 @pytest.fixture(scope="module")
@@ -93,7 +93,7 @@ class TestP1SlaConfigPermissions:
         assert patch_response.status_code == 200, f"Coordinator should be able to edit sla_config. Got: {patch_response.status_code} - {patch_response.text}"
         
         data = patch_response.json()
-        assert data.get("success") == True
+        assert data.get("success")
         assert data.get("section") == "sla_config"
         print("PASSED: Coordinator can PATCH sla_config")
 
@@ -186,7 +186,7 @@ class TestP2PulseConfigEndpoint:
         excepciones = pulse_config.get("excepciones_traslado_por_proveedor", [])
         assert isinstance(excepciones, list), "excepciones_traslado_por_proveedor should be a list"
         
-        print(f"PASSED: pulse_config has all required fields")
+        print("PASSED: pulse_config has all required fields")
         print(f"  hora_limite: {pulse_config.get('hora_limite')}")
         print(f"  traslado_primer_punto_default: {pulse_config.get('traslado_primer_punto_default')}")
         print(f"  tiempo_promedio_entrega: {pulse_config.get('tiempo_promedio_entrega')}")
@@ -217,7 +217,7 @@ class TestP2PulseConfigEndpoint:
         assert patch_response.status_code == 200, f"PATCH pulse_config failed: {patch_response.text}"
         
         patch_data = patch_response.json()
-        assert patch_data.get("success") == True
+        assert patch_data.get("success")
         assert patch_data.get("section") == "pulse_config"
         
         # Verify persistence by GET
@@ -291,7 +291,7 @@ class TestP2JourneysEndpoint:
         for field in required_fields:
             assert field in journey, f"Journey missing required field: {field}"
         
-        print(f"PASSED: Journey has required fields for Pulse")
+        print("PASSED: Journey has required fields for Pulse")
         print(f"  status: {journey.get('status')}")
         print(f"  packages_total: {journey.get('packages_total')}")
         print(f"  packages_delivered: {journey.get('packages_delivered')}")

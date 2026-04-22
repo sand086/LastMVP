@@ -18,10 +18,10 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 CREDENTIALS = {
-    'developer': {'email': 'dev@me.mx', 'password': 'LastMile2026'},
-    'coordinator': {'email': 'yael@me.mx', 'password': 'LastMile2026'},
-    'agent': {'email': 'agente@me.mx', 'password': 'LastMile2026'},
-    'proveedor': {'email': 'proveedor@me.mx', 'password': 'LastMile2026'},
+    'developer': {'email': 'dev@me.mx', 'password': os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")},
+    'coordinator': {'email': 'yael@me.mx', 'password': os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")},
+    'agent': {'email': 'agente@me.mx', 'password': os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")},
+    'proveedor': {'email': 'proveedor@me.mx', 'password': os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")},
 }
 
 # Test journey IDs
@@ -78,28 +78,28 @@ class TestAuthEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert 'access_token' in data or 'token' in data
-        print(f"Developer login successful")
+        print("Developer login successful")
     
     def test_coordinator_login(self, api_client):
         response = api_client.post(f"{BASE_URL}/api/auth/login", json=CREDENTIALS['coordinator'])
         assert response.status_code == 200
         data = response.json()
         assert 'access_token' in data or 'token' in data
-        print(f"Coordinator login successful")
+        print("Coordinator login successful")
     
     def test_agent_login(self, api_client):
         response = api_client.post(f"{BASE_URL}/api/auth/login", json=CREDENTIALS['agent'])
         assert response.status_code == 200
         data = response.json()
         assert 'access_token' in data or 'token' in data
-        print(f"Agent login successful")
+        print("Agent login successful")
     
     def test_proveedor_login(self, api_client):
         response = api_client.post(f"{BASE_URL}/api/auth/login", json=CREDENTIALS['proveedor'])
         assert response.status_code == 200
         data = response.json()
         assert 'access_token' in data or 'token' in data
-        print(f"Proveedor login successful")
+        print("Proveedor login successful")
 
 
 class TestJourneyDetailEndpoint:
@@ -167,7 +167,7 @@ class TestPackageReviewEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data.get('manually_reviewed') == True
+        assert data.get('manually_reviewed')
         print(f"Developer approved package {pkg_id}")
     
     def test_coordinator_can_approve_package(self, api_client, coordinator_token):
@@ -190,7 +190,7 @@ class TestPackageReviewEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data.get('manually_reviewed') == True
+        assert data.get('manually_reviewed')
         print(f"Coordinator approved package {pkg_id}")
     
     def test_coordinator_can_reject_with_note(self, api_client, coordinator_token):
@@ -213,7 +213,7 @@ class TestPackageReviewEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data.get('manually_reviewed') == False
+        assert not data.get('manually_reviewed')
         assert data.get('rejection_reason') == 'Test rejection reason'
         print(f"Coordinator rejected package {pkg_id} with note")
     
@@ -235,7 +235,7 @@ class TestPackageReviewEndpoint:
             headers={'Authorization': f'Bearer {agent_token}'}
         )
         assert response.status_code == 403, f"Expected 403, got {response.status_code}"
-        print(f"Agent correctly denied access to review package (403)")
+        print("Agent correctly denied access to review package (403)")
     
     def test_proveedor_cannot_review_package(self, api_client, proveedor_token, developer_token):
         """Proveedor should get 403 when trying to review a package"""
@@ -255,7 +255,7 @@ class TestPackageReviewEndpoint:
             headers={'Authorization': f'Bearer {proveedor_token}'}
         )
         assert response.status_code == 403, f"Expected 403, got {response.status_code}"
-        print(f"Proveedor correctly denied access to review package (403)")
+        print("Proveedor correctly denied access to review package (403)")
 
 
 class TestReviewIndicatorStates:
@@ -290,9 +290,9 @@ class TestReviewIndicatorStates:
         packages = response.json()['packages']
         pkg = next((p for p in packages if p['id'] == pkg_id), None)
         assert pkg is not None
-        assert pkg['manually_reviewed'] == True
+        assert pkg['manually_reviewed']
         assert pkg.get('rejection_reason') is None or pkg.get('rejection_reason') == ''
-        print(f"Approved package state verified: manually_reviewed=True, rejection_reason=None")
+        print("Approved package state verified: manually_reviewed=True, rejection_reason=None")
     
     def test_rejected_package_state(self, api_client, developer_token):
         """Verify rejected package has manually_reviewed=False and rejection_reason set"""
@@ -323,9 +323,9 @@ class TestReviewIndicatorStates:
         packages = response.json()['packages']
         pkg = next((p for p in packages if p['id'] == pkg_id), None)
         assert pkg is not None
-        assert pkg['manually_reviewed'] == False
+        assert not pkg['manually_reviewed']
         assert pkg.get('rejection_reason') == 'Foto borrosa'
-        print(f"Rejected package state verified: manually_reviewed=False, rejection_reason='Foto borrosa'")
+        print("Rejected package state verified: manually_reviewed=False, rejection_reason='Foto borrosa'")
     
     def test_pending_package_state(self, api_client, developer_token):
         """Verify pending package has manually_reviewed=False and no rejection_reason"""
@@ -341,16 +341,16 @@ class TestReviewIndicatorStates:
         pending_pkgs = [p for p in packages if not p.get('reviewed_by') and not p.get('rejection_reason')]
         if not pending_pkgs:
             # Reset a package to pending state
-            pkg_id = packages[7]['id'] if len(packages) > 7 else packages[0]['id']
+            packages[7]['id'] if len(packages) > 7 else packages[0]['id']
             # Note: There's no direct way to reset, but we can check the logic
-            print(f"No pending packages found - all may have been reviewed in previous tests")
+            print("No pending packages found - all may have been reviewed in previous tests")
             return
         
         pkg = pending_pkgs[0]
         # Pending state: manually_reviewed should be False (or not set), no rejection_reason
-        assert pkg.get('manually_reviewed') == False or pkg.get('manually_reviewed') is None
+        assert not pkg.get('manually_reviewed') or pkg.get('manually_reviewed') is None
         assert not pkg.get('rejection_reason')
-        print(f"Pending package state verified: manually_reviewed=False, rejection_reason=None")
+        print("Pending package state verified: manually_reviewed=False, rejection_reason=None")
 
 
 class TestKPICalculations:
@@ -367,7 +367,7 @@ class TestKPICalculations:
         packages = response.json()['packages']
         
         # Count manually reviewed packages
-        manual_reviewed_count = sum(1 for p in packages if p.get('manually_reviewed') == True)
+        manual_reviewed_count = sum(1 for p in packages if p.get('manually_reviewed'))
         total_packages = len(packages)
         
         print(f"KPI: Manual reviewed {manual_reviewed_count}/{total_packages}")
@@ -416,7 +416,7 @@ class TestResetPackageForTesting:
         packages = response.json()['packages']
         
         # Find packages that are reviewed and reset them
-        reviewed_pkgs = [p for p in packages if p.get('manually_reviewed') == True]
+        reviewed_pkgs = [p for p in packages if p.get('manually_reviewed')]
         if reviewed_pkgs:
             pkg_id = reviewed_pkgs[0]['id']
             # Reset by setting manually_reviewed to False without rejection note

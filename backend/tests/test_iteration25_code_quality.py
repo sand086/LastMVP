@@ -12,7 +12,6 @@ Tests for:
 8. Backend regression: POST /api/upload/history-orders accepts developer role (was 403 before)
 9. Backend regression: POST /api/journeys/from-cosmo accepts developer role (was 403 before)
 """
-import os
 import pytest
 import requests
 
@@ -99,7 +98,7 @@ class TestSystemHealthRegression:
         assert response.status_code == 200, f"Performance failed: {response.text}"
         data = response.json()
         assert "requests_per_hour" in data or "slowest_endpoints" in data
-        print(f"✓ System performance endpoint working")
+        print("✓ System performance endpoint working")
     
     def test_integrity_run_executes_checks(self, dev_token):
         """POST /api/system/integrity/run executes checks"""
@@ -154,7 +153,7 @@ class TestAdminModuleRegression:
         assert response.status_code == 200, f"Admin config failed: {response.text}"
         data = response.json()
         assert "ia_cost_config" in data or "exchange_rate" in data or "budget_alerts" in data
-        print(f"✓ Admin config endpoint working")
+        print("✓ Admin config endpoint working")
 
 
 class TestDashboardRegression:
@@ -254,7 +253,7 @@ class TestDependenciesRefactoring:
         assert response.status_code == 200, f"Journeys failed: {response.text}"
         data = response.json()
         assert "data" in data or isinstance(data, list), f"Unexpected response format: {type(data)}"
-        print(f"✓ Journeys endpoint working after dependencies refactoring")
+        print("✓ Journeys endpoint working after dependencies refactoring")
     
     def test_packages_search_works(self, dev_token):
         """GET /api/packages/search works after dependencies refactoring"""
@@ -283,7 +282,7 @@ class TestConfTestEnvVars:
             "password": TEST_DEV_PASSWORD
         })
         assert response.status_code == 200, f"Login with conftest creds failed: {response.text}"
-        print(f"✓ Login successful with conftest credentials")
+        print("✓ Login successful with conftest credentials")
 
 
 class TestHelperFunctionsRefactoring:
@@ -316,7 +315,7 @@ class TestHelperFunctionsRefactoring:
                 assert field in row, f"Missing field {field} in report row: {row.keys()}"
             print(f"✓ Routes report row structure correct: {list(row.keys())[:6]}...")
         else:
-            print(f"✓ Routes report working (no rows in date range)")
+            print("✓ Routes report working (no rows in date range)")
     
     def test_routes_report_totals_structure(self, dev_token):
         """Routes report totals have correct structure"""

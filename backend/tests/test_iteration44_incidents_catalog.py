@@ -25,12 +25,12 @@ def _login(email, password):
 
 @pytest.fixture(scope="module")
 def coord_session():
-    return _login("yael@me.mx", "LastMile2026")
+    return _login("yael@me.mx", os.environ.get("TEST_DEV_PASSWORD", "LastMile2026"))
 
 
 @pytest.fixture(scope="module")
 def dev_session():
-    return _login("dev@me.mx", "LastMile2026")
+    return _login("dev@me.mx", os.environ.get("TEST_DEV_PASSWORD", "LastMile2026"))
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +38,7 @@ def created_incident_ids():
     ids = []
     yield ids
     # cleanup after tests
-    s = _login("yael@me.mx", "LastMile2026")
+    s = _login("yael@me.mx", os.environ.get("TEST_DEV_PASSWORD", "LastMile2026"))
     for iid in ids:
         try:
             s.delete(f"{BASE_URL}/api/incidents/{iid}", timeout=10)

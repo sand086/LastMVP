@@ -14,8 +14,8 @@ from io import BytesIO
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-DEVELOPER_CREDS = {"email": "dev@me.mx", "password": "LastMile2026"}
-COORDINATOR_CREDS = {"email": "yael@me.mx", "password": "LastMile2026"}
+DEVELOPER_CREDS = {"email": "dev@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
+COORDINATOR_CREDS = {"email": "yael@me.mx", "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")}
 
 # Known provider for testing
 EXCLUSIVE_LOGISTICS_ID = "2b34d97d-c709-4dfc-94ec-71e534874bc8"
@@ -113,7 +113,7 @@ class TestSlaConfigPatch:
         get_response = requests.get(f"{BASE_URL}/api/admin/config", headers=headers)
         assert get_response.status_code == 200
         current_sla = get_response.json().get("sla_config", {})
-        original_default = current_sla.get("default_sla", 40)
+        current_sla.get("default_sla", 40)
         
         # Update with new value
         new_sla_config = {
@@ -132,7 +132,7 @@ class TestSlaConfigPatch:
         
         assert patch_response.status_code == 200, f"Expected 200, got {patch_response.status_code}: {patch_response.text}"
         patch_data = patch_response.json()
-        assert patch_data.get("success") == True, "Response should indicate success"
+        assert patch_data.get("success"), "Response should indicate success"
         assert patch_data.get("section") == "sla_config", "Response should confirm section"
         
         # Verify the update persisted
@@ -185,7 +185,7 @@ class TestSlaConfigPatch:
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
         data = response.json()
         assert "sla_config" in data
-        print(f"Coordinator can read config: sla_config present")
+        print("Coordinator can read config: sla_config present")
 
 
 class TestLiquidacionExportUsesSlaConfig:
@@ -252,7 +252,7 @@ class TestLiquidacionExportUsesSlaConfig:
                     # For Exclusive Logistics, SLA should be 55
                     if "Exclusive" in sheet_name:
                         if cost_formula and "55" in str(cost_formula):
-                            print(f"✓ Exclusive Logistics uses custom SLA 55")
+                            print("✓ Exclusive Logistics uses custom SLA 55")
                         elif cost_formula:
                             print(f"Formula found: {cost_formula}")
             

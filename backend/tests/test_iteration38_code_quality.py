@@ -29,7 +29,7 @@ class TestHealthAndAuth:
         """Test coordinator login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -41,7 +41,7 @@ class TestHealthAndAuth:
         """Test developer login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "dev@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         assert response.status_code == 200
         data = response.json()
@@ -58,7 +58,7 @@ class TestJourneyAPIs:
         """Get auth token for coordinator"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         if response.status_code == 200:
             return response.json().get("access_token")
@@ -153,7 +153,7 @@ class TestReportsAPIs:
         """Get auth token for coordinator"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         if response.status_code == 200:
             return response.json().get("access_token")
@@ -214,7 +214,7 @@ class TestIncidentsAPI:
         """Get auth token for coordinator"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         if response.status_code == 200:
             return response.json().get("access_token")
@@ -273,7 +273,7 @@ class TestPackageReviewAPI:
         """Get auth token for coordinator"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         if response.status_code == 200:
             return response.json().get("access_token")
@@ -318,7 +318,7 @@ class TestConfidenceAndDiscrepancy:
         """Get auth token for coordinator"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "yael@me.mx",
-            "password": "LastMile2026"
+            "password": os.environ.get("TEST_DEV_PASSWORD", "LastMile2026")
         })
         if response.status_code == 200:
             return response.json().get("access_token")

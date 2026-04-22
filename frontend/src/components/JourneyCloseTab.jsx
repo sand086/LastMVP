@@ -32,6 +32,27 @@ export const JourneyCloseTab = ({
     handlePreCloseJourney,
     toggleFailedPackage,
 }) => {
+    // Memoizar el filtro de candidatos para no recalcular en cada render
+    const filteredReturnCandidates = React.useMemo(() => {
+        if (!packageSearchTerm) return returnCandidates;
+        const search = packageSearchTerm.toLowerCase();
+        return returnCandidates.filter(pkg => (
+            (pkg.tracking_number || '').toLowerCase().includes(search) ||
+            (pkg.order_reference_id || '').toLowerCase().includes(search) ||
+            (pkg.recipient_name || '').toLowerCase().includes(search)
+        ));
+    }, [returnCandidates, packageSearchTerm]);
+
+    // Memoizar contadores de imputabilidad (se usan en 2 secciones)
+    const imputabilityCounts = React.useMemo(() => {
+        const incs = journey.incidents || [];
+        return {
+            me: incs.filter(i => i.imputability === 'ME / Mensajero').length,
+            client: incs.filter(i => i.imputability === 'Cliente (destinatario)').length,
+            pending: incs.filter(i => !i.imputability || i.imputability === 'Por definir').length,
+        };
+    }, [journey.incidents]);
+
     if (journey.status === 'in_progress' && canEdit()) {
         return (
             <Card>
@@ -109,10 +130,10 @@ export const JourneyCloseTab = ({
                             <p className="text-xs text-slate-500 uppercase mb-2">Resumen de imputabilidad de incidencias</p>
                             <div className="flex gap-4 text-sm">
                                 <span className="text-red-700 font-medium">
-                                    Imputables a ME: {journey.incidents.filter(i => i.imputability === 'ME / Mensajero').length}
+                                    Imputables a ME: {imputabilityCounts.me}
                                 </span>
                                 <span className="text-amber-700 font-medium">
-                                    Imputables al cliente: {journey.incidents.filter(i => i.imputability === 'Cliente (destinatario)').length}
+                                    Imputables al cliente: {imputabilityCounts.client}
                                 </span>
                             </div>
                         </div>
@@ -163,17 +184,7 @@ export const JourneyCloseTab = ({
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {returnCandidates
-                                            .filter(pkg => {
-                                                if (!packageSearchTerm) return true;
-                                                const search = packageSearchTerm.toLowerCase();
-                                                return (
-                                                    (pkg.tracking_number || '').toLowerCase().includes(search) ||
-                                                    (pkg.order_reference_id || '').toLowerCase().includes(search) ||
-                                                    (pkg.recipient_name || '').toLowerCase().includes(search)
-                                                );
-                                            })
-                                            .map((pkg) => {
+                                        {filteredReturnCandidates.map((pkg) => {
                                                 const isFailed = failedPackages.find(f => f.id === pkg.id);
                                                 return (
                                                     <tr key={pkg.id} className={isFailed ? 'bg-red-50' : ''}>
@@ -207,14 +218,7 @@ export const JourneyCloseTab = ({
                                             })}
                                     </tbody>
                                 </table>
-                                {packageSearchTerm && returnCandidates.filter(pkg => {
-                                    const search = packageSearchTerm.toLowerCase();
-                                    return (
-                                        (pkg.tracking_number || '').toLowerCase().includes(search) ||
-                                        (pkg.order_reference_id || '').toLowerCase().includes(search) ||
-                                        (pkg.recipient_name || '').toLowerCase().includes(search)
-                                    );
-                                }).length === 0 && (
+                                {packageSearchTerm && filteredReturnCandidates.length === 0 && (
                                     <div className="text-center py-6 text-slate-500">
                                         <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
                                         <p className="text-sm">No se encontraron paquetes con "{packageSearchTerm}"</p>
@@ -393,13 +397,13 @@ export const JourneyCloseTab = ({
                             <p className="text-xs text-slate-500 uppercase mb-2">Resumen de imputabilidad</p>
                             <div className="flex gap-4 text-sm">
                                 <span className="text-red-700 font-medium">
-                                    Imputables a ME: {journey.incidents.filter(i => i.imputability === 'ME / Mensajero').length}
+                                    Imputables a ME: {imputabilityCounts.me}
                                 </span>
                                 <span className="text-amber-700 font-medium">
-                                    Imputables al cliente: {journey.incidents.filter(i => i.imputability === 'Cliente (destinatario)').length}
+                                    Imputables al cliente: {imputabilityCounts.client}
                                 </span>
                                 <span className="text-slate-600">
-                                    Por definir: {journey.incidents.filter(i => !i.imputability || i.imputability === 'Por definir').length}
+                                    Por definir: {imputabilityCounts.pending}
                                 </span>
                             </div>
                         </div>

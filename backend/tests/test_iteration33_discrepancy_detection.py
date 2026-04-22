@@ -131,7 +131,7 @@ class TestDiscrepancyDetection:
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
         
         data = response.json()
-        assert data.get("success") == True, "Response should indicate success"
+        assert data.get("success"), "Response should indicate success"
         assert data.get("decision") == "confirm_return", "Response should echo the decision"
         assert "package_id" in data, "Response should contain package_id"
         
@@ -174,7 +174,7 @@ class TestDiscrepancyDetection:
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
         
         data = response.json()
-        assert data.get("success") == True, "Response should indicate success"
+        assert data.get("success"), "Response should indicate success"
         assert data.get("decision") == "mark_valid", "Response should echo the decision"
         
         # Verify the package discrepancy is cleared and status unchanged
@@ -188,11 +188,11 @@ class TestDiscrepancyDetection:
         assert updated_pkg is not None, "Package not found after update"
         # Status should remain unchanged (not changed to returned)
         assert updated_pkg.get("status") == original_status or updated_pkg.get("status") != "returned" or original_status == "returned", \
-            f"Status should remain unchanged or not be 'returned' unless it was already"
+            "Status should remain unchanged or not be 'returned' unless it was already"
         
         # Discrepancy should be cleared
         discrepancy = updated_pkg.get("discrepancy", {})
-        assert discrepancy.get("detected") == False, "Discrepancy should be cleared (detected=False)"
+        assert not discrepancy.get("detected"), "Discrepancy should be cleared (detected=False)"
         
         # Manual review should be recorded
         manual_review = updated_pkg.get("manual_review", {})
