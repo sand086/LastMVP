@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getAiEvalJobs, getAiEvalJob, createAiEvalJobManual, cancelAiEvalJob } from '../lib/api';
+import { getAiEvalJobs, getAiEvalJob, createAiEvalJobManual, cancelAiEvalJob, retryAiEvalErrors } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -10,7 +10,7 @@ import {
 } from '../components/ui/dialog';
 import {
     Activity, Search, RefreshCw, Loader2, ChevronLeft, ChevronRight,
-    Clock, Zap, Cpu, XCircle, Eye, RotateCcw,
+    Clock, Zap, Cpu, XCircle, Eye, RotateCcw, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -115,6 +115,25 @@ const MonitorProcesos = () => {
         }
     };
 
+    const [retryingAll, setRetryingAll] = useState(false);
+    const handleRetryAllErrors = async () => {
+        if (!window.confirm('Reencolar TODAS las rutas con jobs en Error? Se crearán nuevos jobs de evaluación (hasta 50 rutas).')) return;
+        setRetryingAll(true);
+        try {
+            const res = await retryAiEvalErrors({ max_jobs: 50 });
+            if (res.data.retried > 0) {
+                toast.success(`${res.data.retried} rutas reencoladas (${res.data.skipped} ya estaban en curso)`);
+            } else {
+                toast.info(res.data.message || 'No hay jobs Error para reintentar');
+            }
+            fetchJobs();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al reintentar');
+        } finally {
+            setRetryingAll(false);
+        }
+    };
+
     return (
         <div className="space-y-4 sm:space-y-6" data-testid="monitor-procesos-page">
             {/* Header */}
@@ -150,6 +169,10 @@ const MonitorProcesos = () => {
                     </SelectContent>
                 </Select>
                 <Button variant="outline" size="sm" onClick={fetchJobs} data-testid="refresh-jobs-btn"><RefreshCw className="w-4 h-4 mr-1" />Actualizar</Button>
+                <Button variant="outline" size="sm" onClick={handleRetryAllErrors} disabled={retryingAll} className="text-amber-700 border-amber-300 hover:bg-amber-50" data-testid="retry-all-errors-btn" title="Reencola todas las rutas en estado Error">
+                    {retryingAll ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-1" />}
+                    Reintentar Errores
+                </Button>
                 <span className="text-xs text-slate-400">{total} jobs</span>
             </div>
 
@@ -245,6 +268,14 @@ const MonitorProcesos = () => {
                                     {detailJob.triggered_by_user && ` | ${detailJob.triggered_by_user}`}
                                 </DialogDescription>
                             </DialogHeader>
+
+                            {/* Friendly error banner */}
+                            {detailJob.error_detail && (
+                                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700" data-testid="job-error-detail">
+                                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                                    <span>{detailJob.error_detail}</span>
+                                </div>
+                            )}
 
                             {/* Summary */}
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-3">

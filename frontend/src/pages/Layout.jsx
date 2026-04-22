@@ -411,8 +411,20 @@ const Layout = () => {
                 toast.info('No se encontraron registros para actualizar');
             }
         } catch (err) {
-            toast.error(err.response?.data?.detail || 'Error al actualizar notas');
-            setNotesResult({ error: err.response?.data?.detail || 'Error' });
+            let msg = err.response?.data?.detail;
+            if (!msg) {
+                if (err.response?.status === 413) {
+                    msg = 'Archivo demasiado grande (límite del servidor). Reduce a menos de 10MB.';
+                } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+                    msg = 'Tiempo de espera agotado. Intenta con un archivo más pequeño.';
+                } else if (err.message === 'Network Error') {
+                    msg = 'Error de red. Verifica tu conexión e intenta de nuevo.';
+                } else {
+                    msg = err.message || 'Error al actualizar notas';
+                }
+            }
+            toast.error(msg);
+            setNotesResult({ error: msg });
         } finally {
             setNotesUploading(false);
         }

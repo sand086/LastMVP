@@ -133,6 +133,70 @@ async def cancel_job(job_id: str, user: dict = Depends(require_role(["coordinato
     return {"message": "Job cancelado"}
 
 
+# ── POST /api/ai-evaluation/jobs/retry-errors ───────────────────
+class RetryErrorsRequest(BaseModel):
+    job_ids: Optional[list] = None  # None → all Error jobs
+    max_jobs: int = 50
+
+
+@router.post("/jobs/retry-errors")
+async def retry_error_jobs(
+    data: RetryErrorsRequest = RetryErrorsRequest(),
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Re-encola rutas de jobs en estado Error. Útil para recuperar tras agotamiento
+    de saldo, bugs corregidos, u otros fallos masivos."""
+    query = {"status": "Error"}
+    if data.job_ids:
+        query["job_id"] = {"$in": data.job_ids}
+
+    errored = await db.ai_evaluation_jobs.find(
+        query, {"_id": 0, "route_id": 1, "job_id": 1}
+    ).sort("fecha_creacion", -1).to_list(max(1, min(data.max_jobs, 200)))
+
+    if not errored:
+        return {"message": "No hay jobs Error para reintentar", "retried": 0}
+
+    # Deduplicate por route_id
+    seen = set()
+    unique_routes = []
+    for j in errored:
+        rid = j.get("route_id")
+        if rid and rid not in seen:
+            seen.add(rid)
+            unique_routes.append(rid)
+
+    retried = 0
+    skipped = 0
+    for route_id in unique_routes:
+        # Skip if there's already a pending/running job for this route
+        existing = await db.ai_evaluation_jobs.find_one(
+            {"route_id": route_id, "status": {"$in": ["En_Cola", "Evaluando"]}},
+            {"_id": 0, "job_id": 1},
+        )
+        if existing:
+            skipped += 1
+            continue
+
+        result = await enqueue_job(
+            db,
+            route_id=route_id,
+            triggered_by="user_manual",
+            triggered_by_user=user.get("email", user.get("name", "")),
+            priority="NORMAL",
+            force_reevaluate=True,
+        )
+        if result and result.get("job_id"):
+            retried += 1
+
+    return {
+        "message": f"{retried} rutas reencoladas ({skipped} ya estaban en curso)",
+        "retried": retried,
+        "skipped": skipped,
+        "total_routes": len(unique_routes),
+    }
+
+
 # ── GET /api/ai-evaluation/health ───────────────────────────────
 @router.get("/health")
 async def worker_health(user: dict = Depends(get_current_user)):

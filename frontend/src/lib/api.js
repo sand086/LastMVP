@@ -286,6 +286,7 @@ export const getAiEvalJob = (jobId) => api.get(`/ai-evaluation/jobs/${jobId}`);
 export const createAiEvalJobManual = (data) => api.post('/ai-evaluation/jobs/manual', data);
 export const createAiEvalJobGuia = (data) => api.post('/ai-evaluation/jobs/manual/guia', data);
 export const cancelAiEvalJob = (jobId) => api.delete(`/ai-evaluation/jobs/${jobId}`);
+export const retryAiEvalErrors = (data) => api.post('/ai-evaluation/jobs/retry-errors', data || {});
 
 
 // ── Architecture (live auto-generated documentation) ──────────────
