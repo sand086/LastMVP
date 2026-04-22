@@ -168,6 +168,29 @@ async def seed_database():
     }
 
 
+async def _chunked_delete(collection, query: dict, chunk_size: int = 500) -> int:
+    """Delete documents in chunks to avoid MongoDB timeouts on large datasets.
+    Relies on the query matching 'id' (UUID). Works for any {'field': {'$in': [...]}}
+    query by processing in ID batches when applicable."""
+    # Optimization: for simple {} or small-match queries, single delete is faster.
+    # For $in queries with many IDs, chunk them.
+    if "$in" in str(query):
+        # Extract the $in list and chunk
+        key = next(iter(query))
+        ids = query[key].get("$in", [])
+        if len(ids) <= chunk_size:
+            result = await collection.delete_many(query)
+            return result.deleted_count or 0
+        total = 0
+        for i in range(0, len(ids), chunk_size):
+            batch_q = {key: {"$in": ids[i:i + chunk_size]}}
+            result = await collection.delete_many(batch_q)
+            total += result.deleted_count or 0
+        return total
+    result = await collection.delete_many(query)
+    return result.deleted_count or 0
+
+
 # ==================== CLEANUP ====================
 
 class CleanupRequest(BaseModel):
@@ -261,19 +284,19 @@ async def cleanup_routes_packages(
                 "error_detail": "Cancelado por limpieza total de rutas/pedidos.",
             }},
         )
-        j_del = await db.journeys.delete_many({})
-        p_del = await db.packages.delete_many({})
-        i_del = await db.incidents.delete_many({})
-        aij_del = await db.ai_evaluation_jobs.delete_many({})
-        redit_del = await db.route_edits.delete_many({})
+        j_del_count = await _chunked_delete(db.journeys, {})
+        p_del_count = await _chunked_delete(db.packages, {})
+        i_del_count = await _chunked_delete(db.incidents, {})
+        aij_del_count = await _chunked_delete(db.ai_evaluation_jobs, {})
+        redit_del_count = await _chunked_delete(db.route_edits, {})
         return {
             "message": "Datos limpiados (todo)",
             "deleted": {
-                "journeys": j_del.deleted_count,
-                "packages": p_del.deleted_count,
-                "incidents": i_del.deleted_count,
-                "ai_evaluation_jobs": aij_del.deleted_count,
-                "route_edits": redit_del.deleted_count,
+                "journeys": j_del_count,
+                "packages": p_del_count,
+                "incidents": i_del_count,
+                "ai_evaluation_jobs": aij_del_count,
+                "route_edits": redit_del_count,
             },
             "cancelled_active_jobs": cancel_all.modified_count or 0,
         }
@@ -296,21 +319,21 @@ async def cleanup_routes_packages(
         }},
     )
 
-    j_del = await db.journeys.delete_many(jquery)
-    p_del = await db.packages.delete_many({"journey_id": {"$in": journey_ids}})
-    i_del = await db.incidents.delete_many({"journey_id": {"$in": journey_ids}})
-    aij_del = await db.ai_evaluation_jobs.delete_many({"route_id": {"$in": journey_ids}})
-    redit_del = await db.route_edits.delete_many({"journey_id": {"$in": journey_ids}})
+    j_del_count = await _chunked_delete(db.journeys, jquery)
+    p_del_count = await _chunked_delete(db.packages, {"journey_id": {"$in": journey_ids}})
+    i_del_count = await _chunked_delete(db.incidents, {"journey_id": {"$in": journey_ids}})
+    aij_del_count = await _chunked_delete(db.ai_evaluation_jobs, {"route_id": {"$in": journey_ids}})
+    redit_del_count = await _chunked_delete(db.route_edits, {"journey_id": {"$in": journey_ids}})
     return {
         "message": f"Datos limpiados del rango {data.date_from or '…'} → {data.date_to or '…'}",
         "date_from": data.date_from,
         "date_to": data.date_to,
         "deleted": {
-            "journeys": j_del.deleted_count,
-            "packages": p_del.deleted_count,
-            "incidents": i_del.deleted_count,
-            "ai_evaluation_jobs": aij_del.deleted_count,
-            "route_edits": redit_del.deleted_count,
+            "journeys": j_del_count,
+            "packages": p_del_count,
+            "incidents": i_del_count,
+            "ai_evaluation_jobs": aij_del_count,
+            "route_edits": redit_del_count,
         },
         "cancelled_active_jobs": cancel_result.modified_count or 0,
     }

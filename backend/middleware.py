@@ -195,7 +195,32 @@ class AuditMiddleware(BaseHTTPMiddleware):
             logger.error(f"Middleware logging error: {e}")
 
     async def _track_error(self, db, method, path, status_code, client_ip, error_detail, now_iso):
-        """Track 4xx/5xx errors in system_errors collection."""
+        """Track 4xx/5xx errors in system_errors collection.
+        Skip 'expected' errors (session expired, entity not found after delete, empty-result 404s)
+        para no contaminar el Error Tracker con falsos positivos."""
+        # 401 en endpoints con auth: expira sesión = flujo normal, no es error
+        if status_code == 401:
+            return
+
+        # 404 en patrones de business-logic esperado
+        if status_code == 404:
+            expected_404_prefixes = (
+                "/api/journeys/",          # ruta eliminada / URL tipeada
+                "/api/packages/",          # paquete eliminado
+                "/api/clients/",           # cliente eliminado
+                "/api/providers/",         # proveedor eliminado
+                "/api/users/",             # usuario eliminado
+                "/api/lumi/active-context",# ruta del LumiChat ya borrada
+                "/api/lumi/tools/journey-lookup",
+                "/api/ai-evaluation/jobs/",# job inexistente
+                "/api/architecture/snapshots/",
+                "/api/admin/export-liquidacion",  # período sin datos
+                "/api/admin/routes-report",       # idem
+                "/api/reports/export",             # idem
+            )
+            if any(path.startswith(p) for p in expected_404_prefixes):
+                return
+
         error_key = f"{method}:{path}:{status_code}"
         existing = await db.system_errors.find_one(
             {"error_key": error_key, "reviewed": False}, {"_id": 0}
