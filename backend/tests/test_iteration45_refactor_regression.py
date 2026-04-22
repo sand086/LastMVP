@@ -131,8 +131,8 @@ class TestAiEvalWorkerRefactor:
                 assert g["status"] == "En_Cola"
                 assert "tokens" in g and "retries" in g
             pytest.skip(
-                f"Worker saturated with pre-existing Evaluando jobs; enqueue contract verified. "
-                f"(This is NOT a refactor regression — same behavior before/after P3.)"
+                "Worker saturated with pre-existing Evaluando jobs; enqueue contract verified. "
+                "(This is NOT a refactor regression — same behavior before/after P3.)"
             )
         # Contract that the refactor must preserve:
         assert final_job["progress_percent"] == 100

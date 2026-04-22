@@ -111,6 +111,7 @@ import PulseBanner from '../components/PulseBanner';
 import { JourneyStartTab } from '../components/JourneyStartTab';
 import { JourneyIncidentsTab } from '../components/JourneyIncidentsTab';
 import { JourneyCloseTab } from '../components/JourneyCloseTab';
+import { ProviderEditDialogs } from '../components/journey/ProviderEditDialogs';
 
 const JourneyDetail = () => {
     const { id } = useParams();
@@ -1187,57 +1188,19 @@ const JourneyDetail = () => {
                 packageInfo={mainCarouselPkgInfo}
             />
 
-            {/* Provider Edit Dialog (P1) */}
-            <Dialog open={showProviderEdit} onOpenChange={setShowProviderEdit}>
-                <DialogContent className="max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle className="font-heading">Cambiar proveedor de ruta</DialogTitle>
-                        <DialogDescription>
-                            Este cambio aplica solo a esta ruta. No modifica el driver maestro.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-3">
-                        <div className="space-y-1">
-                            <Label>Proveedor</Label>
-                            <Select value={selectedProvider} onValueChange={setSelectedProvider}>
-                                <SelectTrigger data-testid="route-provider-select">
-                                    <SelectValue placeholder="Seleccionar proveedor" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {providersList.map(p => (
-                                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowProviderEdit(false)}>Cancelar</Button>
-                        <Button onClick={handleSaveProvider} disabled={providerEditSaving} data-testid="save-route-provider-btn">
-                            {providerEditSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                            Guardar
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Provider Change Confirmation for Closed Routes */}
-            <AlertDialog open={showProviderConfirm} onOpenChange={setShowProviderConfirm}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle className="font-heading">Ruta completada</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Esta ruta ya fue completada. El cambio de proveedor se registrara en el historial de auditoria.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={doSaveProvider} data-testid="confirm-provider-change-btn">
-                            Confirmar cambio
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
+            {/* Provider Edit + Confirm Dialogs */}
+            <ProviderEditDialogs
+                showProviderEdit={showProviderEdit}
+                setShowProviderEdit={setShowProviderEdit}
+                selectedProvider={selectedProvider}
+                setSelectedProvider={setSelectedProvider}
+                providersList={providersList}
+                handleSaveProvider={handleSaveProvider}
+                providerEditSaving={providerEditSaving}
+                showProviderConfirm={showProviderConfirm}
+                setShowProviderConfirm={setShowProviderConfirm}
+                doSaveProvider={doSaveProvider}
+            />
         </div>
     );
 };

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from dependencies import db, get_current_user, require_role
+from pagination_utils import paginated_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Manuals"])
@@ -66,7 +67,8 @@ async def list_manuals(
         ]
 
     manuals = await db.manuals.find(query, {"_id": 0}).sort("sort_order", 1).to_list(200)
-    return {"data": manuals, "total": len(manuals)}
+    # Standardized envelope (page=1, page_size=200 = no pagination in practice)
+    return paginated_response(manuals, total=len(manuals), page=1, page_size=max(len(manuals), 1))
 
 
 # ── PUBLIC: Get manual by slug ──────────────────────────────────
@@ -85,7 +87,7 @@ async def get_manual(slug: str, user: dict = Depends(get_current_user)):
 @router.get("/manuals-admin")
 async def list_manuals_admin(user: dict = Depends(require_role(["coordinator", "developer"]))):
     manuals = await db.manuals.find({}, {"_id": 0}).sort("sort_order", 1).to_list(200)
-    return {"data": manuals, "total": len(manuals)}
+    return paginated_response(manuals, total=len(manuals), page=1, page_size=max(len(manuals), 1))
 
 
 # ── ADMIN: Create manual ────────────────────────────────────────

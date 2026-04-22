@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 47 regression testing for P2+P3 refactor batch (pagination envelope harmonization + GuiasTab/JourneyDetail/Layout component extraction). Backend: 12/12 pytest pass — paginated_response helper returns BOTH flat (data,total,page,pages,page_size) AND nested (pagination.{total,page,page_size,total_pages,pages}) shapes simultaneously on /api/ai-evaluation/jobs, /api/journeys (+legacy total_count), /api/manuals, /api/manuals-admin. Legacy consumer paths validated: TokenUsageTab (pagination.total_pages), RoutesReportTab (pagination.page_size), QualityTabV2 (res.data.pages flat). Regressions green: /api/ai-evaluation/health, cancel_job 404/400 differentiation, incident 'otro' requires comentario_asesor (422). Frontend: Dashboard .lm-dashboard class renders; /monitor lists 20 jobs (envelope res.data.data read correctly); /layout wizard step 1 renders history-file-zone (route-file-zone correctly gated to step 2); /documentation 3 tabs + main content; JourneyDetail Guias tab shows ALL 6 KPIs (kpi-avg-score/complete/ai-evaluated/manual-reviewed/discrepancies/avg-confidence) + segment pills (segment-all/alert) + 3 action buttons (evaluate-all-btn/resync-kosmo-btn/evaluate-confidence-btn). useGuiasMetrics hook extraction preserved all metric values. Refactor is transparent — zero functional regressions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "JourneyDetail Incidencias list", "issues": ["Pre-existing React duplicate key warning: 'Encountered two children with the same key: En tiempo' — likely in incidents table when multiple incidents share the same estado label. Not caused by this refactor, but should be addressed by adding unique suffix/id to list keys."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration47_pagination_envelope.py",
+    "/app/test_reports/pytest/pytest_results_iter47.xml"
+  ],
+  "action_items": [
+    "(LOW / pre-existing) Fix React duplicate key warning on JourneyDetail incidents list — items use non-unique keys (e.g. 'En tiempo'). Use unique id suffix.",
+    "(INFO) Refactor successfully validated — safe to merge."
+  ],
+  "critical_code_review_comments": [
+    "pagination_utils.paginated_response() implementation is clean: total_pages computed with ceil via (total + page_size - 1) // page_size, guarded against page_size=0. Both flat + nested shapes returned in ONE dict, keeping legacy readers functional without code changes on consumer side.",
+    "journey_routes.py correctly overrides the pagination block from paginated_response() with an explicit dict that includes the legacy 'total_count' key — preserving backwards-compat with consumers that read res.data.pagination.total_count. This two-step pattern (spread helper, then overwrite with extended dict) is pragmatic and correct.",
+    "manual_routes.py uses paginated_response with page=1, page_size=max(len(manuals),1) — sensible when pagination is not actually in use; guards against div-by-zero when manuals list is empty.",
+    "ai_eval_routes.list_jobs adopted paginated_response cleanly; removed ad-hoc envelope construction. All 3 legacy reader patterns verified live (flat.pages, nested.total_pages, nested.page_size).",
+    "(Observed in console) React key collision warning on incidents list — orthogonal to this refactor, noted for cleanup.",
+    "Component extraction (useGuiasMetrics / GuiasKpisRow / GuiasSegmentFilters / ProviderEditDialogs / LayoutSidebar) preserves all data-testid attributes — verified via runtime checks on all 11 expected testids in Guias tab. No behavioral drift."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration47_pagination_envelope.py (new - 12 tests covering envelope + regressions)"
+  ],
+  "success_rate": {"backend": "100% (12/12 pass, 0 failures, 0 skips)", "frontend": "100% (Dashboard CSS, /monitor, /layout wizard, /documentation tabs, Guias tab all 6 KPIs + segments + 3 action buttons)"},
+  "test_credentials": "yael@me.mx / LastMile2026 (Coordinator), dev@me.mx / LastMile2026 (Dev) — verified working",
+  "seed_data_creation": "None — test_incident_otro_requires_comentario expects 422 before persistence, no data written.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Test file /app/backend/tests/test_iteration47_pagination_envelope.py provides a reusable _assert_envelope(body, require_total_count) helper that validates the dual-shape envelope. When adding new list endpoints, adopt pagination_utils.paginated_response() and extend this test. Journey listing has a special 'pagination.total_count' legacy key that is NOT auto-added by the helper — must be added manually in journey_routes.py. /api/ai-evaluation/jobs returns job items with 'id' key (not 'job_id' or '_id'). Preview URL: https://lastmile-mvp.preview.emergentagent.com",
+  "rca of the issue": "N/A — refactor is transparent, no regressions detected."
+}

@@ -11,6 +11,7 @@ import asyncio
 
 from dependencies import db, get_current_user, require_role
 from ai_eval_worker import enqueue_job
+from pagination_utils import paginated_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai-evaluation", tags=["AI Evaluation"])
@@ -57,7 +58,7 @@ async def list_jobs(
         query, {"_id": 0, "guias_detail": 0}
     ).sort("fecha_creacion", -1).skip(skip).to_list(limit)
 
-    return {"data": jobs, "total": total, "page": page, "pages": max(1, (total + limit - 1) // limit)}
+    return paginated_response(jobs, total=total, page=page, page_size=limit)
 
 
 # ── GET /api/ai-evaluation/jobs/{job_id} ────────────────────────

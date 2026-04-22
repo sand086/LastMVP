@@ -25,6 +25,7 @@ from evidence_scoring import (
 )
 from ws_manager import ws_manager
 from routes.webhook_routes import dispatch_webhook_event
+from pagination_utils import paginated_response
 import logging
 
 logger = logging.getLogger(__name__)
@@ -95,12 +96,15 @@ async def get_journeys(
         j["open_incidents_count"] = open_incident_counts.get(j["id"], 0)
 
     return {
-        "data": journeys,
+        **paginated_response(journeys, total=total_count, page=page, page_size=page_size),
+        # Backwards compat: viejos consumidores leen pagination.total_count
         "pagination": {
             "page": page,
             "page_size": page_size,
+            "total": total_count,
             "total_count": total_count,
             "total_pages": total_pages,
+            "pages": total_pages,
         },
     }
 

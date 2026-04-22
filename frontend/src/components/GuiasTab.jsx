@@ -22,8 +22,10 @@ import EvidenceCarousel from './EvidenceCarousel';
 import ReviewModal from './ReviewModal';
 import {
     ScoreCircle, ConfidenceBar, StatusPill, ReviewIndicator,
-    SeverityBadge, getMaxSeverity, KpiCard, SEGMENT_FILTERS,
+    SeverityBadge, getMaxSeverity,
 } from './guias/GuiasHelpers';
+import { GuiasKpisRow, GuiasSegmentFilters } from './guias/GuiasKpisRow';
+import { useGuiasMetrics } from './guias/useGuiasMetrics';
 import GuiasPackageDetail from './guias/GuiasPackageDetail';
 
 /* ─── Main component ─── */
@@ -63,6 +65,13 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
 
     useEffect(() => { setReviewOverrides({}); setSelectedPkgs({}); }, [packages]);
 
+    // Derived metrics + filtered list (memoized via custom hook)
+    const { mergedPackages, kpis, aiErrorSummary, segmentCounts, filteredPackages } = useGuiasMetrics(
+        packages,
+        reviewOverrides,
+        segment,
+    );
+
     const startPolling = useCallback(() => {
         if (pollingRef.current) return;
         pollingRef.current = setInterval(async () => {
@@ -91,60 +100,6 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
             if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
         };
     }, []);
-
-    const mergedPackages = useMemo(() => {
-        return packages.map(p => {
-            const override = reviewOverrides[p.id];
-            return override ? { ...p, ...override } : p;
-        });
-    }, [packages, reviewOverrides]);
-
-    const kpis = useMemo(() => {
-        const total = mergedPackages.length;
-        const withScore = mergedPackages.filter(p => p.ai_score != null);
-        const avgScore = withScore.length > 0 ? Math.round(withScore.reduce((s, p) => s + p.ai_score, 0) / withScore.length) : 0;
-        const complete = withScore.filter(p => p.ai_score === 100).length;
-        const aiEvaluated = withScore.length;
-        const manualReviewed = mergedPackages.filter(p => p.manually_reviewed || p.manual_review?.decision).length;
-        const discrepancies = mergedPackages.filter(p => p.discrepancy?.detected).length;
-        const withConfidence = mergedPackages.filter(p => p.confidence?.score != null);
-        const avgConfidence = withConfidence.length > 0
-            ? Math.round(withConfidence.reduce((s, p) => s + p.confidence.score, 0) / withConfidence.length)
-            : null;
-        return { avgScore, complete, totalScored: withScore.length, aiEvaluated, manualReviewed, totalPkgs: total, discrepancies, avgConfidence };
-    }, [mergedPackages]);
-
-    const aiErrorSummary = useMemo(() => {
-        const errorMap = {};
-        mergedPackages.forEach(p => (p.ai_errors || []).forEach(e => { errorMap[e] = (errorMap[e] || 0) + 1; }));
-        return Object.entries(errorMap).sort((a, b) => b[1] - a[1]);
-    }, [mergedPackages]);
-
-    const segmentCounts = useMemo(() => ({
-        all: mergedPackages.length,
-        alert: mergedPackages.filter(p => (p.ai_errors || []).length > 0).length,
-        discrepancy: mergedPackages.filter(p => p.discrepancy?.detected).length,
-        no_evidence: mergedPackages.filter(p => (p.photos_count || 0) === 0 && !(p.kosmo_proof_urls?.length)).length,
-        pending_review: mergedPackages.filter(p => !p.manually_reviewed && !p.rejection_reason && !p.manual_review?.decision).length,
-    }), [mergedPackages]);
-
-    const filteredPackages = useMemo(() => {
-        let list = [...mergedPackages];
-        if (segment === 'alert') list = list.filter(p => (p.ai_errors || []).length > 0);
-        if (segment === 'discrepancy') list = list.filter(p => p.discrepancy?.detected);
-        if (segment === 'no_evidence') list = list.filter(p => (p.photos_count || 0) === 0 && !(p.kosmo_proof_urls?.length));
-        if (segment === 'pending_review') list = list.filter(p => !p.manually_reviewed && !p.rejection_reason && !p.manual_review?.decision);
-        list.sort((a, b) => {
-            const aDisc = a.discrepancy?.detected ? 1 : 0;
-            const bDisc = b.discrepancy?.detected ? 1 : 0;
-            if (bDisc !== aDisc) return bDisc - aDisc;
-            const aErr = (a.ai_errors || []).length;
-            const bErr = (b.ai_errors || []).length;
-            if (bErr !== aErr) return bErr - aErr;
-            return (a.order_reference_id || a.tracking_number || '').localeCompare(b.order_reference_id || b.tracking_number || '');
-        });
-        return list;
-    }, [mergedPackages, segment]);
 
     const findNextPending = useCallback((currentId) => {
         const idx = filteredPackages.findIndex(p => p.id === currentId);
@@ -371,75 +326,20 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                 )}
             </div>
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <KpiCard label="Score promedio" value={`${kpis.avgScore}%`} color={kpis.avgScore >= 90 ? 'emerald' : kpis.avgScore >= 60 ? 'amber' : 'red'} testId="kpi-avg-score" />
-                <KpiCard label="Completos" value={`${kpis.complete}/${kpis.totalScored}`} color="emerald" testId="kpi-complete" />
-                <KpiCard label="Evaluados IA" value={`${kpis.aiEvaluated}/${kpis.totalPkgs}`} color="blue" testId="kpi-ai-evaluated" />
-                <KpiCard label="Revisión manual" value={`${kpis.manualReviewed}/${kpis.totalPkgs}`} color="violet" testId="kpi-manual-reviewed" />
-                <KpiCard label="Discrepancias" value={kpis.discrepancies} color={kpis.discrepancies > 0 ? 'red' : 'emerald'}
-                    accent={kpis.discrepancies > 0 ? 'red' : undefined} testId="kpi-discrepancies" />
-                <KpiCard label="Confianza prom." value={kpis.avgConfidence != null ? `${kpis.avgConfidence}%` : '—'}
-                    color={kpis.avgConfidence >= 70 ? 'emerald' : kpis.avgConfidence >= 30 ? 'amber' : 'red'} testId="kpi-avg-confidence" />
-            </div>
-
-            {/* Discrepancy Alert Banner */}
-            {kpis.discrepancies > 0 && (
-                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-start gap-3" data-testid="discrepancy-alert-banner">
-                    <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <AlertTriangle className="w-4 h-4 text-amber-600" />
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-sm font-semibold text-amber-800">
-                            {kpis.discrepancies} guía{kpis.discrepancies !== 1 ? 's' : ''} con discrepancia de estatus detectada
-                        </p>
-                        <p className="text-xs text-amber-700 mt-0.5">
-                            El tracking público de Kosmo reporta "Entregado" pero no se encontraron evidencias fotográficas ni motivo de excepción.
-                        </p>
-                    </div>
-                    <Button variant="outline" size="sm"
-                        className="border-amber-400 text-amber-700 hover:bg-amber-100 shrink-0"
-                        onClick={() => setSegment('discrepancy')}
-                        data-testid="view-discrepancies-btn">
-                        Ver discrepancias
-                    </Button>
-                </div>
-            )}
-
-            {/* AI Alert Banner */}
-            {aiErrorSummary.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-3" data-testid="ai-alert-banner">
-                    <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                    <div className="text-sm">
-                        <p className="font-medium text-amber-800">Alertas IA detectadas — Driver: {journey.driver_name || 'N/A'}</p>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                            {aiErrorSummary.slice(0, 5).map(([error, count]) => (
-                                <span key={error} className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">{error} ({count})</span>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* KPI Cards + Alert Banners */}
+            <GuiasKpisRow
+                kpis={kpis}
+                aiErrorSummary={aiErrorSummary}
+                driverName={journey.driver_name}
+                onViewDiscrepancies={() => setSegment('discrepancy')}
+            />
 
             {/* Segment Filter Pills */}
-            <div className="flex gap-2 flex-wrap" data-testid="segment-filters">
-                {SEGMENT_FILTERS.map(f => {
-                    const count = segmentCounts[f.key];
-                    const isDiscrepancy = f.key === 'discrepancy' && count > 0;
-                    return (
-                        <button key={f.key}
-                            className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${
-                                segment === f.key
-                                    ? (isDiscrepancy ? 'bg-amber-600 text-white border-amber-600' : 'bg-slate-900 text-white border-slate-900')
-                                    : (isDiscrepancy ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')
-                            }`}
-                            onClick={() => setSegment(f.key)}
-                            data-testid={`segment-${f.key}`}>
-                            {f.label} <span className="ml-1 opacity-70">({count})</span>
-                        </button>
-                    );
-                })}
-            </div>
+            <GuiasSegmentFilters
+                segment={segment}
+                segmentCounts={segmentCounts}
+                onSegmentChange={setSegment}
+            />
 
             {/* Main Table */}
             <Card>
