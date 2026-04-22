@@ -5,6 +5,7 @@ import { useSortableTable } from '../lib/useSortableTable';
 import { KPICard } from '../components/dashboard/KPICard';
 import { RoutesTable } from '../components/dashboard/RoutesTable';
 import { useWebSocket } from '../lib/useWebSocket';
+import './Dashboard.css';
 import { 
     getDashboardStats, 
     getJourneys, 
@@ -206,42 +207,6 @@ const Dashboard = () => {
 
     return (
         <div className="lm-dashboard">
-            <style>{`
-                .lm-dashboard { font-family: 'DM Sans', sans-serif; display: flex; flex-direction: column; gap: 20px; }
-                :root { --bg: #F5F4F1; --surface: #FFFFFF; --surface-2: #F0EFEC; --border: #E2E0DB; --border-strong: #C8C6BF; --text-primary: #1A1916; --text-secondary: #6B6960; --text-tertiary: #9C9A92; --blue: #2563EB; --blue-light: #EFF6FF; --amber: #D97706; --amber-light: #FFFBEB; --green: #16A34A; --green-light: #F0FDF4; --coral: #DC2626; --coral-light: #FEF2F2; --purple: #7C3AED; --purple-light: #F5F3FF; --radius: 10px; --radius-sm: 6px; }
-                .lm-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-                .lm-card-header { padding: 16px 20px; }
-                .lm-section-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
-                .lm-kpi-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-                .lm-table { border-collapse: collapse; font-size: 13px; }
-                .lm-table thead th { padding: 10px 14px; text-align: left; font-weight: 500; font-size: 12px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); background: var(--surface-2); cursor: pointer; }
-                .lm-table tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
-                .lm-table tbody tr:hover { background: var(--surface-2); }
-                .lm-btn-ghost { display: inline-flex; align-items: center; font-size: 13px; color: var(--text-secondary); background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: var(--radius-sm); transition: background 0.15s, color 0.15s; }
-                .lm-btn-ghost:hover { background: var(--surface-2); color: var(--text-primary); }
-                .lm-select { font-size: 13px; padding: 6px 28px 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B6960' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center; appearance: none; color: var(--text-primary); font-family: 'DM Sans', sans-serif; outline: none; }
-                .lm-select:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(37,99,235,0.12); }
-                .lm-cp-row:hover { background: var(--surface-2); }
-                .lm-search-box { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; }
-                .lm-search-box input { flex: 1; border: none; outline: none; background: transparent; font-size: 13px; font-family: 'DM Sans', sans-serif; color: var(--text-primary); }
-                .lm-search-box input::placeholder { color: var(--text-tertiary); }
-                .lm-filter-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: 13px; font-family: 'DM Sans', sans-serif; color: var(--text-primary); cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
-                .lm-filter-btn:hover { border-color: var(--border-strong); }
-                .lm-sync-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-secondary); gap: 12px; }
-                .lm-metric-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-                .lm-metric-row:last-child { border-bottom: none; }
-                .lm-provider-header { display: grid; grid-template-columns: 1.5fr repeat(5, 1fr); gap: 8px; padding: 10px 16px; font-size: 12px; font-weight: 500; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--border); background: var(--surface-2); }
-                .lm-provider-row { display: grid; grid-template-columns: 1.5fr repeat(5, 1fr); gap: 8px; padding: 10px 16px; font-size: 13px; border-bottom: 1px solid var(--border); transition: background 0.15s; cursor: default; }
-                .lm-provider-row:hover { background: var(--surface-2); }
-                .lm-provider-row:last-child { border-bottom: none; }
-                .lm-pag { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-secondary); }
-                .lm-pag-btn { padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: 13px; font-family: 'DM Sans', sans-serif; cursor: pointer; color: var(--text-primary); transition: background 0.15s; }
-                .lm-pag-btn:hover:not(:disabled) { background: var(--surface-2); }
-                .lm-pag-btn:disabled { opacity: 0.4; cursor: default; }
-                @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-                @keyframes spin { to { transform: rotate(360deg); } }
-            `}</style>
-
             {/* ─── Top bar: WS + Kosmo sync ─── */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -266,7 +231,7 @@ const Dashboard = () => {
                         data-testid="kosmo-sync-btn"
                         style={{ fontSize: 12 }}
                     >
-                        <RefreshCw style={{ width: 13, height: 13, ...(syncing ? { animation: 'spin 1s linear infinite' } : {}) }} />
+                        <RefreshCw style={{ width: 13, height: 13, ...(syncing ? { animation: 'lm-spin 1s linear infinite' } : {}) }} />
                         {syncing ? 'Sincronizando...' : 'Sincronizar ahora'}
                     </button>
                     {canEdit() && (
@@ -291,7 +256,7 @@ const Dashboard = () => {
                         placeholder="Buscar paquete por guía o referencia..."
                         data-testid="package-search-input"
                     />
-                    {searching && <RefreshCw style={{ width: 13, height: 13, color: T.textTer, animation: 'spin 1s linear infinite' }} />}
+                    {searching && <RefreshCw style={{ width: 13, height: 13, color: T.textTer, animation: 'lm-spin 1s linear infinite' }} />}
                     {searchResults.length > 0 && packageSearch.length >= 2 && (
                         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, marginTop: 4, background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radiusSm, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', maxHeight: 260, overflowY: 'auto' }}>
                             {searchResults.map((pkg) => (
@@ -367,7 +332,7 @@ const Dashboard = () => {
 
                 {/* Refresh */}
                 <button className="lm-filter-btn" onClick={handleRefresh} data-testid="refresh-btn" style={{ padding: 7 }}>
-                    <RefreshCw style={{ width: 15, height: 15, ...(loading ? { animation: 'spin 1s linear infinite' } : {}) }} />
+                    <RefreshCw style={{ width: 15, height: 15, ...(loading ? { animation: 'lm-spin 1s linear infinite' } : {}) }} />
                 </button>
 
                 {/* Export */}
@@ -522,7 +487,7 @@ const Dashboard = () => {
             {/* ─── HEATMAP ─── */}
             <Suspense fallback={
                 <div className="lm-card" style={{ padding: 40, textAlign: 'center' }}>
-                    <RefreshCw style={{ width: 24, height: 24, color: T.textTer, margin: '0 auto', animation: 'spin 1s linear infinite' }} />
+                    <RefreshCw style={{ width: 24, height: 24, color: T.textTer, margin: '0 auto', animation: 'lm-spin 1s linear infinite' }} />
                     <p style={{ color: T.textTer, fontSize: 13, marginTop: 12 }}>Cargando mapa...</p>
                 </div>
             }>

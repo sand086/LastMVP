@@ -117,18 +117,83 @@ async def create_manual_guia_job(
 # ── DELETE /api/ai-evaluation/jobs/{job_id} ─────────────────────
 @router.delete("/jobs/{job_id}")
 async def cancel_job(job_id: str, user: dict = Depends(require_role(["coordinator", "developer"]))):
-    result = await db.ai_evaluation_jobs.update_one(
-        {"job_id": job_id, "status": "En_Cola"},
+    job = await db.ai_evaluation_jobs.find_one({"job_id": job_id}, {"_id": 0, "status": 1})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job no encontrado")
+    if job.get("status") != "En_Cola":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Solo se pueden cancelar jobs en estado 'En_Cola' (actual: '{job.get('status')}')",
+        )
+    await db.ai_evaluation_jobs.update_one(
+        {"job_id": job_id},
         {"$set": {"status": "Error", "error_detail": "Cancelado por usuario"}},
     )
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Solo se pueden cancelar jobs en estado En_Cola")
     return {"message": "Job cancelado"}
+
+
+# ── GET /api/ai-evaluation/health ───────────────────────────────
+@router.get("/health")
+async def worker_health(user: dict = Depends(get_current_user)):
+    """Estado operativo del AI Eval Worker para monitoreo (Grafana/uptime)."""
+    from datetime import datetime, timezone
+    from ai_eval_worker import MAX_ROUTES_CONCURRENT, CRON_INTERVAL_MINUTES
+
+    evaluando = await db.ai_evaluation_jobs.count_documents({"status": "Evaluando"})
+    en_cola = await db.ai_evaluation_jobs.count_documents({"status": "En_Cola"})
+    slots_free = max(0, MAX_ROUTES_CONCURRENT - evaluando)
+
+    # Edad del Evaluando mas antiguo (detecta orphans/stuck jobs)
+    oldest = await db.ai_evaluation_jobs.find_one(
+        {"status": "Evaluando"},
+        {"_id": 0, "fecha_inicio": 1},
+        sort=[("fecha_inicio", 1)],
+    )
+    oldest_age_seconds = None
+    if oldest and oldest.get("fecha_inicio"):
+        try:
+            started = datetime.fromisoformat(oldest["fecha_inicio"].replace("Z", "+00:00"))
+            oldest_age_seconds = int((datetime.now(timezone.utc) - started).total_seconds())
+        except (ValueError, TypeError):
+            pass
+
+    # Ultimo job terminado (health signal)
+    last_terminal = await db.ai_evaluation_jobs.find_one(
+        {"status": {"$in": ["Evaluada", "Parcial", "Error"]}, "fecha_termino": {"$ne": None}},
+        {"_id": 0, "fecha_termino": 1, "status": 1},
+        sort=[("fecha_termino", -1)],
+    )
+
+    # Salud general: "healthy" / "saturated" / "stuck"
+    if evaluando >= MAX_ROUTES_CONCURRENT and en_cola > 0:
+        status = "saturated"
+    elif oldest_age_seconds and oldest_age_seconds > 30 * 60:
+        status = "stuck"
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "worker": {
+            "max_concurrent": MAX_ROUTES_CONCURRENT,
+            "slots_in_use": evaluando,
+            "slots_free": slots_free,
+            "cron_interval_minutes": CRON_INTERVAL_MINUTES,
+        },
+        "queue": {
+            "running": evaluando,
+            "queued": en_cola,
+            "oldest_running_age_seconds": oldest_age_seconds,
+        },
+        "last_terminal_job": last_terminal,
+    }
 
 
 # ── GET /api/ai-evaluation/jobs/{job_id}/stream (SSE) ───────────
 @router.get("/jobs/{job_id}/stream")
 async def stream_job(job_id: str, user: dict = Depends(get_current_user)):
+    import json
+
     async def event_generator():
         last_progress = -1
         for _ in range(300):  # Max 5 min
@@ -136,20 +201,21 @@ async def stream_job(job_id: str, user: dict = Depends(get_current_user)):
                 {"job_id": job_id}, {"_id": 0, "status": 1, "progress_percent": 1, "guias_evaluadas": 1, "total_guias": 1, "guias_con_error": 1, "tokens_consumidos": 1}
             )
             if not job:
-                yield "data: {\"error\": \"Job no encontrado\"}\n\n"
+                yield f"data: {json.dumps({'error': 'Job no encontrado'})}\n\n"
                 break
 
             progress = job.get("progress_percent", 0)
             if progress != last_progress:
                 last_progress = progress
-                yield f"data: {{\
-\"status\": \"{job['status']}\", \
-\"progress\": {progress}, \
-\"evaluated\": {job.get('guias_evaluadas', 0)}, \
-\"total\": {job.get('total_guias', 0)}, \
-\"errors\": {job.get('guias_con_error', 0)}, \
-\"tokens\": {job.get('tokens_consumidos', 0)}\
-}}\n\n"
+                payload = {
+                    "status": job["status"],
+                    "progress": progress,
+                    "evaluated": job.get("guias_evaluadas", 0),
+                    "total": job.get("total_guias", 0),
+                    "errors": job.get("guias_con_error", 0),
+                    "tokens": job.get("tokens_consumidos", 0),
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
 
             if job["status"] in ("Evaluada", "Error", "Parcial"):
                 break

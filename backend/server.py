@@ -2,6 +2,7 @@
 LastMile OS API - Main Application
 Modular FastAPI application for last-mile delivery management.
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -42,7 +43,22 @@ logger = logging.getLogger(__name__)
 
 # ==================== APP CREATION ====================
 
-app = FastAPI(title="LastMile OS API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ─── STARTUP ───
+    await _create_indexes()
+    await _auto_migrate_order_id()
+    start_periodic_sync(db)
+    start_ai_eval_worker(db)
+    yield
+    # ─── SHUTDOWN ───
+    stop_periodic_sync()
+    stop_ai_eval_worker()
+    await close_http_client()
+    mongo_client.close()
+
+
+app = FastAPI(title="LastMile OS API", lifespan=lifespan)
 
 # Attach limiter to app state
 app.state.limiter = limiter
@@ -148,11 +164,11 @@ else:
         max_age=600,
     )
 
-# ==================== STARTUP / SHUTDOWN ====================
+# ==================== STARTUP / SHUTDOWN HELPERS ====================
 
 
-@app.on_event("startup")
-async def startup_event():
+async def _create_indexes():
+    """Crea/verifica todos los indices de produccion al arranque."""
     # Package indexes
     await db.packages.create_index(
         [("cosmo_route_id", 1), ("order_reference_id", 1)],
@@ -237,7 +253,9 @@ async def startup_event():
 
     logger.info("Production indexes created/verified")
 
-    # Auto-migrate: set order_id = cosmo_route_id for journeys missing order_id
+
+async def _auto_migrate_order_id():
+    """Auto-migrate: set order_id = cosmo_route_id for journeys missing order_id."""
     migrated = await db.journeys.update_many(
         {
             "cosmo_route_id": {"$nin": [None, ""]},
@@ -251,14 +269,3 @@ async def startup_event():
     )
     if migrated.modified_count > 0:
         logger.info(f"Auto-migrated order_id for {migrated.modified_count} journeys")
-
-    start_periodic_sync(db)
-    start_ai_eval_worker(db)
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    stop_periodic_sync()
-    stop_ai_eval_worker()
-    await close_http_client()
-    mongo_client.close()
