@@ -265,10 +265,6 @@ const Login = () => {
                             </>
                         )}
                     </div>
-
-                    <p className="text-center text-slate-400 text-xs mt-6">
-                        Credenciales de prueba: agente@me.mx / LastMile2026
-                    </p>
                 </div>
             </div>
         </div>
