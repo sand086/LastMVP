@@ -14,6 +14,9 @@ from ai_eval_worker import enqueue_job
 from ai_eval_config import (
     get_ai_eval_config,
     set_ai_eval_config,
+    pause_worker,
+    resume_worker,
+    is_worker_paused,
     DEFAULTS as AI_EVAL_DEFAULTS,
     VALID_BOUNDS as AI_EVAL_BOUNDS,
     MODEL_MAP,
@@ -311,11 +314,13 @@ class AiEvalConfigPatch(BaseModel):
 @router.get("/config")
 async def get_config(user: dict = Depends(require_role(["developer", "coordinator", "executive"]))):
     cfg = await get_ai_eval_config(db, force_refresh=True)
+    paused, reason = is_worker_paused(cfg)
     return {
         "config": cfg,
         "defaults": AI_EVAL_DEFAULTS,
         "bounds": {k: list(v) if isinstance(v, tuple) else v for k, v in AI_EVAL_BOUNDS.items()},
         "model_map": MODEL_MAP,
+        "pause_state": {"is_paused": paused, "reason": reason, "paused_until": cfg.get("paused_until")},
     }
 
 
@@ -329,3 +334,60 @@ async def update_config(
         raise HTTPException(status_code=400, detail="Debes enviar al menos un campo")
     new_cfg = await set_ai_eval_config(db, patch_dict, user_email=user.get("email"))
     return {"message": "Configuración actualizada", "config": new_cfg}
+
+
+# ══════ PAUSE / RESUME (kill switch) ══════
+
+class PauseRequest(BaseModel):
+    duration_minutes: int
+    reason: Optional[str] = None
+
+
+@router.post("/pause")
+async def pause_ai_worker(
+    data: PauseRequest,
+    user: dict = Depends(require_role(["developer", "coordinator"])),
+):
+    if data.duration_minutes < 1 or data.duration_minutes > 60 * 48:
+        raise HTTPException(status_code=400, detail="duration_minutes debe estar entre 1 y 2880 (48h)")
+    cfg = await pause_worker(db, data.duration_minutes, data.reason, user.get("email"))
+    return {
+        "message": f"Worker pausado {data.duration_minutes} min. Se aborterán jobs activos en <10s.",
+        "paused_until": cfg["paused_until"],
+        "pause_reason": cfg["pause_reason"],
+    }
+
+
+@router.post("/resume")
+async def resume_ai_worker(user: dict = Depends(require_role(["developer", "coordinator"]))):
+    await resume_worker(db, user.get("email"))
+    return {"message": "Worker reanudado. Tomará jobs de la cola en <10s."}
+
+
+class ScheduleWindow(BaseModel):
+    name: str
+    days: list
+    frm: str = ""  # not used
+    to: str = ""
+    tz: Optional[str] = "America/Mexico_City"
+
+
+class ScheduleUpdate(BaseModel):
+    enabled: bool
+    windows: list  # raw dict list with {name, days, from, to, tz}
+
+
+@router.put("/schedule")
+async def update_schedule(
+    data: ScheduleUpdate,
+    user: dict = Depends(require_role(["developer", "coordinator"])),
+):
+    new_cfg = await set_ai_eval_config(db, {
+        "schedule_enabled": data.enabled,
+        "schedule_windows": data.windows,
+    }, user_email=user.get("email"))
+    return {
+        "message": f"Agenda actualizada ({len(new_cfg['schedule_windows'])} ventanas)",
+        "schedule_enabled": new_cfg["schedule_enabled"],
+        "schedule_windows": new_cfg["schedule_windows"],
+    }

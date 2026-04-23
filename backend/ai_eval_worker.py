@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from ai_eval_config import get_ai_eval_config
+from ai_eval_config import get_ai_eval_config, is_worker_paused
 
 logger = logging.getLogger(__name__)
 
@@ -317,9 +317,51 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
     return await _finalize_job(db, job_id, start, evaluated, errors, total, total_tokens)
 
 
+async def _kill_active_jobs_due_to_pause(db, reason: str) -> int:
+    """Mark all Evaluando jobs as Error immediately (kill switch).
+    Guías already marked Evaluada keep their results."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    # Per-guia: mark any Evaluando as Error
+    await db.ai_evaluation_jobs.update_many(
+        {"status": "Evaluando"},
+        {"$set": {"guias_detail.$[g].status": "Error",
+                  "guias_detail.$[g].error": "Worker pausado"}},
+        array_filters=[{"g.status": "Evaluando"}],
+    )
+    # Count per-job totals manually (cannot finalize in single update)
+    killed = 0
+    async for job in db.ai_evaluation_jobs.find({"status": "Evaluando"}, {"_id": 0}):
+        from collections import Counter
+        cnt = Counter(g["status"] for g in job.get("guias_detail") or [])
+        evaluated = cnt.get("Evaluada", 0)
+        errors = cnt.get("Error", 0) + cnt.get("En_Cola", 0) + cnt.get("Evaluando", 0)
+        # Any remaining En_Cola guías: mark as Error too
+        await db.ai_evaluation_jobs.update_one(
+            {"job_id": job["job_id"]},
+            {"$set": {
+                "status": "Parcial" if evaluated > 0 else "Error",
+                "fecha_termino": now_iso,
+                "progress_percent": 100,
+                "guias_evaluadas": evaluated,
+                "guias_con_error": errors,
+                "error_detail": f"Evaluación abortada: {reason}",
+            }},
+        )
+        # Mark leftover En_Cola guías
+        await db.ai_evaluation_jobs.update_many(
+            {"job_id": job["job_id"]},
+            {"$set": {"guias_detail.$[g].status": "Error",
+                      "guias_detail.$[g].error": "Worker pausado"}},
+            array_filters=[{"g.status": {"$in": ["En_Cola", "Evaluando"]}}],
+        )
+        killed += 1
+    return killed
+
+
 async def _worker_loop(db: AsyncIOMotorDatabase):
     """Main worker loop — polls for queued jobs and processes them."""
     ticks_since_recovery = 0
+    was_paused = False
     while True:
         try:
             await asyncio.sleep(WORKER_POLL_SECONDS)
@@ -330,8 +372,21 @@ async def _worker_loop(db: AsyncIOMotorDatabase):
                 ticks_since_recovery = 0
                 await _recover_orphan_jobs(db)
 
-            # Lee concurrencia dinámica
+            # Lee configuración dinámica
             cfg = await get_ai_eval_config(db)
+
+            # Kill switch: si el worker está pausado, aborta jobs activos y no toma nuevos
+            paused, reason = is_worker_paused(cfg)
+            if paused:
+                if not was_paused:
+                    killed = await _kill_active_jobs_due_to_pause(db, reason)
+                    logger.warning(f"Worker PAUSED ({reason}) — killed {killed} active jobs")
+                    was_paused = True
+                continue
+            if was_paused:
+                logger.info("Worker RESUMED — resumen polling jobs")
+                was_paused = False
+
             max_concurrent = cfg["max_routes_concurrent"]
 
             # Count running jobs

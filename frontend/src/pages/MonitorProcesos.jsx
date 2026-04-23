@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getAiEvalJobs, getAiEvalJob, createAiEvalJobManual, cancelAiEvalJob, retryAiEvalErrors } from '../lib/api';
+import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -10,7 +11,7 @@ import {
 } from '../components/ui/dialog';
 import {
     Activity, Search, RefreshCw, Loader2, ChevronLeft, ChevronRight,
-    Clock, Zap, Cpu, XCircle, Eye, RotateCcw, AlertTriangle,
+    Clock, Zap, Cpu, XCircle, Eye, RotateCcw, AlertTriangle, Pause,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -53,6 +54,20 @@ const MonitorProcesos = () => {
     // Detail modal
     const [detailJob, setDetailJob] = useState(null);
     const [detailLoading, setDetailLoading] = useState(false);
+
+    // Worker pause state (reuses /ai-evaluation/config)
+    const [pauseState, setPauseState] = useState({ is_paused: false, reason: null, paused_until: null });
+    const fetchPauseState = useCallback(async () => {
+        try {
+            const res = await api.get('/ai-evaluation/config');
+            setPauseState(res.data.pause_state || { is_paused: false });
+        } catch { /* ignore */ }
+    }, []);
+    useEffect(() => {
+        fetchPauseState();
+        const it = setInterval(fetchPauseState, 15000);
+        return () => clearInterval(it);
+    }, [fetchPauseState]);
 
     const fetchJobs = useCallback(async () => {
         setLoading(true);
@@ -141,6 +156,21 @@ const MonitorProcesos = () => {
                 <h1 className="font-heading text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Monitor de Procesos - Evaluacion IA</h1>
                 <p className="text-slate-500 text-xs sm:text-sm">Seguimiento en tiempo real del estado de las evaluaciones automaticas de guias</p>
             </div>
+
+            {/* Worker paused banner */}
+            {pauseState.is_paused && (
+                <div
+                    className="flex items-center gap-3 p-3 rounded-lg border border-amber-300 bg-amber-50"
+                    data-testid="worker-paused-banner"
+                >
+                    <Pause className="w-5 h-5 text-amber-700 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-amber-900">Worker pausado — no se tomarán nuevos jobs</p>
+                        <p className="text-xs text-amber-700 mt-0.5 truncate">{pauseState.reason || 'Pausa manual'}</p>
+                    </div>
+                    <a href="/admin?tab=model" className="text-xs font-semibold text-amber-800 underline whitespace-nowrap">Configurar →</a>
+                </div>
+            )}
 
             {/* Filters */}
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">

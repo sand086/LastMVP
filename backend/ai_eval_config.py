@@ -9,11 +9,17 @@ Configurable keys:
   - max_routes_concurrent: 1–5 (default 3)
   - batch_size_per_route: 1–10 (default 5)
   - max_retries: 0–5 (default 3)
+  - paused_until: ISO string (UTC) — worker paused until this moment; null=not paused
+  - pause_reason: free-text (why it was paused)
+  - schedule_enabled: bool — whether schedule_windows are active
+  - schedule_windows: list of {name, days:[0-6], from:'HH:MM', to:'HH:MM', tz:'America/Mexico_City'}
 """
 import os
 import time
 import logging
-from typing import Any, Dict, Optional
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,10 @@ DEFAULTS: Dict[str, Any] = {
     "max_routes_concurrent": int(os.environ.get("AI_EVAL_MAX_ROUTES_CONCURRENT", "3")),
     "batch_size_per_route": int(os.environ.get("AI_EVAL_BATCH_SIZE_PER_ROUTE", "5")),
     "max_retries": int(os.environ.get("AI_EVAL_MAX_RETRIES", "3")),
+    "paused_until": None,
+    "pause_reason": None,
+    "schedule_enabled": False,
+    "schedule_windows": [],
 }
 
 VALID_BOUNDS = {
@@ -39,6 +49,7 @@ VALID_BOUNDS = {
     "max_retries": (0, 5),
 }
 
+DEFAULT_TZ = "America/Mexico_City"
 _CACHE_TTL_SECONDS = 30
 _cache = {"ts": 0.0, "data": None}
 
@@ -61,7 +72,83 @@ def _validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 out[key] = default
         else:
             out[key] = val
+    # Normalize schedule_windows
+    windows = out.get("schedule_windows") or []
+    if not isinstance(windows, list):
+        windows = []
+    clean_windows = []
+    for w in windows[:10]:  # hard cap
+        if not isinstance(w, dict):
+            continue
+        days = [int(d) for d in (w.get("days") or []) if isinstance(d, (int, float)) and 0 <= int(d) <= 6]
+        frm = str(w.get("from", "09:00"))[:5]
+        to = str(w.get("to", "13:00"))[:5]
+        if not _valid_hhmm(frm) or not _valid_hhmm(to):
+            continue
+        clean_windows.append({
+            "name": str(w.get("name", "Ventana"))[:60],
+            "days": sorted(set(days)),
+            "from": frm,
+            "to": to,
+            "tz": str(w.get("tz", DEFAULT_TZ))[:40],
+        })
+    out["schedule_windows"] = clean_windows
+    out["schedule_enabled"] = bool(out.get("schedule_enabled", False))
     return out
+
+
+def _valid_hhmm(s: str) -> bool:
+    try:
+        h, m = s.split(":")
+        h, m = int(h), int(m)
+        return 0 <= h <= 23 and 0 <= m <= 59
+    except Exception:
+        return False
+
+
+def _in_window(now_utc: datetime, window: dict) -> bool:
+    """Check if now_utc falls within a recurring schedule window.
+    Day index uses Python's Monday=0..Sunday=6."""
+    try:
+        tz = ZoneInfo(window.get("tz") or DEFAULT_TZ)
+    except Exception:
+        tz = ZoneInfo(DEFAULT_TZ)
+    local = now_utc.astimezone(tz)
+    days = window.get("days") or []
+    if days and local.weekday() not in days:
+        return False
+    fh, fm = map(int, window["from"].split(":"))
+    th, tm = map(int, window["to"].split(":"))
+    from_min = fh * 60 + fm
+    to_min = th * 60 + tm
+    cur_min = local.hour * 60 + local.minute
+    # Overnight window handling (e.g., 22:00 → 06:00)
+    if from_min <= to_min:
+        return from_min <= cur_min < to_min
+    return cur_min >= from_min or cur_min < to_min
+
+
+def is_worker_paused(cfg: Dict[str, Any], now_utc: Optional[datetime] = None) -> Tuple[bool, Optional[str]]:
+    """Return (is_paused, reason_human_readable)."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    # 1) Manual pause
+    paused_until = cfg.get("paused_until")
+    if paused_until:
+        try:
+            until = datetime.fromisoformat(paused_until.replace("Z", "+00:00"))
+            if until > now_utc:
+                delta = until - now_utc
+                mins = int(delta.total_seconds() // 60)
+                reason = cfg.get("pause_reason") or "Pausa manual"
+                return True, f"{reason} · reanuda en {mins} min"
+        except (ValueError, AttributeError):
+            pass
+    # 2) Schedule windows
+    if cfg.get("schedule_enabled") and cfg.get("schedule_windows"):
+        for w in cfg["schedule_windows"]:
+            if _in_window(now_utc, w):
+                return True, f"Ventana programada: {w.get('name', 'N/A')} ({w['from']}–{w['to']})"
+    return False, None
 
 
 async def get_ai_eval_config(db, force_refresh: bool = False) -> Dict[str, Any]:
@@ -93,7 +180,6 @@ def invalidate_cache() -> None:
 
 async def set_ai_eval_config(db, patch: Dict[str, Any], user_email: Optional[str] = None) -> Dict[str, Any]:
     """Upsert config document and invalidate cache."""
-    from datetime import datetime, timezone
     current = await get_ai_eval_config(db, force_refresh=True)
     merged = {**current, **{k: v for k, v in patch.items() if k in DEFAULTS}}
     validated = _validate(merged)
@@ -109,3 +195,20 @@ async def set_ai_eval_config(db, patch: Dict[str, Any], user_email: Optional[str
     )
     invalidate_cache()
     return validated
+
+
+async def pause_worker(db, duration_minutes: int, reason: Optional[str] = None, user_email: Optional[str] = None) -> Dict[str, Any]:
+    """Pause worker for N minutes (kill-switch applied by worker loop)."""
+    until = datetime.now(timezone.utc) + timedelta(minutes=max(1, int(duration_minutes)))
+    return await set_ai_eval_config(db, {
+        "paused_until": until.isoformat(),
+        "pause_reason": (reason or "Pausa manual")[:120],
+    }, user_email)
+
+
+async def resume_worker(db, user_email: Optional[str] = None) -> Dict[str, Any]:
+    """Clear pause state."""
+    return await set_ai_eval_config(db, {
+        "paused_until": None,
+        "pause_reason": None,
+    }, user_email)

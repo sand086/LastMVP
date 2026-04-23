@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../lib/api';
 import { toast } from 'sonner';
-import { Save, RefreshCw, Loader2, Info, Cpu, Zap, Clock, Layers, Repeat2 } from 'lucide-react';
+import {
+    Save, RefreshCw, Loader2, Info, Cpu, Zap, Clock, Layers, Repeat2,
+    Pause, Play, CalendarClock, PlusCircle, X, AlertTriangle,
+} from 'lucide-react';
 
 const T = {
     bg: '#F5F4F1', surface: '#FFFFFF',
@@ -40,17 +43,21 @@ const MODEL_INFO = {
 export default function ModelConfigTab({ canEdit }) {
     const [cfg, setCfg] = useState(null);
     const [bounds, setBounds] = useState({});
+    const [pauseState, setPauseState] = useState({ is_paused: false, reason: null, paused_until: null });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [dirty, setDirty] = useState(false);
     const [draft, setDraft] = useState({});
+    const [pauseBusy, setPauseBusy] = useState(false);
+    const [tick, setTick] = useState(0);
+    const refetchTimer = useRef(null);
 
     const fetchConfig = useCallback(async () => {
-        setLoading(true);
         try {
             const res = await api.get('/ai-evaluation/config');
             setCfg(res.data.config);
             setBounds(res.data.bounds);
+            setPauseState(res.data.pause_state || { is_paused: false });
             setDraft(res.data.config);
             setDirty(false);
         } catch {
@@ -61,6 +68,16 @@ export default function ModelConfigTab({ canEdit }) {
     }, []);
 
     useEffect(() => { fetchConfig(); }, [fetchConfig]);
+
+    // Refetch pause state every 20s + countdown tick every second
+    useEffect(() => {
+        refetchTimer.current = setInterval(fetchConfig, 20000);
+        const tickTimer = setInterval(() => setTick((t) => t + 1), 1000);
+        return () => {
+            clearInterval(refetchTimer.current);
+            clearInterval(tickTimer);
+        };
+    }, [fetchConfig]);
 
     const update = (key, value) => {
         setDraft((d) => ({ ...d, [key]: value }));
@@ -87,6 +104,91 @@ export default function ModelConfigTab({ canEdit }) {
         setDirty(false);
     };
 
+    // ── Pause / Resume ───────────────────────────────────────────
+    const handlePause = async (minutes, reason) => {
+        setPauseBusy(true);
+        try {
+            const res = await api.post('/ai-evaluation/pause', { duration_minutes: minutes, reason });
+            toast.success(res.data.message || 'Worker pausado');
+            fetchConfig();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al pausar');
+        } finally {
+            setPauseBusy(false);
+        }
+    };
+
+    const handleResume = async () => {
+        setPauseBusy(true);
+        try {
+            await api.post('/ai-evaluation/resume');
+            toast.success('Worker reanudado');
+            fetchConfig();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error al reanudar');
+        } finally {
+            setPauseBusy(false);
+        }
+    };
+
+    // ── Schedule windows ─────────────────────────────────────────
+    const scheduleEnabled = draft.schedule_enabled || false;
+    const windows = draft.schedule_windows || [];
+
+    const setScheduleEnabled = (v) => {
+        setDraft((d) => ({ ...d, schedule_enabled: v }));
+        setDirty(true);
+    };
+
+    const addWindow = () => {
+        const w = { name: 'Horario pico', days: [0, 1, 2, 3, 4], from: '09:00', to: '13:00', tz: 'America/Mexico_City' };
+        setDraft((d) => ({ ...d, schedule_windows: [...(d.schedule_windows || []), w] }));
+        setDirty(true);
+    };
+
+    const updateWindow = (idx, patch) => {
+        setDraft((d) => ({
+            ...d,
+            schedule_windows: (d.schedule_windows || []).map((w, i) => (i === idx ? { ...w, ...patch } : w)),
+        }));
+        setDirty(true);
+    };
+
+    const removeWindow = (idx) => {
+        setDraft((d) => ({
+            ...d,
+            schedule_windows: (d.schedule_windows || []).filter((_, i) => i !== idx),
+        }));
+        setDirty(true);
+    };
+
+    const saveSchedule = async () => {
+        setSaving(true);
+        try {
+            await api.put('/ai-evaluation/schedule', { enabled: scheduleEnabled, windows });
+            toast.success('Agenda guardada. Worker verifica cada 10s.');
+            fetchConfig();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // ── Countdown for paused_until ──────────────────────────────
+    const countdownText = (() => {
+        if (!pauseState.paused_until) return null;
+        const until = new Date(pauseState.paused_until);
+        const ms = until - new Date();
+        if (ms <= 0) return null;
+        const totalSec = Math.floor(ms / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
+    })();
+    void tick; // Force re-render every second for countdown
+
     if (loading || !cfg) {
         return (
             <div style={{ padding: 32, textAlign: 'center' }}>
@@ -99,6 +201,16 @@ export default function ModelConfigTab({ canEdit }) {
 
     return (
         <div style={{ display: 'grid', gap: 20 }} data-testid="model-config-tab">
+            {/* Pause status (big banner) */}
+            <PauseBanner
+                pauseState={pauseState}
+                countdownText={countdownText}
+                pauseBusy={pauseBusy}
+                canEdit={canEdit}
+                onPause={handlePause}
+                onResume={handleResume}
+            />
+
             {/* Info banner */}
             <div style={{
                 display: 'flex', gap: 12, padding: '12px 14px',
@@ -230,6 +342,20 @@ export default function ModelConfigTab({ canEdit }) {
                 </div>
             </section>
 
+            {/* Schedule windows */}
+            <ScheduleSection
+                enabled={scheduleEnabled}
+                windows={windows}
+                canEdit={canEdit}
+                onToggle={setScheduleEnabled}
+                onAdd={addWindow}
+                onUpdate={updateWindow}
+                onRemove={removeWindow}
+                onSave={saveSchedule}
+                saving={saving}
+                dirty={dirty}
+            />
+
             {/* Savings estimate */}
             <section style={{ background: selectedModel.bg, border: `1px solid ${selectedModel.color}30`, borderRadius: T.radius, padding: 16 }}>
                 <div style={{ fontSize: 12, color: T.textSec, marginBottom: 6 }}>Estimación mensual (60,000 evaluaciones):</div>
@@ -317,6 +443,327 @@ function SliderField({ icon: Icon, label, unit, min, max, step, value, onChange,
                 <span style={{ fontSize: 10, color: T.textTer }}>{max}</span>
             </div>
             {hint && <p style={{ fontSize: 10.5, color: T.textTer, marginTop: 4, lineHeight: 1.4 }}>{hint}</p>}
+        </div>
+    );
+}
+
+
+// ═══════════════════ PAUSE BANNER ═══════════════════
+
+const PAUSE_PRESETS = [
+    { label: '1h', minutes: 60 },
+    { label: '4h', minutes: 240 },
+    { label: '24h', minutes: 1440 },
+];
+
+function PauseBanner({ pauseState, countdownText, pauseBusy, canEdit, onPause, onResume }) {
+    const paused = pauseState.is_paused;
+    const bg = paused ? '#FEF2F2' : '#F0FDF4';
+    const border = paused ? '#DC2626' : '#16A34A';
+    const icon = paused ? Pause : Play;
+    const Icon = icon;
+    return (
+        <section
+            data-testid="pause-banner"
+            style={{
+                background: bg, border: `1px solid ${border}40`,
+                borderRadius: T.radius, padding: 18,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+                flexWrap: 'wrap',
+            }}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
+                <div style={{
+                    width: 44, height: 44, borderRadius: '50%', background: border,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                }}>
+                    <Icon size={22} color="#fff" />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: border, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {paused ? 'Worker pausado' : 'Worker activo'}
+                        {countdownText && (
+                            <span style={{
+                                fontSize: 12, padding: '2px 8px', borderRadius: 4, background: border,
+                                color: '#fff', fontFamily: "'DM Mono',monospace", fontWeight: 600,
+                            }} data-testid="pause-countdown">
+                                {countdownText}
+                            </span>
+                        )}
+                    </div>
+                    <p style={{ fontSize: 12.5, color: T.textSec, margin: '4px 0 0 0' }}>
+                        {paused
+                            ? (pauseState.reason || 'Pausado')
+                            : 'Tomando jobs de la cola cada 10 segundos.'}
+                    </p>
+                </div>
+            </div>
+            {canEdit && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {!paused && PAUSE_PRESETS.map((p) => (
+                        <button
+                            key={p.label}
+                            onClick={() => onPause(p.minutes, `Pausa manual ${p.label}`)}
+                            disabled={pauseBusy}
+                            data-testid={`pause-preset-${p.label}`}
+                            style={{
+                                padding: '8px 14px', border: `1px solid ${T.borderStrong}`,
+                                background: T.surface, color: T.textPri, borderRadius: T.radiusSm,
+                                cursor: pauseBusy ? 'default' : 'pointer',
+                                fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
+                                opacity: pauseBusy ? 0.5 : 1,
+                            }}
+                        >
+                            <Pause size={13} />
+                            Pausar {p.label}
+                        </button>
+                    ))}
+                    {!paused && (
+                        <CustomPauseButton onPause={onPause} disabled={pauseBusy} />
+                    )}
+                    {paused && (
+                        <button
+                            onClick={onResume}
+                            disabled={pauseBusy}
+                            data-testid="resume-btn"
+                            style={{
+                                padding: '10px 20px', border: 'none',
+                                background: '#16A34A', color: '#fff', borderRadius: T.radiusSm,
+                                cursor: pauseBusy ? 'default' : 'pointer',
+                                fontSize: 13.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
+                                opacity: pauseBusy ? 0.6 : 1,
+                            }}
+                        >
+                            {pauseBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                            Reanudar ahora
+                        </button>
+                    )}
+                </div>
+            )}
+        </section>
+    );
+}
+
+function CustomPauseButton({ onPause, disabled }) {
+    const [open, setOpen] = useState(false);
+    const [mins, setMins] = useState(30);
+    if (!open) {
+        return (
+            <button
+                onClick={() => setOpen(true)}
+                disabled={disabled}
+                data-testid="pause-custom-btn"
+                style={{
+                    padding: '8px 14px', border: `1px solid ${T.borderStrong}`,
+                    background: T.surface, color: T.textPri, borderRadius: T.radiusSm,
+                    cursor: disabled ? 'default' : 'pointer',
+                    fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
+                }}
+            >
+                <Clock size={13} />
+                Personalizado
+            </button>
+        );
+    }
+    return (
+        <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: 4, border: `1px solid ${T.borderStrong}`, borderRadius: T.radiusSm, background: T.surface,
+        }}>
+            <input
+                type="number"
+                min={1} max={2880}
+                value={mins}
+                onChange={(e) => setMins(parseInt(e.target.value, 10) || 0)}
+                style={{
+                    width: 60, padding: '4px 6px', fontSize: 13, border: `1px solid ${T.border}`,
+                    borderRadius: 4, fontFamily: "'DM Mono',monospace",
+                }}
+                data-testid="pause-custom-input"
+            />
+            <span style={{ fontSize: 11, color: T.textSec }}>min</span>
+            <button
+                onClick={() => { onPause(mins, `Pausa manual ${mins}min`); setOpen(false); }}
+                disabled={mins < 1 || mins > 2880 || disabled}
+                data-testid="pause-custom-confirm"
+                style={{
+                    padding: '5px 10px', border: 'none',
+                    background: T.blue, color: '#fff', borderRadius: 4,
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                }}
+            >
+                Pausar
+            </button>
+            <button onClick={() => setOpen(false)} style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 2 }}>
+                <X size={14} color={T.textTer} />
+            </button>
+        </div>
+    );
+}
+
+// ═══════════════════ SCHEDULE SECTION ═══════════════════
+
+const DAYS_LABEL = ['L', 'M', 'X', 'J', 'V', 'S', 'D']; // Monday=0 ... Sunday=6
+
+function ScheduleSection({ enabled, windows, canEdit, onToggle, onAdd, onUpdate, onRemove, onSave, saving, dirty }) {
+    return (
+        <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 20 }} data-testid="schedule-section">
+            <header style={{ marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <CalendarClock size={16} style={{ color: T.textSec }} />
+                    <h3 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, margin: 0 }}>Ventanas programadas</h3>
+                    <span style={{ fontSize: 11, color: T.textTer }}>(hora CDMX)</span>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: canEdit ? 'pointer' : 'default', fontSize: 12.5 }}>
+                    <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(e) => canEdit && onToggle(e.target.checked)}
+                        disabled={!canEdit}
+                        data-testid="schedule-enabled-toggle"
+                    />
+                    <span style={{ color: enabled ? T.textPri : T.textTer, fontWeight: enabled ? 600 : 400 }}>
+                        {enabled ? 'Agenda activa' : 'Agenda inactiva'}
+                    </span>
+                </label>
+            </header>
+
+            <p style={{ fontSize: 12, color: T.textSec, margin: '0 0 14px 0', lineHeight: 1.5 }}>
+                Durante estas ventanas el worker NO toma nuevos jobs y ABORTA los que estén en curso (kill switch).
+                Los jobs ya evaluados conservan su score.
+            </p>
+
+            <div style={{ display: 'grid', gap: 10 }} data-testid="schedule-windows">
+                {windows.length === 0 && (
+                    <div style={{
+                        padding: 20, textAlign: 'center', color: T.textTer, fontSize: 12.5,
+                        border: `1px dashed ${T.border}`, borderRadius: T.radiusSm,
+                    }}>
+                        No hay ventanas programadas. Agrega una para bloquear horarios pico.
+                    </div>
+                )}
+                {windows.map((w, idx) => (
+                    <WindowRow
+                        key={idx}
+                        idx={idx}
+                        window={w}
+                        disabled={!canEdit}
+                        onUpdate={(patch) => onUpdate(idx, patch)}
+                        onRemove={() => onRemove(idx)}
+                    />
+                ))}
+            </div>
+
+            {canEdit && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button
+                        onClick={onAdd}
+                        data-testid="add-window-btn"
+                        style={{
+                            padding: '6px 12px', border: `1px dashed ${T.borderStrong}`,
+                            background: 'transparent', color: T.textSec, borderRadius: T.radiusSm,
+                            fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                        }}
+                    >
+                        <PlusCircle size={13} />
+                        Agregar ventana
+                    </button>
+                    <button
+                        onClick={onSave}
+                        disabled={saving || !dirty}
+                        data-testid="save-schedule-btn"
+                        style={{
+                            marginLeft: 'auto',
+                            padding: '6px 14px', border: 'none',
+                            background: dirty ? T.blue : T.textTer, color: '#fff',
+                            borderRadius: T.radiusSm, fontSize: 12.5, fontWeight: 600,
+                            cursor: dirty ? 'pointer' : 'default',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            opacity: saving ? 0.6 : 1,
+                        }}
+                    >
+                        {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                        Guardar agenda
+                    </button>
+                </div>
+            )}
+        </section>
+    );
+}
+
+function WindowRow({ idx, window: w, disabled, onUpdate, onRemove }) {
+    const toggleDay = (d) => {
+        const days = w.days.includes(d) ? w.days.filter((x) => x !== d) : [...w.days, d].sort();
+        onUpdate({ days });
+    };
+    return (
+        <div
+            data-testid={`window-row-${idx}`}
+            style={{
+                padding: 12, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                background: T.bg, display: 'grid',
+                gridTemplateColumns: '1.5fr 2fr 1fr auto', gap: 12, alignItems: 'center',
+            }}
+        >
+            <input
+                type="text"
+                value={w.name || ''}
+                onChange={(e) => onUpdate({ name: e.target.value })}
+                placeholder="Nombre"
+                disabled={disabled}
+                data-testid={`window-name-${idx}`}
+                style={{
+                    padding: '6px 8px', fontSize: 13, border: `1px solid ${T.border}`,
+                    borderRadius: 4, background: T.surface,
+                }}
+            />
+            <div style={{ display: 'flex', gap: 4 }}>
+                {DAYS_LABEL.map((d, i) => (
+                    <button
+                        key={i}
+                        onClick={() => !disabled && toggleDay(i)}
+                        disabled={disabled}
+                        data-testid={`window-day-${idx}-${i}`}
+                        style={{
+                            width: 28, height: 28, border: `1px solid ${T.border}`,
+                            background: w.days?.includes(i) ? T.blue : T.surface,
+                            color: w.days?.includes(i) ? '#fff' : T.textSec,
+                            borderRadius: 4, cursor: disabled ? 'default' : 'pointer',
+                            fontSize: 11, fontWeight: 600,
+                        }}
+                    >{d}</button>
+                ))}
+            </div>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input
+                    type="time"
+                    value={w.from || '09:00'}
+                    onChange={(e) => onUpdate({ from: e.target.value })}
+                    disabled={disabled}
+                    data-testid={`window-from-${idx}`}
+                    style={{ padding: '4px 6px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 4, fontFamily: "'DM Mono',monospace" }}
+                />
+                <span style={{ fontSize: 11, color: T.textTer }}>→</span>
+                <input
+                    type="time"
+                    value={w.to || '13:00'}
+                    onChange={(e) => onUpdate({ to: e.target.value })}
+                    disabled={disabled}
+                    data-testid={`window-to-${idx}`}
+                    style={{ padding: '4px 6px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 4, fontFamily: "'DM Mono',monospace" }}
+                />
+            </div>
+            {!disabled && (
+                <button
+                    onClick={onRemove}
+                    data-testid={`window-remove-${idx}`}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4 }}
+                    title="Eliminar ventana"
+                >
+                    <X size={14} color={T.textTer} />
+                </button>
+            )}
         </div>
     );
 }
