@@ -212,11 +212,14 @@ async def retry_error_jobs(
 async def worker_health(user: dict = Depends(get_current_user)):
     """Estado operativo del AI Eval Worker para monitoreo (Grafana/uptime)."""
     from datetime import datetime, timezone
-    from ai_eval_worker import MAX_ROUTES_CONCURRENT, CRON_INTERVAL_MINUTES
+    from ai_eval_worker import CRON_INTERVAL_MINUTES
+
+    cfg = await get_ai_eval_config(db)
+    max_routes_concurrent = cfg["max_routes_concurrent"]
 
     evaluando = await db.ai_evaluation_jobs.count_documents({"status": "Evaluando"})
     en_cola = await db.ai_evaluation_jobs.count_documents({"status": "En_Cola"})
-    slots_free = max(0, MAX_ROUTES_CONCURRENT - evaluando)
+    slots_free = max(0, max_routes_concurrent - evaluando)
 
     # Edad del Evaluando mas antiguo (detecta orphans/stuck jobs)
     oldest = await db.ai_evaluation_jobs.find_one(
@@ -240,7 +243,7 @@ async def worker_health(user: dict = Depends(get_current_user)):
     )
 
     # Salud general: "healthy" / "saturated" / "stuck"
-    if evaluando >= MAX_ROUTES_CONCURRENT and en_cola > 0:
+    if evaluando >= max_routes_concurrent and en_cola > 0:
         status = "saturated"
     elif oldest_age_seconds and oldest_age_seconds > 30 * 60:
         status = "stuck"
@@ -250,7 +253,7 @@ async def worker_health(user: dict = Depends(get_current_user)):
     return {
         "status": status,
         "worker": {
-            "max_concurrent": MAX_ROUTES_CONCURRENT,
+            "max_concurrent": max_routes_concurrent,
             "slots_in_use": evaluando,
             "slots_free": slots_free,
             "cron_interval_minutes": CRON_INTERVAL_MINUTES,

@@ -21,6 +21,7 @@ import {
     PieChart, Pie, Cell,
 } from 'recharts';
 import { T, PERIODS, getDateRange, getPrevDateRange, formatDateLabel } from '../components/reports/ReportsHelpers';
+import TrendsTab from '../components/reports/TrendsTab';
 
 /* ─── Health bar color ─── */
 const healthColor = (val) => val >= 90 ? T.green : val >= 75 ? T.amber : T.coral;
@@ -777,6 +778,7 @@ const Reports = () => {
         { id: 'attempts', label: 'Intentos', icon: RefreshCw, isNew: true },
         { id: 'quality', label: 'Evidencias', icon: ShieldCheck },
         { id: 'sla', label: 'SLA', icon: Target, isNew: true },
+        { id: 'trends', label: 'Tendencias', icon: TrendingUp, isNew: true },
     ];
 
     return (
@@ -965,6 +967,7 @@ const Reports = () => {
                                     {activeTab === 'attempts' && <AttemptsTab attempts={attemptsData} />}
                                     {activeTab === 'quality' && <QualityTab data={{ quality_report: qualityData }} />}
                                     {activeTab === 'sla' && <SLATab slaData={slaData} canEditBrackets={canEditBrackets} />}
+                                    {activeTab === 'trends' && <TrendsTab dateFrom={effectiveDates.from} dateTo={effectiveDates.to} />}
                                 </>
                             )}
                         </div>

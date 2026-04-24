@@ -14,6 +14,8 @@ import {
     DialogHeader,
     DialogTitle,
 } from './ui/dialog';
+import { compressImages } from '../lib/imageCompress';
+import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -28,8 +30,9 @@ export const ImageUploader = ({
 }) => {
     const fileInputRef = useRef(null);
     const [previewImage, setPreviewImage] = useState(null);
+    const [compressing, setCompressing] = useState(false);
 
-    const handleFileSelect = (e) => {
+    const handleFileSelect = async (e) => {
         const files = Array.from(e.target.files || []);
         if (files.length === 0) return;
 
@@ -39,9 +42,30 @@ export const ImageUploader = ({
             return ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.png');
         });
 
-        if (validFiles.length > 0 && onUpload) {
-            onUpload(validFiles);
+        if (validFiles.length === 0) {
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
         }
+
+        // Auto-compress (only large images are actually resized/recoded)
+        setCompressing(true);
+        let outFiles = validFiles;
+        try {
+            const results = await compressImages(validFiles);
+            outFiles = results.map(r => r.compressed);
+            const savedBytes = results.reduce((s, r) => s + Math.max(0, r.saved), 0);
+            const compressedCount = results.filter(r => r.compressed_applied).length;
+            if (compressedCount > 0 && savedBytes > 0) {
+                const savedMb = (savedBytes / (1024 * 1024)).toFixed(1);
+                toast.success(`${compressedCount} imagen(es) optimizada(s) · ${savedMb} MB ahorrados`, { duration: 2500 });
+            }
+        } catch (err) {
+            console.warn('Compression failed, uploading originals:', err);
+        } finally {
+            setCompressing(false);
+        }
+
+        if (onUpload) onUpload(outFiles);
 
         // Reset input
         if (fileInputRef.current) {
@@ -75,18 +99,18 @@ export const ImageUploader = ({
                         variant="outline"
                         size="sm"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading}
+                        disabled={uploading || compressing}
                         data-testid="upload-image-btn"
                     >
-                        {uploading ? (
+                        {(uploading || compressing) ? (
                             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         ) : (
                             <Camera className="w-4 h-4 mr-2" />
                         )}
-                        {label}
+                        {compressing ? 'Optimizando...' : label}
                     </Button>
                     <p className="text-xs text-slate-500 mt-1">
-                        JPG, JPEG, PNG • Máximo 5MB por imagen
+                        JPG, JPEG, PNG • Optimización automática sobre 1MB
                     </p>
                 </div>
             )}

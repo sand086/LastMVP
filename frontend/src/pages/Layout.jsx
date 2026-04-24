@@ -1,69 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { 
+import {
     uploadHistoryOrders,
     uploadRouteSummary,
     createJourneysFromCosmo,
-    getClients, 
+    getClients,
     getProviders,
     getMessengerMappings,
     getUploadHistory,
     createProviderInline,
     updateDeliveryNotes,
 } from '../lib/api';
-import { formatDate } from '../lib/utils';
 import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Calendar } from '../components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { 
-    Upload, 
-    FileSpreadsheet, 
-    Calendar as CalendarIcon,
-    AlertCircle,
-    CheckCircle2,
-    X,
-    Loader2,
-    Package,
-    History,
-    Truck,
-    Users,
-    ChevronRight,
-    Link as LinkIcon,
-    ExternalLink,
-    FileText,
-} from 'lucide-react';
+import { AlertCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { WizardSteps } from '../components/layout/WizardSteps';
 import { UpdateNotesSection } from '../components/layout/UpdateNotesSection';
 import { RoutesPreviewCard, UploadHistoryCard } from '../components/layout/LayoutSidebar';
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from '../components/ui/alert-dialog';
-import {
-    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-} from '../components/ui/dialog';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '../components/ui/table';
+import { LayoutStep1History } from '../components/layout/LayoutStep1History';
+import { LayoutStep2Route } from '../components/layout/LayoutStep2Route';
+import { LayoutStep3Config } from '../components/layout/LayoutStep3Config';
+import { LayoutCreationResult } from '../components/layout/LayoutCreationResult';
+import { LayoutConfirmDialog, LayoutPendingProviderDialog } from '../components/layout/LayoutDialogs';
 
 const Layout = () => {
     const navigate = useNavigate();
@@ -102,11 +62,6 @@ const Layout = () => {
     const [creating, setCreating] = useState(false);
     const [showConfirmDialog, setShowConfirmDialog] = useState(false);
     const [creationResult, setCreationResult] = useState(null);
-    
-    // Route type
-    const [routeType, setRouteType] = useState('CDMX / Zona Metro');
-    const [routeCity, setRouteCity] = useState('');
-    const [routeMaxPackages, setRouteMaxPackages] = useState(50);
 
     // Pending providers modal (blocking)
     const [pendingProviders, setPendingProviders] = useState([]);
@@ -115,7 +70,6 @@ const Layout = () => {
     const [creatingPendingProvider, setCreatingPendingProvider] = useState(false);
 
     // Update notes section
-    const [notesFile, setNotesFile] = useState(null);
     const [notesUploading, setNotesUploading] = useState(false);
     const [notesResult, setNotesResult] = useState(null);
     const notesFileRef = useRef(null);
@@ -155,31 +109,27 @@ const Layout = () => {
         fetchData();
     }, []);
 
-    // Initialize driver-provider mappings when route data changes
     useEffect(() => {
         if (routeData?.drivers) {
             const newMap = {};
             routeData.drivers.forEach(driver => {
-                // Use existing mapping if available
                 newMap[driver] = messengerMappings[driver] || '';
             });
             setDriverProviderMap(newMap);
         }
     }, [routeData, messengerMappings]);
 
-    // Step 1: Upload History Orders
     const handleHistoryFileSelect = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         const validTypes = ['.csv', '.xlsx'];
         const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-        
+
         if (!validTypes.includes(ext)) {
             setHistoryError('Solo se permiten archivos CSV o XLSX');
             return;
         }
-
         if (file.size > 10 * 1024 * 1024) {
             setHistoryError('El archivo excede 10MB');
             return;
@@ -202,19 +152,17 @@ const Layout = () => {
         }
     };
 
-    // Step 2: Upload Route Summary
     const handleRouteFileSelect = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         const validTypes = ['.csv', '.xlsx'];
         const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-        
+
         if (!validTypes.includes(ext)) {
             setRouteError('Solo se permiten archivos CSV o XLSX');
             return;
         }
-
         if (file.size > 10 * 1024 * 1024) {
             setRouteError('El archivo excede 10MB');
             return;
@@ -228,20 +176,16 @@ const Layout = () => {
             const res = await uploadRouteSummary(file);
             setRouteData(res.data);
             toast.success(`${res.data.total_routes} rutas encontradas con ${res.data.drivers.length} mensajeros`);
-            
-            // Auto-set date from first route's creation_date if available
+
             if (res.data.routes?.length > 0) {
                 const firstCreationDate = res.data.routes[0].creation_date;
                 if (firstCreationDate) {
                     const dateStr = firstCreationDate.includes('T') ? firstCreationDate.split('T')[0] : firstCreationDate;
                     const parsed = new Date(dateStr + 'T12:00:00');
-                    if (!isNaN(parsed.getTime())) {
-                        setSelectedDate(parsed);
-                    }
+                    if (!isNaN(parsed.getTime())) setSelectedDate(parsed);
                 }
             }
 
-            // Check for pending providers that need to be created
             if (res.data.pending_providers?.length > 0) {
                 setPendingProviders(res.data.pending_providers);
                 setCurrentPendingIdx(0);
@@ -258,42 +202,28 @@ const Layout = () => {
         }
     };
 
-    // Update driver-provider mapping
     const handleDriverProviderChange = (driver, providerId) => {
-        setDriverProviderMap(prev => ({
-            ...prev,
-            [driver]: providerId
-        }));
+        setDriverProviderMap(prev => ({ ...prev, [driver]: providerId }));
     };
 
-    // Check if all drivers have providers assigned
-    const allDriversAssigned = () => {
-        if (!routeData?.drivers) return false;
-        return routeData.drivers.every(driver => driverProviderMap[driver]);
-    };
+    const allDriversAssigned = routeData?.drivers
+        ? routeData.drivers.every(driver => driverProviderMap[driver])
+        : false;
 
-    // Create journeys
     const handleCreateJourneys = async () => {
         setShowConfirmDialog(false);
         setCreating(true);
 
         try {
-            // Build messenger-provider mappings
             const mappings = Object.entries(driverProviderMap).map(([messenger_name, provider_id]) => ({
-                messenger_name,
-                provider_id
+                messenger_name, provider_id,
             }));
 
-            // Build history orders from the parsed data
             const allOrders = [];
             if (historyData?.routes) {
                 historyData.routes.forEach(route => {
                     route.orders.forEach(order => {
-                        allOrders.push({
-                            ...order,
-                            route_id: route.route_id,
-                            order_id: route.route_id
-                        });
+                        allOrders.push({ ...order, route_id: route.route_id, order_id: route.route_id });
                     });
                 });
             }
@@ -311,10 +241,7 @@ const Layout = () => {
             toast.success(res.data.message);
 
             if (res.data.created_journeys?.length > 0) {
-                // Navigate to journeys list after 2 seconds
-                setTimeout(() => {
-                    navigate('/journeys');
-                }, 2000);
+                setTimeout(() => navigate('/journeys'), 2000);
             }
         } catch (error) {
             toast.error(error.response?.data?.detail || 'Error al crear rutas');
@@ -323,24 +250,17 @@ const Layout = () => {
         }
     };
 
-    // Clear all and restart
     const handleClearAll = () => {
         setCurrentStep(1);
-        setHistoryFile(null);
-        setHistoryData(null);
-        setHistoryError(null);
-        setRouteFile(null);
-        setRouteData(null);
-        setRouteError(null);
+        setHistoryFile(null); setHistoryData(null); setHistoryError(null);
+        setRouteFile(null); setRouteData(null); setRouteError(null);
         setDriverProviderMap({});
         setCreationResult(null);
-        setPendingProviders([]);
-        setCurrentPendingIdx(-1);
+        setPendingProviders([]); setCurrentPendingIdx(-1);
         if (historyFileRef.current) historyFileRef.current.value = '';
         if (routeFileRef.current) routeFileRef.current.value = '';
     };
 
-    // Handle creating pending provider and advancing to next
     const handleCreatePendingProvider = async () => {
         if (!pendingProviderForm.name.trim()) { toast.error('Nombre del proveedor requerido'); return; }
         setCreatingPendingProvider(true);
@@ -354,7 +274,6 @@ const Layout = () => {
             const newProv = res.data;
             toast.success(`Proveedor "${newProv.name}" ${newProv.already_existed ? 'ya existia' : 'creado'}`);
 
-            // Auto-bind all drivers of this team to the new provider
             const currentPending = pendingProviders[currentPendingIdx];
             if (currentPending?.drivers) {
                 const newMap = { ...driverProviderMap };
@@ -362,20 +281,17 @@ const Layout = () => {
                 setDriverProviderMap(newMap);
             }
 
-            // Refresh providers list
             try {
                 const provRes = await getProviders();
                 setProviders(provRes.data);
             } catch (err) { console.error('Failed to refresh providers:', err); }
 
-            // Advance to next pending provider or finish
             const nextIdx = currentPendingIdx + 1;
             if (nextIdx < pendingProviders.length) {
                 setCurrentPendingIdx(nextIdx);
                 const next = pendingProviders[nextIdx];
                 setPendingProviderForm({ name: next.team_name, contact_name: '', rfc: '' });
             } else {
-                // All done, proceed to step 3
                 setPendingProviders([]);
                 setCurrentPendingIdx(-1);
                 setCurrentStep(3);
@@ -388,40 +304,28 @@ const Layout = () => {
     };
 
     const handleCancelPendingUpload = () => {
-        setPendingProviders([]);
-        setCurrentPendingIdx(-1);
-        setRouteFile(null);
-        setRouteData(null);
+        setPendingProviders([]); setCurrentPendingIdx(-1);
+        setRouteFile(null); setRouteData(null);
         if (routeFileRef.current) routeFileRef.current.value = '';
         toast.info('Carga cancelada');
     };
 
-    // Update delivery notes handler
     const handleUploadNotes = async (file) => {
         if (!file) return;
-        setNotesFile(file);
         setNotesUploading(true);
         setNotesResult(null);
         try {
             const res = await updateDeliveryNotes(file);
             setNotesResult(res.data);
-            if (res.data.updated > 0) {
-                toast.success(`${res.data.updated} registros actualizados`);
-            } else {
-                toast.info('No se encontraron registros para actualizar');
-            }
+            if (res.data.updated > 0) toast.success(`${res.data.updated} registros actualizados`);
+            else toast.info('No se encontraron registros para actualizar');
         } catch (err) {
             let msg = err.response?.data?.detail;
             if (!msg) {
-                if (err.response?.status === 413) {
-                    msg = 'Archivo demasiado grande (límite del servidor). Reduce a menos de 10MB.';
-                } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-                    msg = 'Tiempo de espera agotado. Intenta con un archivo más pequeño.';
-                } else if (err.message === 'Network Error') {
-                    msg = 'Error de red. Verifica tu conexión e intenta de nuevo.';
-                } else {
-                    msg = err.message || 'Error al actualizar notas';
-                }
+                if (err.response?.status === 413) msg = 'Archivo demasiado grande (límite del servidor). Reduce a menos de 10MB.';
+                else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) msg = 'Tiempo de espera agotado. Intenta con un archivo más pequeño.';
+                else if (err.message === 'Network Error') msg = 'Error de red. Verifica tu conexión e intenta de nuevo.';
+                else msg = err.message || 'Error al actualizar notas';
             }
             toast.error(msg);
             setNotesResult({ error: msg });
@@ -434,19 +338,14 @@ const Layout = () => {
         return (
             <div className="text-center py-16">
                 <AlertCircle className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-700 mb-2">
-                    Acceso restringido
-                </h3>
-                <p className="text-slate-500">
-                    No tienes permisos para cargar layouts
-                </p>
+                <h3 className="text-lg font-medium text-slate-700 mb-2">Acceso restringido</h3>
+                <p className="text-slate-500">No tienes permisos para cargar layouts</p>
             </div>
         );
     }
 
     return (
         <div className="space-y-6">
-            {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="font-heading text-2xl font-bold text-slate-900 tracking-tight">
@@ -464,478 +363,83 @@ const Layout = () => {
                 )}
             </div>
 
-            {/* Steps indicator */}
             <WizardSteps currentStep={currentStep} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Main upload area */}
                 <div className="lg:col-span-2 space-y-6">
-                    {/* Step 1: History Orders */}
-                    <Card className={currentStep === 1 ? 'ring-2 ring-slate-900' : ''}>
-                        <CardHeader>
-                            <CardTitle className="font-heading text-lg flex items-center gap-2">
-                                <FileSpreadsheet className="w-5 h-5" />
-                                Paso 1: Archivo History Orders
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {!historyFile ? (
-                                <div
-                                    className="drop-zone cursor-pointer"
-                                    onClick={() => historyFileRef.current?.click()}
-                                    data-testid="history-file-zone"
-                                >
-                                    <input
-                                        ref={historyFileRef}
-                                        type="file"
-                                        accept=".csv,.xlsx"
-                                        onChange={handleHistoryFileSelect}
-                                        className="hidden"
-                                        data-testid="history-file-input"
-                                    />
-                                    <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
-                                    <p className="text-slate-700 font-medium">
-                                        Selecciona archivo history-orders
-                                    </p>
-                                    <p className="text-slate-500 text-sm mt-1">
-                                        Formato: history-orders-aaaa-mm-dd-aaaa-mm-dd.csv
-                                    </p>
-                                    <p className="text-slate-400 text-xs mt-2">
-                                        CSV o XLSX • Máximo 10MB
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-sm">
-                                        <div className="flex items-center gap-3">
-                                            <FileSpreadsheet className="w-8 h-8 text-emerald-600" />
-                                            <div>
-                                                <p className="font-medium text-slate-900">{historyFile.name}</p>
-                                                <p className="text-sm text-slate-500">
-                                                    {(historyFile.size / 1024).toFixed(1)} KB
-                                                </p>
-                                            </div>
-                                        </div>
-                                        {historyUploading ? (
-                                            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
-                                        ) : (
-                                            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                        )}
-                                    </div>
+                    <LayoutStep1History
+                        currentStep={currentStep}
+                        historyFile={historyFile}
+                        historyData={historyData}
+                        historyUploading={historyUploading}
+                        historyError={historyError}
+                        historyFileRef={historyFileRef}
+                        onFileSelect={handleHistoryFileSelect}
+                    />
 
-                                    {historyData && (
-                                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-sm">
-                                            <div className="flex items-center gap-2 text-emerald-700 mb-2">
-                                                <Package className="w-5 h-5" />
-                                                <span className="font-medium">
-                                                    {historyData.total_orders} órdenes en {historyData.total_routes} rutas
-                                                    {historyData.ignored_rows > 0 && (
-                                                        <span className="text-slate-400 ml-1">({historyData.ignored_rows} filas ignoradas)</span>
-                                                    )}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm text-emerald-600">
-                                                Columnas detectadas: order_reference_id, tracking_url, order_status
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                    <LayoutStep2Route
+                        currentStep={currentStep}
+                        routeFile={routeFile}
+                        routeData={routeData}
+                        routeUploading={routeUploading}
+                        routeError={routeError}
+                        routeFileRef={routeFileRef}
+                        onFileSelect={handleRouteFileSelect}
+                    />
 
-                            {historyError && (
-                                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-sm flex items-center gap-2 text-red-700">
-                                    <AlertCircle className="w-5 h-5" />
-                                    <span>{historyError}</span>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    {/* Step 2: Route Summary */}
-                    <Card className={currentStep === 2 ? 'ring-2 ring-slate-900' : ''}>
-                        <CardHeader>
-                            <CardTitle className="font-heading text-lg flex items-center gap-2">
-                                <Truck className="w-5 h-5" />
-                                Paso 2: Archivo Route Summary
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {currentStep < 2 ? (
-                                <div className="text-center py-8 text-slate-400">
-                                    <Truck className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                                    <p>Primero carga el archivo history-orders</p>
-                                </div>
-                            ) : !routeFile ? (
-                                <div
-                                    className="drop-zone cursor-pointer"
-                                    onClick={() => routeFileRef.current?.click()}
-                                    data-testid="route-file-zone"
-                                >
-                                    <input
-                                        ref={routeFileRef}
-                                        type="file"
-                                        accept=".csv,.xlsx"
-                                        onChange={handleRouteFileSelect}
-                                        className="hidden"
-                                        data-testid="route-file-input"
-                                    />
-                                    <Upload className="w-10 h-10 text-slate-400 mx-auto mb-3" />
-                                    <p className="text-slate-700 font-medium">
-                                        Selecciona archivo route-summary
-                                    </p>
-                                    <p className="text-slate-500 text-sm mt-1">
-                                        Formato: route-summary-aaaa-mm-dd-aaaa-mm-dd.xlsx
-                                    </p>
-                                    <p className="text-slate-400 text-xs mt-2">
-                                        CSV o XLSX • Máximo 10MB
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-sm">
-                                        <div className="flex items-center gap-3">
-                                            <FileSpreadsheet className="w-8 h-8 text-emerald-600" />
-                                            <div>
-                                                <p className="font-medium text-slate-900">{routeFile.name}</p>
-                                                <p className="text-sm text-slate-500">
-                                                    {(routeFile.size / 1024).toFixed(1)} KB
-                                                </p>
-                                            </div>
-                                        </div>
-                                        {routeUploading ? (
-                                            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
-                                        ) : (
-                                            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                        )}
-                                    </div>
-
-                                    {routeData && (
-                                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-sm">
-                                            <div className="flex items-center gap-2 text-emerald-700 mb-2">
-                                                <Users className="w-5 h-5" />
-                                                <span className="font-medium">
-                                                    {routeData.total_routes} rutas con {routeData.drivers.length} mensajeros
-                                                </span>
-                                            </div>
-                                            <p className="text-sm text-emerald-600">
-                                                Columnas detectadas: Order ID, Driver, Team, Total Stops
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {routeError && (
-                                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-sm flex items-center gap-2 text-red-700">
-                                    <AlertCircle className="w-5 h-5" />
-                                    <span>{routeError}</span>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    {/* Step 3: Configuration */}
                     {currentStep >= 3 && (
-                        <Card className="ring-2 ring-slate-900">
-                            <CardHeader>
-                                <CardTitle className="font-heading text-lg flex items-center gap-2">
-                                    <LinkIcon className="w-5 h-5" />
-                                    Paso 3: Configuración y Asignación de Proveedores
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-6">
-                                {/* Date and Client */}
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label>Fecha de las rutas (respaldo)</Label>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <Button 
-                                                    variant="outline" 
-                                                    className="w-full justify-start text-left font-normal"
-                                                    data-testid="journey-date-picker"
-                                                >
-                                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                                    {format(selectedDate, 'dd MMM yyyy', { locale: es })}
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0" align="start">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={selectedDate}
-                                                    onSelect={(date) => date && setSelectedDate(date)}
-                                                    initialFocus
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
-                                        <p className="text-xs text-slate-400">Se usa "Creation Date" del route-summary por ruta. Esta fecha es respaldo si no existe.</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label>Cliente</Label>
-                                        <Select value={selectedClient} onValueChange={setSelectedClient}>
-                                            <SelectTrigger data-testid="select-client">
-                                                <SelectValue placeholder="Seleccionar cliente" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {clients.map((client) => (
-                                                    <SelectItem key={client.id} value={client.id}>
-                                                        {client.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-
-                                {/* Driver-Provider Mapping */}
-                                <div className="border border-slate-200 rounded-sm">
-                                    <div className="p-3 bg-slate-50 border-b border-slate-200">
-                                        <p className="font-medium text-slate-900">Asignar Proveedor a cada Mensajero</p>
-                                        <p className="text-sm text-slate-500">
-                                            Los mensajeros detectados necesitan un proveedor asignado
-                                        </p>
-                                    </div>
-                                    <div className="max-h-80 overflow-y-auto">
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow>
-                                                    <TableHead>Mensajero (Driver)</TableHead>
-                                                    <TableHead>Proveedor Asignado</TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {routeData?.drivers.map((driver) => (
-                                                    <TableRow key={driver}>
-                                                        <TableCell className="font-medium">{driver}</TableCell>
-                                                        <TableCell>
-                                                            <Select
-                                                                value={driverProviderMap[driver] || ''}
-                                                                onValueChange={(v) => handleDriverProviderChange(driver, v)}
-                                                            >
-                                                                <SelectTrigger 
-                                                                    className={`w-full ${!driverProviderMap[driver] ? 'border-amber-400' : ''}`}
-                                                                    data-testid={`provider-select-${driver}`}
-                                                                >
-                                                                    <SelectValue placeholder="Sin asignar" />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    {providers.map((provider) => (
-                                                                        <SelectItem key={provider.id} value={provider.id}>
-                                                                            {provider.name}
-                                                                        </SelectItem>
-                                                                    ))}
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </div>
-                                </div>
-
-                                {/* Warning if not all drivers assigned */}
-                                {!allDriversAssigned() && (
-                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-sm flex items-center gap-2 text-amber-700">
-                                        <AlertCircle className="w-5 h-5" />
-                                        <span>Asigna un proveedor a todos los mensajeros para continuar</span>
-                                    </div>
-                                )}
-
-                                {/* Create button */}
-                                <div className="flex justify-end">
-                                    <Button
-                                        onClick={() => setShowConfirmDialog(true)}
-                                        disabled={!selectedClient || !allDriversAssigned() || creating}
-                                        data-testid="create-journeys-btn"
-                                    >
-                                        {creating ? (
-                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        ) : (
-                                            <Package className="w-4 h-4 mr-2" />
-                                        )}
-                                        Crear Rutas
-                                    </Button>
-                                </div>
-                            </CardContent>
-                        </Card>
+                        <LayoutStep3Config
+                            selectedDate={selectedDate}
+                            setSelectedDate={setSelectedDate}
+                            selectedClient={selectedClient}
+                            setSelectedClient={setSelectedClient}
+                            clients={clients}
+                            providers={providers}
+                            routeData={routeData}
+                            driverProviderMap={driverProviderMap}
+                            onDriverProviderChange={handleDriverProviderChange}
+                            allDriversAssigned={allDriversAssigned}
+                            creating={creating}
+                            onOpenConfirm={() => setShowConfirmDialog(true)}
+                        />
                     )}
 
-                    {/* Creation Result */}
-                    {creationResult && (
-                        <Card className="border-emerald-200 bg-emerald-50">
-                            <CardHeader>
-                                <CardTitle className="font-heading text-lg flex items-center gap-2 text-emerald-700">
-                                    <CheckCircle2 className="w-5 h-5" />
-                                    {creationResult.message}
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                {creationResult.created_journeys?.length > 0 && (
-                                    <div>
-                                        <p className="text-sm font-medium text-emerald-800 mb-2">Rutas creadas:</p>
-                                        <ul className="space-y-1 text-sm text-emerald-700">
-                                            {creationResult.created_journeys.map((j, idx) => (
-                                                <li key={`created-${j.route_id}`}>
-                                                    • {j.driver} - {j.packages} paquetes nuevos (Ruta: {j.route_id})
-                                                    {j.duplicates_updated > 0 && (
-                                                        <span className="text-blue-600 ml-2">
-                                                            ({j.duplicates_updated} paquetes actualizados)
-                                                        </span>
-                                                    )}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {creationResult.updated_journeys?.length > 0 && (
-                                    <div>
-                                        <p className="text-sm font-medium text-blue-700 mb-2">Rutas con paquetes actualizados:</p>
-                                        <ul className="space-y-1 text-sm text-blue-600">
-                                            {creationResult.updated_journeys.map((j, idx) => (
-                                                <li key={`updated-${j.route_id || j.driver}`}>
-                                                    • {j.driver || j.route_id} - {j.packages_updated} paquetes actualizados
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {(creationResult.total_new_packages > 0 || creationResult.total_updated_packages > 0) && (
-                                    <div className="p-3 bg-white border border-emerald-200 rounded-sm">
-                                        <p className="text-sm font-medium text-slate-800">
-                                            Resumen: {creationResult.total_new_packages || 0} nuevos paquetes creados, {creationResult.total_updated_packages || 0} paquetes actualizados
-                                        </p>
-                                    </div>
-                                )}
-
-                                {creationResult.skipped_duplicates?.length > 0 && (
-                                    <div>
-                                        <p className="text-sm font-medium text-amber-700 mb-2">Rutas duplicadas omitidas:</p>
-                                        <ul className="space-y-1 text-sm text-amber-600">
-                                            {creationResult.skipped_duplicates.map((id, idx) => (
-                                                <li key={`skip-${id}`}>• {id}</li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {creationResult.errors?.length > 0 && (
-                                    <div>
-                                        <p className="text-sm font-medium text-red-700 mb-2">Errores:</p>
-                                        <ul className="space-y-1 text-sm text-red-600">
-                                            {creationResult.errors.map((err, idx) => (
-                                                <li key={`err-${idx}-${err.slice(0,12)}`}>• {err}</li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    )}
+                    <LayoutCreationResult result={creationResult} />
                 </div>
 
-                {/* Sidebar: Upload history & Preview */}
                 <div className="space-y-6">
-                    {/* Routes Preview */}
                     <RoutesPreviewCard routes={historyData?.routes} />
-
-                    {/* Update Delivery Notes Section */}
                     <UpdateNotesSection
                         notesFileRef={notesFileRef}
                         notesUploading={notesUploading}
                         notesResult={notesResult}
                         onUpload={handleUploadNotes}
                     />
-
-                    {/* Upload History */}
                     <UploadHistoryCard loading={loading} uploadHistory={uploadHistory} />
                 </div>
             </div>
 
-            {/* Confirm Dialog */}
-            <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle className="font-heading">
-                            Confirmar creación de rutas
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Se crearán rutas con los siguientes datos:
-                            <ul className="mt-3 space-y-1 text-slate-700">
-                                <li>• Fecha: <strong>{format(selectedDate, 'dd/MM/yyyy')}</strong></li>
-                                <li>• Cliente: <strong>{clients.find(c => c.id === selectedClient)?.name}</strong></li>
-                                <li>• Rutas: <strong>{routeData?.total_routes}</strong></li>
-                                <li>• Mensajeros: <strong>{routeData?.drivers.length}</strong></li>
-                                <li>• Órdenes totales: <strong>{historyData?.total_orders}</strong></li>
-                            </ul>
-                            <p className="mt-3 text-sm text-amber-600">
-                                Se omitirán automáticamente órdenes y rutas duplicadas.
-                            </p>
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction 
-                            onClick={handleCreateJourneys}
-                            disabled={creating}
-                            data-testid="confirm-create-btn"
-                        >
-                            {creating ? (
-                                <>
-                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                    Creando...
-                                </>
-                            ) : (
-                                'Crear rutas'
-                            )}
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
+            <LayoutConfirmDialog
+                open={showConfirmDialog}
+                onOpenChange={setShowConfirmDialog}
+                selectedDate={selectedDate}
+                selectedClient={selectedClient}
+                clients={clients}
+                routeData={routeData}
+                historyData={historyData}
+                onConfirm={handleCreateJourneys}
+                creating={creating}
+            />
 
-            {/* Blocking Modal: Create Pending Provider */}
-            <Dialog open={currentPendingIdx >= 0 && currentPendingIdx < pendingProviders.length} onOpenChange={() => {}}>
-                <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
-                    <DialogHeader>
-                        <DialogTitle className="font-heading text-lg">
-                            Proveedor no registrado: {pendingProviders[currentPendingIdx]?.team_name}
-                        </DialogTitle>
-                        <DialogDescription>
-                            {pendingProviders[currentPendingIdx]?.drivers?.length > 1 ? (
-                                <>Los drivers <strong>{pendingProviders[currentPendingIdx]?.drivers?.join(', ')}</strong> aparecen asociados al proveedor <strong>{pendingProviders[currentPendingIdx]?.team_name}</strong>, que no existe en el sistema. Crea el proveedor para continuar la carga.</>
-                            ) : (
-                                <>El driver <strong>{pendingProviders[currentPendingIdx]?.drivers?.[0]}</strong> aparece asociado al proveedor <strong>{pendingProviders[currentPendingIdx]?.team_name}</strong>, que no existe en el sistema. Crea el proveedor para continuar la carga.</>
-                            )}
-                        </DialogDescription>
-                    </DialogHeader>
-                    {currentPendingIdx >= 0 && pendingProviders.length > 1 && (
-                        <p className="text-xs text-slate-500">Proveedor {currentPendingIdx + 1} de {pendingProviders.length}</p>
-                    )}
-                    <div className="space-y-3">
-                        <div className="space-y-1">
-                            <Label>Nombre del proveedor *</Label>
-                            <Input value={pendingProviderForm.name} onChange={(e) => setPendingProviderForm(p => ({ ...p, name: e.target.value }))} data-testid="pending-provider-name" />
-                        </div>
-                        <div className="space-y-1">
-                            <Label>RFC / Razon social</Label>
-                            <Input value={pendingProviderForm.rfc} onChange={(e) => setPendingProviderForm(p => ({ ...p, rfc: e.target.value }))} placeholder="Opcional" data-testid="pending-provider-rfc" />
-                        </div>
-                        <div className="space-y-1">
-                            <Label>Contacto</Label>
-                            <Input value={pendingProviderForm.contact_name} onChange={(e) => setPendingProviderForm(p => ({ ...p, contact_name: e.target.value }))} placeholder="Opcional" data-testid="pending-provider-contact" />
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={handleCancelPendingUpload} data-testid="cancel-pending-upload-btn">Cancelar carga</Button>
-                        <Button onClick={handleCreatePendingProvider} disabled={creatingPendingProvider} data-testid="create-pending-provider-btn">
-                            {creatingPendingProvider && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                            Crear y continuar
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <LayoutPendingProviderDialog
+                currentPendingIdx={currentPendingIdx}
+                pendingProviders={pendingProviders}
+                pendingProviderForm={pendingProviderForm}
+                setPendingProviderForm={setPendingProviderForm}
+                onCreate={handleCreatePendingProvider}
+                onCancel={handleCancelPendingUpload}
+                creating={creatingPendingProvider}
+            />
         </div>
     );
 };

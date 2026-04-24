@@ -25,6 +25,7 @@ import {
     changeJourneyProvider,
 } from '../lib/api';
 import api from '../lib/api';
+import { exportJourneyPdf } from '../lib/journeyPdfExport';
 import { 
     formatDate, 
     formatDateTime,
@@ -782,6 +783,25 @@ const JourneyDetail = () => {
                             )}
                         </p>
                     </div>
+                </div>
+                <div className="flex-shrink-0">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                            try {
+                                await exportJourneyPdf(journey);
+                                toast.success('PDF descargado');
+                            } catch (err) {
+                                console.error('PDF export error:', err);
+                                toast.error('No se pudo generar el PDF');
+                            }
+                        }}
+                        data-testid="export-journey-pdf-btn"
+                    >
+                        <Download className="w-4 h-4 mr-2" />
+                        Exportar PDF
+                    </Button>
                 </div>
             </div>
 
