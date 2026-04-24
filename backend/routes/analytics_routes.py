@@ -1404,6 +1404,7 @@ Usa **negritas** para cifras clave. Maximo 600 palabras total."""
 
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from token_logger import log_token_usage
         import json as json_module
         chat = LlmChat(
             api_key=llm_key,
@@ -1411,8 +1412,23 @@ Usa **negritas** para cifras clave. Maximo 600 palabras total."""
             system_message=system_prompt,
         ).with_model("anthropic", "claude-sonnet-4-5-20250929")
 
-        msg = UserMessage(text=f"Genera el reporte ejecutivo para estos datos:\n\n{json_module.dumps(structured_input, ensure_ascii=False, indent=2)}")
+        user_text = f"Genera el reporte ejecutivo para estos datos:\n\n{json_module.dumps(structured_input, ensure_ascii=False, indent=2)}"
+        msg = UserMessage(text=user_text)
         raw_response = await chat.send_message(msg)
+
+        # Log token usage (previously missing — caused $ drift in admin dashboard)
+        try:
+            await log_token_usage(
+                db=db,
+                entregable="reporte",
+                modelo="claude-sonnet-4-5",
+                referencia=f"reporte_{date_from}_{date_to}",
+                input_text=user_text,
+                output_text=raw_response or "",
+                system_prompt=system_prompt,
+            )
+        except Exception as log_err:
+            logger.debug(f"Reporte token log skipped: {log_err}")
 
         # Parse cards from response
         cards = []

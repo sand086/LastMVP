@@ -137,9 +137,39 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str, timeout_s: int) ->
         return {"status": "Evaluada", "tokens": tokens, "error": None}
 
     except asyncio.TimeoutError:
+        # Shadow-log: el LLM probablemente procesó parcialmente antes del timeout;
+        # loguear input conservador para reflejar costo aproximado.
+        try:
+            from token_logger import log_token_usage
+            await log_token_usage(
+                db=db,
+                entregable="evaluacion",
+                modelo="claude-haiku-4-5",
+                referencia=f"{pkg.get('tracking_number') or pkg_id}_timeout",
+                input_text=str(pkg.get("tracking_number", ""))[:100],
+                output_text="",
+                system_prompt="[timeout - estimated]",
+            )
+        except Exception:
+            pass
         return {"status": "Error", "tokens": 0, "error": f"Timeout ({timeout_s}s)"}
     except Exception as e:
         msg = str(e)
+        # Shadow-log para errores no-budget (budget ya no generó tokens; otros errores sí)
+        if "budget" not in msg.lower() and "saldo" not in msg.lower():
+            try:
+                from token_logger import log_token_usage
+                await log_token_usage(
+                    db=db,
+                    entregable="evaluacion",
+                    modelo="claude-haiku-4-5",
+                    referencia=f"{pkg.get('tracking_number') or pkg_id}_error",
+                    input_text=str(pkg.get("tracking_number", ""))[:100],
+                    output_text="",
+                    system_prompt="[error - estimated]",
+                )
+            except Exception:
+                pass
         # Detectar errores comunes y devolver mensajes claros
         if "Budget has been exceeded" in msg or "budget" in msg.lower():
             friendly = "Saldo de Emergent LLM Key agotado. Recarga en Perfil → Clave Universal."

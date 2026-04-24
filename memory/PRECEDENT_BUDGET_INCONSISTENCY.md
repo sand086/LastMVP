@@ -71,6 +71,55 @@ La inconsistencia sugiere que el proxy de Emergent aplica un **cap intermedio po
 
 ---
 
+## 🚨 HALLAZGO MAYOR: Subestimación del costo real (2026-04-24 T10:20 CDMX)
+
+### Evidencia cruzada saldo real vs logs
+
+| Métrica | Valor | Fuente |
+|---|---|---|
+| Saldo ayer 04:58 UTC | $103.74 | UI Profile Emergent |
+| Saldo hoy 16:20 UTC | $94.07 | UI Profile Emergent |
+| Consumo real medido | **$9.67 USD** | delta |
+| Consumo registrado (abril) | $4.09 USD | `token_usage_log` aggregation |
+| **Delta no contabilizado** | **$5.58 USD (137% del registrado)** | — |
+
+### Implicación
+
+**Nuestro estimador de tokens (`_estimate_tokens: len(text)/4`) subestima sistemáticamente el costo real.** El costo por guía no es $0.0072 sino **~$0.017**. Proyecciones corregidas:
+
+- Saldo $94.07 → **~5,530 guías** (no 13,000)
+- 1,000 guías → **$17** (no $7)
+- Backlog 1,497 paquetes → **$25** (no $11)
+
+### Hipótesis causa raíz del delta de $5.58
+
+1. **Retries sin log**: el worker tiene `max_retries=3` con backoff. Cada retry llama al LLM y consume tokens, pero SÓLO se loggea el resultado exitoso final → ~3 retries por guía fallida se pierden.
+2. **Timeouts cobran tokens parciales**: al hacer `asyncio.wait_for(..., timeout=60)` y timeout, Anthropic ya procesó parte → cobra tokens aunque nosotros no recibimos response.
+3. **Tokens de sistema/prompt no contados**: `len(system_prompt)/4` puede subestimar; los prompt caching hits/misses tampoco se reflejan.
+4. **Evaluaciones de Lumi + Reportes adicionales no pasan por el logger**: si hay integraciones que llaman al LLM sin usar `log_token_usage()`, se vuelven "shadow calls" invisibles.
+5. **Descuento por imagen**: 6 imágenes/guía con vision-model pueden cobrar más tokens de los que `len(text)/4` refleja (las imágenes a tokens en Anthropic tienen su propio cálculo).
+
+### Impacto operativo
+
+- Proyecciones de costo mensual actual deben **multiplicarse x2.36** para ser realistas.
+- Budget caps en LiteLLM probablemente reflejan el real (por eso llegan a "exceeded" con solo $91).
+- La métrica "Costo USD / mes" del admin dashboard es **optimista x2.36**.
+
+### Acciones recomendadas (backlog P1)
+
+1. **Audit de `log_token_usage` callsites**: grep todos los lugares que llaman al LLM y confirmar que TODOS lloguean.
+2. **Agregar `_log_ai_token_usage` dentro de retries**: cada retry debe loguear su propio costo (con `referencia=<tracking>_retry_N`).
+3. **Log también timeouts**: si `asyncio.TimeoutError`, asumir tokens_in completos + 0 output (conservador).
+4. **Ajustar fórmula de tokens**: `len(text)/3.5` en español (caracteres acentuados pesan más), o usar tokenizer real (`tiktoken` para Anthropic es el mismo).
+5. **Reconciliación diaria**: script que compare `token_usage_log.cost_usd` vs delta de saldo Emergent y alerte si drift >10%.
+6. **Exponer `/api/admin/budget-reconciliation`**: endpoint que retorne `{logged_cost, inferred_real_cost, drift_pct, anomalies}`.
+
+---
+
+## 📊 Datos de contexto ACTUALIZADOS (24-abr-2026)
+
+---
+
 ## 🛡️ Mitigaciones implementadas (2026-04-24)
 
 ### 1. Auto-pausa inteligente
