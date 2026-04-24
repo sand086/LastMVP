@@ -486,3 +486,56 @@ async def get_sync_schedule(user: dict = Depends(get_current_user)):
         "active_journeys_count": len(schedule),
         "schedule": schedule,
     }
+
+
+
+# ==================== DELIVERABLES DOWNLOAD ====================
+
+DELIVERABLES_DIR = Path("/app/memory/deliverables")
+
+ALLOWED_DELIVERABLES = {
+    "DICCIONARIO_REPORTS.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "DICCIONARIO_REPORTS.md": "text/markdown; charset=utf-8",
+}
+
+
+@router.get("/deliverables")
+async def list_deliverables(user: dict = Depends(get_current_user)):
+    """Listado de entregables documentales disponibles."""
+    items = []
+    for name, mime in ALLOWED_DELIVERABLES.items():
+        p = DELIVERABLES_DIR / name
+        if p.exists():
+            items.append({
+                "name": name,
+                "mime": mime,
+                "size_bytes": p.stat().st_size,
+                "modified_at": datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).isoformat(),
+                "download_url": f"/api/system/deliverables/{name}",
+            })
+    return {"data": items, "total": len(items)}
+
+
+@router.get("/deliverables/{filename}")
+async def download_deliverable(filename: str, user: dict = Depends(get_current_user)):
+    """Descarga un entregable por nombre (whitelist)."""
+    if filename not in ALLOWED_DELIVERABLES:
+        raise HTTPException(status_code=404, detail="Entregable no encontrado")
+    path = DELIVERABLES_DIR / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Archivo no disponible")
+    mime = ALLOWED_DELIVERABLES[filename]
+
+    def _iter():
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+    return StreamingResponse(
+        _iter(),
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
