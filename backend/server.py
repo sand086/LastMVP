@@ -38,6 +38,8 @@ from routes import (
     architecture_router,
 )
 
+from leader_election import acquire_leader, release_leader, is_leader, worker_id
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -49,12 +51,25 @@ async def lifespan(app: FastAPI):
     # ─── STARTUP ───
     await _create_indexes()
     await _auto_migrate_order_id()
-    start_periodic_sync(db)
-    start_ai_eval_worker(db)
+
+    # Leader election: when multiple Uvicorn workers run, only ONE spawns
+    # background tasks (ai_eval_worker + kosmo_sync). Others skip.
+    # Single-worker deploys (current preview) always become leader.
+    elected = await acquire_leader(db, role="bg_tasks")
+    if elected:
+        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync")
+        start_periodic_sync(db)
+        start_ai_eval_worker(db)
+    else:
+        logger.info(f"[bg] Worker {worker_id()} is FOLLOWER — skipping background tasks")
+
     yield
+
     # ─── SHUTDOWN ───
-    stop_periodic_sync()
-    stop_ai_eval_worker()
+    if is_leader("bg_tasks"):
+        stop_periodic_sync()
+        stop_ai_eval_worker()
+        await release_leader(db, role="bg_tasks")
     await close_http_client()
     mongo_client.close()
 

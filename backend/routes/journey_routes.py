@@ -216,8 +216,9 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
     }
     await db.journeys.insert_one(journey)
 
-    for pkg in data.packages:
-        package = {
+    # Bulk insert: build list first, then single insert_many call (N+1 → 1 query)
+    if data.packages:
+        pkg_docs = [{
             "id": str(uuid.uuid4()),
             "journey_id": journey_id,
             "tracking_number": pkg.get("tracking_number", ""),
@@ -227,12 +228,13 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
             "delivery_window": pkg.get("delivery_window", ""),
             "status": "pending",
             "is_retry": False,
-        }
-        await db.packages.insert_one(package)
+        } for pkg in data.packages]
+        await db.packages.insert_many(pkg_docs)
 
-    for pkg_id in data.retry_packages:
-        await db.packages.update_one(
-            {"id": pkg_id},
+    # Bulk update retry packages with a single update_many call
+    if data.retry_packages:
+        await db.packages.update_many(
+            {"id": {"$in": data.retry_packages}},
             {"$set": {"journey_id": journey_id, "status": "pending", "is_retry": True}},
         )
 
@@ -638,22 +640,36 @@ async def create_journeys_from_cosmo(
 
     mappings = {m["messenger_name"]: m["provider_id"] for m in data.messenger_provider_mappings if m.get("provider_id")}
 
+    # Pre-fetch ALL messenger_mappings (bulk: 1 query) — was N+1 inside the loop
+    db_mappings = await db.messenger_mappings.find(
+        {}, {"_id": 0, "messenger_name": 1, "provider_id": 1}
+    ).to_list(5000)
+    db_mapping_by_name = {m["messenger_name"]: m.get("provider_id") for m in db_mappings}
+
+    # Pre-fetch ALL journeys for the route_ids in this sync (bulk: 1 query)
+    sync_route_ids = [r.get("route_id", "") for r in data.route_summary if r.get("route_id")]
+    existing_journeys_list = await db.journeys.find(
+        {"cosmo_route_id": {"$in": sync_route_ids}}, {"_id": 0}
+    ).to_list(10000)
+    existing_journeys_by_cosmo = {j["cosmo_route_id"]: j for j in existing_journeys_list}
+
+    # Accumulate package updates and journey-counter recomputations for bulk_write
+    from pymongo import UpdateOne
+    pkg_updates: list[UpdateOne] = []
+    journeys_needing_recount: set[str] = set()
+
     for route in data.route_summary:
         route_id = route.get("route_id", "")
         driver_name = route.get("driver_name", "")
         if not route_id:
             continue
 
-        provider_id = mappings.get(driver_name)
-        if not provider_id:
-            existing_mapping = await db.messenger_mappings.find_one({"messenger_name": driver_name}, {"_id": 0})
-            if existing_mapping:
-                provider_id = existing_mapping.get("provider_id")
+        provider_id = mappings.get(driver_name) or db_mapping_by_name.get(driver_name)
         if not provider_id:
             errors.append(f"Sin proveedor asignado para mensajero: {driver_name}")
             continue
 
-        existing_journey = await db.journeys.find_one({"cosmo_route_id": route_id}, {"_id": 0})
+        existing_journey = existing_journeys_by_cosmo.get(route_id)
         route_orders = orders_by_route.get(route_id, [])
 
         if existing_journey:
@@ -676,17 +692,12 @@ async def create_journeys_from_cosmo(
                     if update_fields:
                         pkg_data = existing_order_map[composite_key]
                         if isinstance(pkg_data, dict) and "id" in pkg_data:
-                            await db.packages.update_one({"id": pkg_data["id"]}, {"$set": update_fields})
+                            pkg_updates.append(UpdateOne({"id": pkg_data["id"]}, {"$set": update_fields}))
                             route_updated += 1
 
             if route_updated > 0:
                 j_id = existing_journey["id"]
-                delivered = await db.packages.count_documents({"journey_id": j_id, "status": "delivered"})
-                failed = await db.packages.count_documents({"journey_id": j_id, "status": "failed"})
-                await db.journeys.update_one(
-                    {"id": j_id},
-                    {"$set": {"packages_delivered": delivered, "packages_failed": failed}},
-                )
+                journeys_needing_recount.add(j_id)
                 total_updated_packages += route_updated
                 updated_journeys.append({
                     "journey_id": j_id,
@@ -716,7 +727,7 @@ async def create_journeys_from_cosmo(
                     if tracking_url:
                         update_fields["tracking_url"] = tracking_url
                     if update_fields:
-                        await db.packages.update_one({"id": pkg_data["id"]}, {"$set": update_fields})
+                        pkg_updates.append(UpdateOne({"id": pkg_data["id"]}, {"$set": update_fields}))
                         updated_in_other += 1
                         total_updated_packages += 1
             else:
@@ -807,6 +818,34 @@ async def create_journeys_from_cosmo(
             "packages": len(new_orders),
             "duplicates_updated": updated_in_other,
         })
+
+    # ── Flush batched package updates (single bulk_write instead of N update_one)
+    if pkg_updates:
+        await db.packages.bulk_write(pkg_updates, ordered=False)
+
+    # ── Recompute journey counters in bulk (aggregate instead of 2 count_documents per journey)
+    if journeys_needing_recount:
+        pipeline = [
+            {"$match": {"journey_id": {"$in": list(journeys_needing_recount)},
+                        "status": {"$in": ["delivered", "failed"]}}},
+            {"$group": {"_id": {"journey_id": "$journey_id", "status": "$status"},
+                        "count": {"$sum": 1}}},
+        ]
+        counter_map: dict[str, dict[str, int]] = {}
+        async for row in db.packages.aggregate(pipeline):
+            jid = row["_id"]["journey_id"]
+            st = row["_id"]["status"]
+            counter_map.setdefault(jid, {"delivered": 0, "failed": 0})[st] = row["count"]
+
+        journey_updates = [
+            UpdateOne({"id": jid}, {"$set": {
+                "packages_delivered": counter_map.get(jid, {}).get("delivered", 0),
+                "packages_failed": counter_map.get(jid, {}).get("failed", 0),
+            }})
+            for jid in journeys_needing_recount
+        ]
+        if journey_updates:
+            await db.journeys.bulk_write(journey_updates, ordered=False)
 
     await log_audit_event(
         db, user["id"], user["role"], "layout_uploaded", "layout", "",
