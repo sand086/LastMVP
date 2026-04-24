@@ -28,6 +28,8 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
     const [loading, setLoading] = useState(false);
     const [entregable, setEntregable] = useState('');
     const [modelo, setModelo] = useState('');
+    const [lastFetch, setLastFetch] = useState(null);
+    const [nowTick, setNowTick] = useState(Date.now());
 
     const fetchEvents = useCallback(async (page = 1) => {
         setLoading(true);
@@ -40,6 +42,7 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
             setEvents(res.data.events);
             setPagination(res.data.pagination);
             setDetailSummary(res.data.summary);
+            setLastFetch(Date.now());
         } catch (err) { console.error("Admin component error:", err);
             toast.error('Error al cargar eventos de tokens');
         } finally {
@@ -54,6 +57,23 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
         const it = setInterval(() => fetchEvents(pagination.page), 30000);
         return () => clearInterval(it);
     }, [fetchEvents, pagination.page]);
+
+    // Live clock for "actualizado hace Ns" tooltip (re-render every 1s)
+    useEffect(() => {
+        const it = setInterval(() => setNowTick(Date.now()), 1000);
+        return () => clearInterval(it);
+    }, []);
+
+    const agoText = (() => {
+        if (!lastFetch) return 'Nunca';
+        const diffS = Math.max(0, Math.floor((nowTick - lastFetch) / 1000));
+        if (diffS < 5) return 'hace un momento';
+        if (diffS < 60) return `hace ${diffS}s`;
+        const m = Math.floor(diffS / 60);
+        const s = diffS % 60;
+        return `hace ${m}m ${s}s`;
+    })();
+    const isFresh = lastFetch && (nowTick - lastFetch) < 35000; // within refresh window
 
     const ds = detailSummary || { by_entregable: {}, totals: {} };
     const byEnt = ds.by_entregable || {};
@@ -164,7 +184,10 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
             {/* Events Table */}
             <div style={{ border: `1px solid ${T.border}`, borderRadius: T.radius, background: T.surface, overflow: 'hidden' }}>
                 <div style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: T.textPri }}>Detalle por evento</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: T.textPri }}>Detalle por evento</span>
+                        <LiveIndicator isFresh={isFresh} agoText={agoText} data-testid="tokens-live-indicator" />
+                    </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 11, color: T.textTer }}>Mostrando {events.length} de {pagination.total} eventos</span>
                         <select value={pagination.page_size} onChange={e => setPagination(prev => ({ ...prev, page_size: Number(e.target.value) }))} style={{ padding: '4px 8px', borderRadius: 4, border: `1px solid ${T.border}`, fontSize: 11 }}>
@@ -231,3 +254,40 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
         </div>
     );
 }
+
+// ═══════════════════ LIVE INDICATOR ═══════════════════
+function LiveIndicator({ isFresh, agoText }) {
+    const color = isFresh ? '#16A34A' : '#9C9A92';
+    const bg = isFresh ? '#F0FDF4' : '#F0EFEC';
+    return (
+        <div
+            data-testid="tokens-live-indicator"
+            title={`Actualización automática cada 30s · Última actualización ${agoText}`}
+            style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '2px 8px', borderRadius: 999,
+                background: bg, fontSize: 10.5, fontWeight: 600,
+                color: color, userSelect: 'none', cursor: 'default',
+            }}
+        >
+            <span
+                style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: color,
+                    animation: isFresh ? 'tu-live-pulse 1.8s ease-in-out infinite' : 'none',
+                    boxShadow: isFresh ? `0 0 0 2px ${bg}` : 'none',
+                }}
+            />
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{isFresh ? 'LIVE' : 'Sin actualizar'}</span>
+            <span style={{ color: '#9C9A92', fontWeight: 500, marginLeft: 2 }}>·</span>
+            <span style={{ color: '#6B6960', fontWeight: 500 }}>{agoText}</span>
+            <style>{`
+                @keyframes tu-live-pulse {
+                    0%, 100% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.4); opacity: 0.55; }
+                }
+            `}</style>
+        </div>
+    );
+}
+
