@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../lib/api';
 import { toast } from 'sonner';
-import { Loader2, ChevronLeft, ChevronRight, ExternalLink, Filter } from 'lucide-react';
+import { Loader2, ChevronLeft, ChevronRight, ExternalLink, Filter, RefreshCw } from 'lucide-react';
 
 const T = {
     bg: '#F5F4F1', surface: '#FFFFFF', surface2: '#F0EFEC',
@@ -49,14 +49,29 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
 
     useEffect(() => { fetchEvents(1); }, [fetchEvents]);
 
+    // Auto-refresh every 30s to reflect new evaluations live
+    useEffect(() => {
+        const it = setInterval(() => fetchEvents(pagination.page), 30000);
+        return () => clearInterval(it);
+    }, [fetchEvents, pagination.page]);
+
     const ds = detailSummary || { by_entregable: {}, totals: {} };
     const byEnt = ds.by_entregable || {};
 
+    // Derive the ACTUAL model currently in use per entregable from the event list.
+    // Falls back to the hardcoded default if no events are visible yet.
+    const modelByEntregable = events.reduce((acc, ev) => {
+        if (ev.entregable && ev.modelo && !acc[ev.entregable]) {
+            acc[ev.entregable] = ev.modelo;
+        }
+        return acc;
+    }, {});
+
     const entCards = [
-        { key: 'evaluacion', label: 'Evaluaciones IA', model: 'claude-opus-4-5', color: T.blue, bgColor: T.blueLt },
-        { key: 'reporte', label: 'Reportes con IA', model: 'claude-sonnet-4-5', color: T.teal, bgColor: T.tealLt },
-        { key: 'lumi', label: 'Consultas Lumi', model: 'claude-sonnet-4-5', color: T.purple, bgColor: T.purpleLt },
-    ];
+        { key: 'evaluacion', label: 'Evaluaciones IA', defaultModel: 'claude-haiku-4-5', color: T.blue, bgColor: T.blueLt },
+        { key: 'reporte', label: 'Reportes con IA', defaultModel: 'claude-sonnet-4-5', color: T.teal, bgColor: T.tealLt },
+        { key: 'lumi', label: 'Consultas Lumi', defaultModel: 'claude-sonnet-4-5', color: T.purple, bgColor: T.purpleLt },
+    ].map(c => ({ ...c, model: modelByEntregable[c.key] || c.defaultModel }));
 
     // Generate dynamic month labels
     const now = new Date();
@@ -79,15 +94,30 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
                     <option value="reporte">Reportes con IA</option>
                     <option value="lumi">Consultas Lumi</option>
                 </select>
-                <select value={modelo} onChange={e => setModelo(e.target.value)} style={{ padding: '6px 12px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12, background: T.surface }}>
+                <select value={modelo} onChange={e => setModelo(e.target.value)} style={{ padding: '6px 12px', borderRadius: T.radiusSm, border: `1px solid ${T.border}`, fontSize: 12, background: T.surface }} data-testid="filter-modelo">
                     <option value="">Todos los modelos</option>
-                    <option value="claude-opus-4-5">claude-opus-4-5</option>
+                    <option value="claude-haiku-4-5">claude-haiku-4-5</option>
                     <option value="claude-sonnet-4-5">claude-sonnet-4-5</option>
+                    <option value="claude-opus-4-5">claude-opus-4-5</option>
                     <option value="gpt-4o">gpt-4o</option>
                 </select>
                 <span style={{ fontSize: 11, color: T.textTer, padding: '4px 8px', borderRadius: T.radiusSm, background: T.surface2 }}>
                     TC: <strong>$19.00 MXN/USD</strong>
                 </span>
+                <button
+                    onClick={() => fetchEvents(pagination.page)}
+                    disabled={loading}
+                    data-testid="refresh-token-usage-btn"
+                    title="Actualizar datos (auto cada 30s)"
+                    style={{
+                        marginLeft: 'auto', padding: '6px 10px', borderRadius: T.radiusSm,
+                        border: `1px solid ${T.border}`, background: T.surface, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: T.textSec,
+                    }}
+                >
+                    {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    Actualizar
+                </button>
             </div>
 
             {/* Summary Cards - 3 columns */}
