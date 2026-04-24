@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from dependencies import db, get_current_user
+from ttl_cache import ttl_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin Module"])
@@ -48,6 +49,7 @@ def _month_range(period: str, date_from: str = None, date_to: str = None):
 # ═══════════════ SUMMARY ═══════════════
 
 @router.get("/summary")
+@ttl_cache(ttl_seconds=60, prefix="admin_summary", user_scope="role")
 async def admin_summary(
     period: str = Query("current_month"),
     date_from: Optional[str] = None,
@@ -138,6 +140,7 @@ async def admin_summary(
 # ═══════════════ TOKEN USAGE ═══════════════
 
 @router.get("/token-usage")
+@ttl_cache(ttl_seconds=20, prefix="token_usage", user_scope="role")
 async def get_token_usage(
     period: str = Query("current_month"),
     date_from: Optional[str] = None,

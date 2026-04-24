@@ -7,6 +7,7 @@ from typing import Optional
 from datetime import datetime, timezone
 
 from dependencies import db, get_current_user, apply_assignment_filter, _next_day
+from ttl_cache import ttl_cache
 
 router = APIRouter(tags=["Dashboard"])
 
@@ -41,6 +42,7 @@ async def search_packages(q: str, user: dict = Depends(get_current_user)):
 
 
 @router.get("/dashboard/stats")
+@ttl_cache(ttl_seconds=30, prefix="dashboard_stats", user_scope="role")
 async def get_dashboard_stats(
     date: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -113,6 +115,7 @@ async def get_dashboard_stats(
 
 
 @router.get("/dashboard/incidents-breakdown")
+@ttl_cache(ttl_seconds=45, prefix="incidents_breakdown", user_scope="role")
 async def get_incidents_breakdown(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -137,6 +140,7 @@ async def get_incidents_breakdown(
 
 
 @router.get("/dashboard/provider-comparison")
+@ttl_cache(ttl_seconds=60, prefix="provider_comparison", user_scope="role")
 async def get_provider_comparison(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,

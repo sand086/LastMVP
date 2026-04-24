@@ -14,6 +14,7 @@ Features:
 """
 
 import asyncio
+import os
 import re
 import json
 import logging
@@ -49,8 +50,8 @@ HEADERS = {
 # ── Performance Tuning ──────────────────────────────────────────
 MAX_PACKAGES_PER_SYNC = 250
 SCRAPE_CONCURRENCY = 10
-SCHEDULER_CHECK_SECONDS = 45
-MAX_JOURNEYS_PER_CYCLE = 25
+SCHEDULER_CHECK_SECONDS = int(os.environ.get("KOSMO_SCHEDULER_CHECK_SECONDS", "90"))
+MAX_JOURNEYS_PER_CYCLE = int(os.environ.get("KOSMO_MAX_JOURNEYS_PER_CYCLE", "20"))
 HTTP_TIMEOUT = 12
 MAX_RETRIES_ON_429 = 2
 BACKOFF_BASE_SECONDS = 3
