@@ -314,6 +314,49 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
 
         await _update_job_progress(db, job_id, evaluated, errors, total, total_tokens)
 
+        # Guard 2: si el batch completo falló por Budget exceeded, auto-pausa worker
+        # 10 min y finaliza job (evita gastar intentos inútiles).
+        all_budget_errors = (
+            len(results) > 0
+            and all(r["status"] == "Error" and r.get("error") and "saldo" in r["error"].lower()
+                    for r in results)
+        )
+        if all_budget_errors:
+            logger.error(f"Job {job_id}: budget exceeded on entire batch — auto-pausing worker 10 min")
+            try:
+                from ai_eval_config import pause_worker
+                await pause_worker(db, duration_minutes=10,
+                                   reason="Auto-pausa: saldo Emergent LLM agotado",
+                                   user_email="system_auto")
+            except Exception as pe:
+                logger.error(f"Auto-pause failed: {pe}")
+            # Marcar guías restantes como Error
+            remaining = guias[batch_start + batch_size:]
+            for g in remaining:
+                await db.ai_evaluation_jobs.update_one(
+                    {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
+                    {"$set": {
+                        "guias_detail.$.status": "Error",
+                        "guias_detail.$.error": "Saldo IA agotado",
+                    }},
+                )
+                errors += 1
+            end_time = datetime.now(timezone.utc)
+            await db.ai_evaluation_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "status": "Parcial" if evaluated > 0 else "Error",
+                    "fecha_termino": end_time.isoformat(),
+                    "duracion_segundos": round((end_time - start).total_seconds()),
+                    "progress_percent": 100,
+                    "guias_evaluadas": evaluated,
+                    "guias_con_error": errors,
+                    "tokens_consumidos": total_tokens,
+                    "error_detail": "Saldo Emergent LLM agotado. Worker pausado 10 min automáticamente.",
+                }},
+            )
+            return "BudgetExhausted"
+
     return await _finalize_job(db, job_id, start, evaluated, errors, total, total_tokens)
 
 
@@ -461,13 +504,15 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
 
 
 async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
-    """Recupera jobs 'Evaluando' huérfanos por reinicio o estancamiento.
-    - Jobs sin progreso >15 min (last_progress_at) → Error con mensaje claro
-    - Jobs iniciados hace >30 min sin last_progress_at → Error (legacy sin heartbeat)
+    """Recupera jobs 'Evaluando' y 'En_Cola' estancados por reinicio o saturación.
+    - Evaluando sin progreso >15 min (last_progress_at) → Error
+    - Evaluando iniciados hace >30 min sin heartbeat (legacy) → Error
+    - En_Cola esperando >2h → Error (probable saturación de créditos/workers)
     Idempotente."""
     now = datetime.now(timezone.utc)
     stuck_cutoff = (now - timedelta(minutes=15)).isoformat()
     legacy_cutoff = (now - timedelta(minutes=30)).isoformat()
+    queue_cutoff = (now - timedelta(hours=2)).isoformat()
 
     # 1) Jobs con heartbeat estancado (>15 min sin progreso)
     result1 = await db.ai_evaluation_jobs.update_many(
@@ -490,9 +535,21 @@ async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
             "error_detail": "Job huérfano por reinicio de backend. Usa 'Reintentar' para reencolar.",
         }},
     )
-    total = (result1.modified_count or 0) + (result2.modified_count or 0)
+    # 3) En_Cola >2h — no fueron tomados por el worker
+    result3 = await db.ai_evaluation_jobs.update_many(
+        {"status": "En_Cola", "fecha_creacion": {"$lt": queue_cutoff}},
+        {"$set": {
+            "status": "Error",
+            "fecha_termino": now.isoformat(),
+            "error_detail": "Job En_Cola >2h sin procesar (probable saturación IA). Usa 'Reintentar'.",
+        }},
+    )
+    total = (result1.modified_count or 0) + (result2.modified_count or 0) + (result3.modified_count or 0)
     if total > 0:
-        logger.warning(f"AI Eval worker: recovered {total} stuck/orphan jobs → Error")
+        logger.warning(
+            f"AI Eval worker: recovered {total} stale jobs → Error "
+            f"(evaluando:{result1.modified_count}+{result2.modified_count}, en_cola:{result3.modified_count})"
+        )
 
 
 def start_ai_eval_worker(db: AsyncIOMotorDatabase):
