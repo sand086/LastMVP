@@ -554,11 +554,17 @@ async def _worker_loop(db: AsyncIOMotorDatabase):
 
 
 async def _cron_sweep(db: AsyncIOMotorDatabase):
-    """Cron job — every N minutes, find unqueued terminal packages and enqueue them."""
+    """Cron job — every N minutes, find unqueued terminal packages and enqueue them.
+
+    Sweep ORDER: ejecutar primero, dormir despues. Ası­ tras cualquier restart del
+    backend el primer barrido ocurre en <1s en vez de esperar 30 min (lo que daba
+    impresion de "worker muerto" cuando en realidad simplemente esperaba el sleep).
+    """
+    # Pequeño delay inicial para que el bg loop principal y leader_election
+    # se asienten antes de ejecutar la primera consulta pesada.
+    await asyncio.sleep(15)
     while True:
         try:
-            await asyncio.sleep(CRON_INTERVAL_MINUTES * 60)
-
             # Find journeys with unevaluated terminal packages
             pipeline = [
                 {"$match": {
@@ -579,6 +585,9 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
                 if doc["_id"]:
                     routes_to_eval.append({"route_id": doc["_id"], "count": doc["count"]})
 
+            if routes_to_eval:
+                logger.info(f"Cron sweep: encontradas {len(routes_to_eval)} rutas con packages pendientes de evaluar")
+
             for route in routes_to_eval:
                 # Check if there's already a pending/running job for this route
                 existing = await db.ai_evaluation_jobs.find_one(
@@ -592,10 +601,14 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
                 if result and result.get("job_id"):
                     logger.info(f"Cron sweep: enqueued {result['total']} guias for route {route['route_id'][:12]} (job {result['job_id'][:8]})")
 
+            await asyncio.sleep(CRON_INTERVAL_MINUTES * 60)
+
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"AI eval cron error: {e}")
+            # Wait 60s on error to avoid tight crash-loop
+            await asyncio.sleep(60)
 
 
 async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
