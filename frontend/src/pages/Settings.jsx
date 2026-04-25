@@ -363,6 +363,11 @@ const Settings = () => {
                     <SettingsSystemTab systemConfig={systemConfig} configLoading={configLoading} />
                 </TabsContent>
                 <TabsContent value="webhooks"><WebhooksTab /></TabsContent>
+                {isDeveloper && (
+                    <TabsContent value="integraciones">
+                        <SettingsIntegrationsTab isDeveloper={isDeveloper} />
+                    </TabsContent>
+                )}
             </Tabs>
 
             {/* User Modal */}
