@@ -226,10 +226,12 @@ async def health():
     storage_check = _check_storage()
     breakers = _check_circuit_breakers()
 
-    # Overall status
+    # Overall status. Threshold ajustable vía env (default 30 min) para evitar
+    # falsos positivos cuando el worker IA está pausado intencionalmente por el usuario.
+    _hb_threshold = int(_os.environ.get("AI_EVAL_HEARTBEAT_THRESHOLD_SECONDS", "1800"))
     if db_check.get("status") in ("error", "timeout"):
         overall = "unhealthy"
-    elif (ai_check.get("last_heartbeat_seconds_ago") is not None and ai_check["last_heartbeat_seconds_ago"] > 600) or \
+    elif (ai_check.get("last_heartbeat_seconds_ago") is not None and ai_check["last_heartbeat_seconds_ago"] > _hb_threshold) or \
          any(b.get("state") == "OPEN" for b in (breakers.values() if isinstance(breakers, dict) else [])):
         overall = "degraded"
     else:
@@ -277,7 +279,11 @@ async def global_rate_limit_middleware(request: StarletteRequest, call_next):
         user_id = None
 
     is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
-    key = f"user:{user_id}" if user_id else f"ip:{request.client.host if request.client else 'unknown'}"
+    # P03: Detectar IP real cuando hay ingress/proxy delante (Emergent K8s usa X-Forwarded-For).
+    # Tomar el primer hop de la lista (cliente original) en vez de request.client.host (que es el ingress).
+    fwd = request.headers.get("X-Forwarded-For", "")
+    real_ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
+    key = f"user:{user_id}" if user_id else f"ip:{real_ip}"
 
     # Manual sliding-window check (in-memory; consistent with slowapi default store)
     bucket = "write" if is_write and user_id else ("user" if user_id else "anon")

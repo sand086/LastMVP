@@ -1,5 +1,20 @@
 /* LastMile OS Styles */
 
+/* P05: ConnectionStatus animated dot — keyframes ubicados en CSS global
+   para evitar bleed de textContent al usar <style> inline en JSX. */
+.cs-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background-color: #10B981;
+    animation: cs-pulse 1.8s ease-in-out infinite;
+    display: inline-block;
+}
+@keyframes cs-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.55; }
+}
+
 /* Prevent text-align center on App container */
 .App {
     text-align: left;

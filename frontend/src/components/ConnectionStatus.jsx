@@ -31,21 +31,12 @@ const ConnectionStatus = ({ connectionMode = 'polling', justRecovered = false })
             <div
                 data-testid="connection-status"
                 data-connection-mode="websocket"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100 cs-live"
                 style={{ fontSize: 11, fontWeight: 600, color: '#047857' }}
                 title="Conexión en tiempo real activa (WebSocket)"
             >
-                <span
-                    className="w-2 h-2 rounded-full bg-emerald-500"
-                    style={{ animation: 'cs-pulse 1.8s ease-in-out infinite' }}
-                />
+                <span className="cs-dot" />
                 <span>En vivo</span>
-                <style>{`
-                    @keyframes cs-pulse {
-                        0%, 100% { transform: scale(1); opacity: 1; }
-                        50% { transform: scale(1.4); opacity: 0.55; }
-                    }
-                `}</style>
             </div>
         );
     }
