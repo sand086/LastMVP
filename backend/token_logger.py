@@ -22,6 +22,11 @@ FALLBACK_MODEL_PRICING = {
     "gpt-5.1": (5.0, 20.0),
 }
 
+# Anthropic Vision: una imagen <= 1.15 MP cuesta ~1.5K input tokens (approx baseline).
+# Una imagen ~5 MP cuesta ~5K tokens. Usamos 1500 como estimación segura para fotos
+# de evidencia ya redimensionadas a 1920px max (post-compresión) ≈ 1MP.
+IMAGE_INPUT_TOKEN_ESTIMATE = 1500
+
 
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English/Spanish."""
@@ -42,15 +47,27 @@ async def log_token_usage(
     guide: str = None,
     client_id: str = None,
     user_id: str = None,
+    image_count: int = 0,
+    is_shadow_cost: bool = False,
+    shadow_kind: str = None,
 ):
     """
     Log AI token usage to token_usage_log collection.
-    Non-blocking: errors are caught and logged, never bubbled up.
+
+    Args:
+        image_count: número de imágenes adjuntas al request (Anthropic Vision cobra por imagen).
+        is_shadow_cost: True si el LLM ya facturó pero la respuesta falló/se cortó.
+        shadow_kind: 'timeout' | 'error_before_response' | 'partial_response' | etc.
+
+    Non-blocking: errores se capturan y loguean, nunca propagan.
     """
     try:
         tokens_input = _estimate_tokens(input_text)
         tokens_output = _estimate_tokens(output_text)
         tokens_prompt = _estimate_tokens(system_prompt)
+        # Imágenes facturan como input tokens en Anthropic Vision.
+        tokens_images = max(0, int(image_count or 0)) * IMAGE_INPUT_TOKEN_ESTIMATE
+        tokens_input += tokens_images
         tokens_total = tokens_input + tokens_output + tokens_prompt
 
         # Get cost config
@@ -97,15 +114,20 @@ async def log_token_usage(
             "tokens_input": tokens_input,
             "tokens_output": tokens_output,
             "tokens_prompt": tokens_prompt,
+            "tokens_images": tokens_images,
+            "image_count": int(image_count or 0),
             "tokens_total": tokens_total,
             "cost_usd": cost_usd,
             "cost_mxn": cost_mxn,
             "client_id": client_id,
             "user_id": user_id,
+            "is_shadow_cost": bool(is_shadow_cost),
+            "shadow_kind": shadow_kind if is_shadow_cost else None,
         }
 
         await db.token_usage_log.insert_one(doc)
-        logger.debug(f"Token usage logged: {entregable} / {modelo} / {tokens_total} tokens / ${cost_usd}")
+        logger.debug(f"Token usage logged: {entregable} / {modelo} / {tokens_total} tokens / ${cost_usd}{' [SHADOW]' if is_shadow_cost else ''}")
 
     except Exception as e:
         logger.warning(f"Failed to log token usage (non-blocking): {e}")
+

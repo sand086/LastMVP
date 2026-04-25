@@ -140,6 +140,32 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
                 </button>
             </div>
 
+            {/* Shadow cost alert (consumo invisible cuando LLM falla pero ya facturó) */}
+            {(ds.shadow?.total_count > 0) && (
+                <div
+                    data-testid="shadow-cost-banner"
+                    style={{
+                        padding: '10px 14px', marginBottom: 16,
+                        background: T.amberLt, border: `1px solid #F59E0B`,
+                        borderRadius: T.radius, display: 'flex',
+                        alignItems: 'center', gap: 10,
+                    }}
+                >
+                    <span style={{ fontSize: 18 }}>⚠</span>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#92400E' }}>
+                            Consumo en sombra detectado: ${ds.shadow.total_cost_usd?.toFixed(4)} USD ({ds.totals?.shadow_cost_pct ?? 0}% del total) — {ds.shadow.total_count} eventos
+                        </div>
+                        <div style={{ fontSize: 11, color: '#78350F', marginTop: 2 }}>
+                            Anthropic facturó input tokens (incluyendo imágenes) cuando la respuesta del modelo no se recibió completa (timeout, rate-limit, error de red). Estos cargos ahora quedan auditados con flag <code style={{ background: 'rgba(0,0,0,0.06)', padding: '0 4px', borderRadius: 3 }}>is_shadow_cost</code>.
+                            {ds.shadow.by_kind && Object.keys(ds.shadow.by_kind).length > 0 && (
+                                <span> Tipos: {Object.entries(ds.shadow.by_kind).map(([k, v]) => `${k}=${v.count}`).join(', ')}.</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Summary Cards - 3 columns */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
                 {entCards.map(card => {
@@ -201,20 +227,22 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                         <thead>
                             <tr style={{ background: T.surface2, borderBottom: `1px solid ${T.border}` }}>
-                                {['Fecha', 'Entregable', 'Modelo', 'Referencia', 'Input', 'Output', 'Prompt', 'Total', 'USD', 'MXN', 'Cliente'].map(h => (
+                                {['Fecha', 'Entregable', 'Modelo', 'Referencia', 'Input', 'Output', 'Prompt', 'Total', 'USD', 'MXN', 'Tipo', 'Cliente'].map(h => (
                                     <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Referencia' ? 'left' : 'center', fontSize: 10, fontWeight: 600, color: T.textTer, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                                 ))}
                             </tr>
                         </thead>
                         <tbody>
                             {loading ? (
-                                <tr><td colSpan={11} style={{ padding: 40, textAlign: 'center' }}><Loader2 size={20} className="animate-spin" style={{ margin: '0 auto' }} /></td></tr>
+                                <tr><td colSpan={12} style={{ padding: 40, textAlign: 'center' }}><Loader2 size={20} className="animate-spin" style={{ margin: '0 auto' }} /></td></tr>
                             ) : events.length === 0 ? (
-                                <tr><td colSpan={11} style={{ padding: 40, textAlign: 'center', color: T.textTer }}>No hay eventos registrados para este período</td></tr>
+                                <tr><td colSpan={12} style={{ padding: 40, textAlign: 'center', color: T.textTer }}>No hay eventos registrados para este período</td></tr>
                             ) : events.map(ev => {
                                 const color = ENTREGABLE_COLORS[ev.entregable] || T.textSec;
+                                const isShadow = !!ev.is_shadow_cost;
+                                const rowBg = isShadow ? T.amberLt : 'transparent';
                                 return (
-                                    <tr key={ev.id} style={{ borderBottom: `1px solid ${T.border}` }}>
+                                    <tr key={ev.id} style={{ borderBottom: `1px solid ${T.border}`, background: rowBg }}>
                                         <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', fontSize: 11, color: T.textSec }}>
                                             {new Date(ev.timestamp).toLocaleString('es-MX', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                         </td>
@@ -228,6 +256,9 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
                                                     {ev.referencia} <ExternalLink size={10} />
                                                 </a>
                                             ) : ev.referencia}
+                                            {ev.image_count > 0 && (
+                                                <span style={{ marginLeft: 6, fontSize: 9, color: T.textTer }}>📷×{ev.image_count}</span>
+                                            )}
                                         </td>
                                         <td style={{ padding: '8px 10px', textAlign: 'center', fontFamily: "'DM Mono',monospace" }}>{fmtNum(ev.tokens_input)}</td>
                                         <td style={{ padding: '8px 10px', textAlign: 'center', fontFamily: "'DM Mono',monospace" }}>{fmtNum(ev.tokens_output)}</td>
@@ -235,6 +266,16 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
                                         <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{fmtNum(ev.tokens_total)}</td>
                                         <td style={{ padding: '8px 10px', textAlign: 'center', fontFamily: "'DM Mono',monospace", color: T.green }}>${ev.cost_usd?.toFixed(4)}</td>
                                         <td style={{ padding: '8px 10px', textAlign: 'center', fontFamily: "'DM Mono',monospace" }}>${ev.cost_mxn?.toFixed(3)}</td>
+                                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                            {isShadow ? (
+                                                <span
+                                                    title={`Shadow cost (${ev.shadow_kind || 'desconocido'}): Anthropic facturó pero la respuesta no llegó.`}
+                                                    style={{ padding: '2px 7px', borderRadius: 8, fontSize: 9.5, fontWeight: 700, background: '#FEF3C7', color: '#92400E', textTransform: 'uppercase' }}
+                                                >Shadow</span>
+                                            ) : (
+                                                <span style={{ padding: '2px 7px', borderRadius: 8, fontSize: 9.5, fontWeight: 600, background: T.greenLt, color: T.green }}>OK</span>
+                                            )}
+                                        </td>
                                         <td style={{ padding: '8px 10px', textAlign: 'center', fontSize: 11 }}>{ev.client_id ? 'Cubbo' : '—'}</td>
                                     </tr>
                                 );

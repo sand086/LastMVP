@@ -219,8 +219,32 @@ async def get_token_usage(
     totals["output_pct"] = round(to / tt * 100) if tt else 0
     totals["prompt_pct"] = 100 - totals["input_pct"] - totals["output_pct"] if tt else 0
 
+    # Shadow-cost breakdown: créditos consumidos cuando la respuesta del LLM no se
+    # recibió pero Anthropic ya facturó (timeouts, rate-limit, errores intermitentes).
+    shadow_pipeline = [
+        {"$match": {**match, "is_shadow_cost": True}},
+        {"$group": {
+            "_id": {"$ifNull": ["$shadow_kind", "unknown"]},
+            "count": {"$sum": 1},
+            "cost_usd": {"$sum": "$cost_usd"},
+            "tokens_total": {"$sum": "$tokens_total"},
+        }},
+    ]
+    shadow_results = await db.token_usage_log.aggregate(shadow_pipeline).to_list(10)
+    shadow = {
+        "by_kind": {r["_id"]: {
+            "count": r["count"],
+            "cost_usd": round(r["cost_usd"], 4),
+            "tokens_total": r["tokens_total"],
+        } for r in shadow_results},
+        "total_count": sum(r["count"] for r in shadow_results),
+        "total_cost_usd": round(sum(r["cost_usd"] for r in shadow_results), 4),
+    }
+    totals["shadow_cost_usd"] = shadow["total_cost_usd"]
+    totals["shadow_cost_pct"] = round(shadow["total_cost_usd"] / totals["cost_usd"] * 100, 1) if totals["cost_usd"] else 0
+
     return {
-        "summary": {"by_entregable": by_entregable, "totals": totals},
+        "summary": {"by_entregable": by_entregable, "totals": totals, "shadow": shadow},
         "events": events,
         "pagination": {"total": total, "page": page, "page_size": page_size, "total_pages": max(1, (total + page_size - 1) // page_size)},
     }

@@ -220,6 +220,8 @@ def _build_ai_result(ai_result: dict, package: dict, has_incident: bool, proof_u
         "ia_errors": ai_result.get("errors", []),
         "ia_severity": ai_result.get("severity", {}),
         "ia_feedback": feedback,
+        "tokens_used": ai_result.get("_tokens_used_estimate", 0),
+        "image_count": ai_result.get("_image_count", 0),
         "evidence_detail": {
             "proof_count": len(proof_urls),
             "has_driver_note": bool(driver_note.strip()),
@@ -327,7 +329,16 @@ def _build_user_context(tracking: str, status: str, driver_note: str, image_coun
     return context
 
 
-async def _log_ai_token_usage(tracking: str, context: str, response_text: str, system_prompt: str, model_alias: str) -> None:
+async def _log_ai_token_usage(
+    tracking: str,
+    context: str,
+    response_text: str,
+    system_prompt: str,
+    model_alias: str,
+    image_count: int = 0,
+    is_shadow_cost: bool = False,
+    shadow_kind: str = None,
+) -> None:
     """Log AI token usage (non-blocking, swallows errors)."""
     try:
         from token_logger import log_token_usage
@@ -339,6 +350,9 @@ async def _log_ai_token_usage(tracking: str, context: str, response_text: str, s
             input_text=context,
             output_text=response_text or "",
             system_prompt=system_prompt,
+            image_count=image_count,
+            is_shadow_cost=is_shadow_cost,
+            shadow_kind=shadow_kind,
         )
     except Exception as log_err:
         logger.debug(f"Token log skipped: {log_err}")
@@ -371,11 +385,50 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
     context = _build_user_context(tracking, status, driver_note, len(valid_images), training_context)
     file_contents = [ImageContent(image_base64=img) for img in valid_images]
     user_msg = UserMessage(text=context, file_contents=file_contents)
-    response_text = await chat.send_message(user_msg)
+    image_count = len(valid_images)
 
-    await _log_ai_token_usage(tracking, context, response_text, system_prompt, model_alias)
+    # Cualquier excepción a partir de aquí significa que Anthropic YA recibió
+    # (o probablemente recibió) el request → debemos loguear el costo aunque la
+    # respuesta no llegue, para evitar consumo invisible.
+    try:
+        response_text = await chat.send_message(user_msg)
+    except Exception as send_err:
+        # Shadow log con el contexto REAL armado (system + user prompt + image count).
+        await _log_ai_token_usage(
+            tracking=tracking,
+            context=context,
+            response_text="",
+            system_prompt=system_prompt,
+            model_alias=model_alias,
+            image_count=image_count,
+            is_shadow_cost=True,
+            shadow_kind="error_before_response",
+        )
+        raise send_err
 
-    return _parse_ai_response(response_text)
+    await _log_ai_token_usage(
+        tracking=tracking,
+        context=context,
+        response_text=response_text,
+        system_prompt=system_prompt,
+        model_alias=model_alias,
+        image_count=image_count,
+        is_shadow_cost=False,
+    )
+
+    parsed = _parse_ai_response(response_text)
+    if parsed is not None:
+        # Estimación local (consistente con token_logger) para que el worker pueda
+        # sumar tokens al stat del job y el monitor IA muestre consumo real.
+        from token_logger import _estimate_tokens, IMAGE_INPUT_TOKEN_ESTIMATE
+        parsed["_tokens_used_estimate"] = (
+            _estimate_tokens(context)
+            + _estimate_tokens(system_prompt)
+            + _estimate_tokens(response_text)
+            + image_count * IMAGE_INPUT_TOKEN_ESTIMATE
+        )
+        parsed["_image_count"] = image_count
+    return parsed
 
 
 def _parse_ai_response(text: str) -> Optional[dict]:
