@@ -6,14 +6,23 @@ const WS_PING_INTERVAL = 30000;
 /**
  * Hook to connect to the dashboard WebSocket and listen for real-time events.
  * @param {function} onEvent - Callback when an event is received: (event) => void
- * @returns {{ isConnected: boolean, connectionCount: number }}
+ * @returns {{ isConnected: boolean, connectionMode: 'websocket'|'polling'|'offline', justRecovered: boolean }}
+ *   - connectionMode: 'websocket' cuando el WS está conectado; 'polling' cuando se intenta
+ *     reconectar pero el cliente sigue funcionando con la API REST cada 60s; 'offline'
+ *     cuando >3 intentos consecutivos fallaron sin éxito.
+ *   - justRecovered: true durante 3s tras reconexión exitosa desde polling/offline.
  */
 export function useWebSocket(onEvent) {
     const [isConnected, setIsConnected] = useState(false);
+    const [connectionMode, setConnectionMode] = useState('polling');
+    const [justRecovered, setJustRecovered] = useState(false);
     const wsRef = useRef(null);
     const reconnectTimerRef = useRef(null);
     const pingTimerRef = useRef(null);
+    const recoveryTimerRef = useRef(null);
     const onEventRef = useRef(onEvent);
+    const failureCountRef = useRef(0);
+    const wasConnectedRef = useRef(false);
 
     // Keep callback reference fresh
     useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
@@ -29,6 +38,15 @@ export function useWebSocket(onEvent) {
 
             ws.onopen = () => {
                 setIsConnected(true);
+                setConnectionMode('websocket');
+                // Si veníamos de offline/polling y ya habíamos conectado al menos una vez, mostrar "Conexión restaurada"
+                if (wasConnectedRef.current && failureCountRef.current > 0) {
+                    setJustRecovered(true);
+                    clearTimeout(recoveryTimerRef.current);
+                    recoveryTimerRef.current = setTimeout(() => setJustRecovered(false), 3000);
+                }
+                wasConnectedRef.current = true;
+                failureCountRef.current = 0;
                 // Start ping interval
                 pingTimerRef.current = setInterval(() => {
                     if (ws.readyState === WebSocket.OPEN) {
@@ -49,6 +67,9 @@ export function useWebSocket(onEvent) {
 
             ws.onclose = () => {
                 setIsConnected(false);
+                failureCountRef.current += 1;
+                // Tras >3 fallos consecutivos sin éxito → offline. Mientras tanto: polling.
+                setConnectionMode(failureCountRef.current > 3 ? 'offline' : 'polling');
                 clearInterval(pingTimerRef.current);
                 // Auto-reconnect
                 reconnectTimerRef.current = setTimeout(connect, WS_RECONNECT_INTERVAL);
@@ -59,6 +80,8 @@ export function useWebSocket(onEvent) {
             };
         } catch (err) {
             console.error('WebSocket connection error:', err);
+            failureCountRef.current += 1;
+            setConnectionMode(failureCountRef.current > 3 ? 'offline' : 'polling');
             // Retry on connection error
             reconnectTimerRef.current = setTimeout(connect, WS_RECONNECT_INTERVAL);
         }
@@ -68,6 +91,7 @@ export function useWebSocket(onEvent) {
         connect();
         return () => {
             clearTimeout(reconnectTimerRef.current);
+            clearTimeout(recoveryTimerRef.current);
             clearInterval(pingTimerRef.current);
             if (wsRef.current) {
                 wsRef.current.close();
@@ -75,5 +99,5 @@ export function useWebSocket(onEvent) {
         };
     }, [connect]);
 
-    return { isConnected };
+    return { isConnected, connectionMode, justRecovered };
 }

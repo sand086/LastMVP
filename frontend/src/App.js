@@ -24,6 +24,7 @@ const ManualViewer = lazy(() => import('./pages/ManualViewer'));
 const MonitorProcesos = lazy(() => import('./pages/MonitorProcesos'));
 const Architecture = lazy(() => import('./pages/Architecture'));
 import LumiChat from './components/LumiChat';
+import ErrorBoundary from './components/ErrorBoundary';
 import './App.css';
 
 // Fallback UI while lazy chunks load
@@ -86,6 +87,7 @@ const PublicRoute = ({ children }) => {
 function AppRoutes() {
     return (
         <Suspense fallback={<PageLoader />}>
+            <ErrorBoundary fallbackMessage="Esta sección no se pudo cargar correctamente. Si el problema persiste, contacta al equipo de soporte.">
             <Routes>
             {/* Public routes */}
             <Route 
@@ -255,6 +257,7 @@ function AppRoutes() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </ErrorBoundary>
         </Suspense>
     );
 }
@@ -282,7 +285,12 @@ function LumiChatWrapper() {
     // Detect journeyId from URL pattern /journeys/:id
     const match = location.pathname.match(/^\/journeys\/([a-f0-9-]{36})$/);
     const journeyId = match ? match[1] : null;
-    return <LumiChat journeyId={journeyId} />;
+    // Asistente IA: si falla un render de Lumi, NO debe romper la página principal
+    return (
+        <ErrorBoundary fallbackMessage="El asistente Lumi no está disponible en este momento. Recarga la página para reintentar.">
+            <LumiChat journeyId={journeyId} />
+        </ErrorBoundary>
+    );
 }
 
 export default App;

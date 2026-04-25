@@ -144,6 +144,9 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str, timeout_s: int) ->
         return {"status": "Error", "tokens": 0, "error": f"Timeout ({timeout_s}s)"}
     except Exception as e:
         msg = str(e)
+        # Circuit breaker abierto: no es un fallo del paquete, es una pausa controlada.
+        if "circuit OPEN" in msg or "CircuitOpenError" in type(e).__name__:
+            return {"status": "Error", "tokens": 0, "error": "LLM en circuit breaker (recuperándose)", "_skip_retry": True}
         # El shadow log ya se realiza dentro de _call_ai_vision cuando send_message
         # lanza una excepción (es el único punto donde Anthropic ya facturó).
         # Aquí solo mapeamos el error a un mensaje friendly.

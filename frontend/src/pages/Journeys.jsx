@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { getJourneys, getClients, getProviders, deleteJourney } from '../lib/api';
+import { getClients, getProviders, deleteJourney } from '../lib/api';
+import { useJourneys } from '../hooks/useJourneys';
 import { 
     formatDate, 
     getStatusColor, 
@@ -33,10 +34,8 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const Journeys = () => {
     const { canEdit, hasRole } = useAuth();
     const canDelete = hasRole(['coordinator', 'developer']);
-    const [journeys, setJourneys] = useState([]);
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
-    const [loading, setLoading] = useState(true);
     const [pulseConfig, setPulseConfig] = useState(null);
 
     // Filters
@@ -56,44 +55,47 @@ const Journeys = () => {
     const [deleteModal, setDeleteModal] = useState({ open: false, journey: null });
     const [deleting, setDeleting] = useState(false);
 
-    const fetchData = useCallback(async () => {
-        try {
-            const params = {};
-            if (dateFrom) params.date_from = format(dateFrom, 'yyyy-MM-dd');
-            if (dateTo) params.date_to = format(dateTo, 'yyyy-MM-dd');
-            if (selectedClient !== 'all') params.client_id = selectedClient;
-            if (selectedProvider !== 'all') params.provider_id = selectedProvider;
-            if (selectedStatus !== 'all') params.status = selectedStatus;
+    // P08 — Journeys via useJourneys hook (cancela auto, retry x2 en network errors)
+    const journeysFilters = useMemo(() => ({
+        date_from: dateFrom ? format(dateFrom, 'yyyy-MM-dd') : undefined,
+        date_to: dateTo ? format(dateTo, 'yyyy-MM-dd') : undefined,
+        client_id: selectedClient !== 'all' ? selectedClient : undefined,
+        provider_id: selectedProvider !== 'all' ? selectedProvider : undefined,
+        status: selectedStatus !== 'all' ? selectedStatus : undefined,
+    }), [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus]);
 
+    const { data: journeysData, loading: journeysLoading, error: journeysError, refetch: refetchJourneys } = useJourneys(journeysFilters);
+    const journeys = useMemo(() => journeysData?.data || journeysData || [], [journeysData]);
+
+    // Clients + Providers + Config: one-shot al montar (no requieren retry/cancel)
+    const fetchAux = useCallback(async () => {
+        try {
             const results = await Promise.allSettled([
-                getJourneys(params),
                 getClients(),
                 getProviders(),
                 api.get('/admin/config'),
             ]);
-
-            const [journeysRes, clientsRes, providersRes, configRes] = results;
-
-            if (journeysRes.status === 'fulfilled') {
-                setJourneys(journeysRes.value.data?.data || journeysRes.value.data || []);
-            }
+            const [clientsRes, providersRes, configRes] = results;
             if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data);
             if (providersRes.status === 'fulfilled') setProviders(providersRes.value.data);
             if (configRes.status === 'fulfilled') setPulseConfig(configRes.value.data?.pulse_config || null);
+        } catch { /* silent — clients/providers no son críticos */ }
+    }, []);
 
-            const failed = results.filter(r => r.status === 'rejected');
-            if (failed.length === results.length) {
-                toast.error('Error al cargar rutas');
-            } else if (failed.length > 0) {
-                console.warn('Partial fetch failures:', failed.map(f => f.reason?.message));
-            }
-        } catch (err) {
-            toast.error('Error al cargar datos');
+    useEffect(() => { fetchAux(); }, [fetchAux]);
+
+    // Loading combinado: muestra spinner mientras journeys carga (clients/providers son secundarios)
+    const loading = journeysLoading;
+
+    // Mostrar toast solo si journeys falla con error no recuperable (red persistente o 5xx)
+    useEffect(() => {
+        if (journeysError) {
+            toast.error('Error al cargar rutas');
         }
-        setLoading(false);
-    }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus]);
+    }, [journeysError]);
 
-    useEffect(() => { fetchData(); }, [fetchData]);
+    // Refetch externo (compatibilidad con código que llamaba fetchData())
+    const fetchData = refetchJourneys;
 
     const hasActiveFilters = dateFrom || dateTo || selectedClient !== 'all' || selectedProvider !== 'all' || selectedStatus !== 'all';
 

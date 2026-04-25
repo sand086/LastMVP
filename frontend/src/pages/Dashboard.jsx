@@ -5,6 +5,7 @@ import { useSortableTable } from '../lib/useSortableTable';
 import { KPICard } from '../components/dashboard/KPICard';
 import { RoutesTable } from '../components/dashboard/RoutesTable';
 import { useWebSocket } from '../lib/useWebSocket';
+import ConnectionStatus from '../components/ConnectionStatus';
 import './Dashboard.css';
 import { 
     getDashboardStats, 
@@ -145,7 +146,7 @@ const Dashboard = () => {
     const handleWsEvent = useCallback((event) => {
         if (['stats_update', 'journey_update', 'incident_update', 'sync_update'].includes(event.type)) fetchData();
     }, [fetchData]);
-    const { isConnected: wsConnected } = useWebSocket(handleWsEvent);
+    const { connectionMode, justRecovered } = useWebSocket(handleWsEvent);
 
     useEffect(() => { setCurrentPage(1); }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus]);
 
@@ -210,10 +211,7 @@ const Dashboard = () => {
             {/* ─── Top bar: WS + Kosmo sync ─── */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: wsConnected ? T.green : T.textTer, display: 'inline-block' }} />
-                    <span style={{ fontSize: 12, color: T.textTer }} data-testid="ws-status">
-                        {wsConnected ? 'En vivo' : 'Reconectando...'}
-                    </span>
+                    <ConnectionStatus connectionMode={connectionMode} justRecovered={justRecovered} />
                     {kosmoSync.last_sync && (
                         <span style={{ fontSize: 12, color: T.textTer, marginLeft: 8, fontFamily: "'DM Mono', monospace" }}>
                             · Kosmo: {getTimeSince(kosmoSync.last_sync)}

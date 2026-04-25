@@ -387,12 +387,20 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
     user_msg = UserMessage(text=context, file_contents=file_contents)
     image_count = len(valid_images)
 
+    # Circuit breaker: si LLM lleva 5 fallos consecutivos, no enviamos más requests
+    # por 60s. Evita drenar saldo cuando Anthropic está overloaded/rate-limited.
+    from utils.circuit_breaker import get_circuit_breaker, CircuitOpenError
+    cb = get_circuit_breaker("llm_anthropic_vision", failure_threshold=5, open_timeout_seconds=60)
+    if cb.is_open():
+        raise CircuitOpenError("LLM Anthropic vision circuit OPEN — skipping (recovery in progress)")
+
     # Cualquier excepción a partir de aquí significa que Anthropic YA recibió
     # (o probablemente recibió) el request → debemos loguear el costo aunque la
     # respuesta no llegue, para evitar consumo invisible.
     try:
         response_text = await chat.send_message(user_msg)
     except Exception as send_err:
+        cb.record_failure()
         # Shadow log con el contexto REAL armado (system + user prompt + image count).
         await _log_ai_token_usage(
             tracking=tracking,
@@ -405,6 +413,8 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
             shadow_kind="error_before_response",
         )
         raise send_err
+
+    cb.record_success()
 
     await _log_ai_token_usage(
         tracking=tracking,

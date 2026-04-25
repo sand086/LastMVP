@@ -147,6 +147,25 @@ async def get_current_user(request: Request):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
 
+
+async def _resolve_user_from_request_unsafe(request: Request) -> str | None:
+    """P03: Best-effort user_id extraction (cookie/Bearer) for global rate-limit middleware.
+    Returns user_id if a valid token is present, None otherwise. NEVER raises.
+    Does NOT check token revocation (would add a DB hit per request).
+    """
+    try:
+        token = request.cookies.get(COOKIE_NAME)
+        if not token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+        if not token:
+            return None
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload.get("sub")
+    except Exception:
+        return None
+
 def require_role(allowed_roles: List[str]):
     async def role_checker(user: dict = Depends(get_current_user)):
         if user["role"] not in allowed_roles:

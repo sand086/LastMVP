@@ -10,6 +10,10 @@ from starlette.responses import JSONResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 import logging
 import os
+import time
+
+# P03: in-memory rate-limit buckets para el middleware global
+_RATE_BUCKETS: dict = {}
 
 from dependencies import db, limiter, mongo_client
 from middleware import AuditMiddleware, SecurityHeadersMiddleware
@@ -83,9 +87,21 @@ app.state.db = db
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: StarletteRequest, exc: RateLimitExceeded):
+    # P03: header Retry-After para clientes que respeten el estándar
+    retry_after = 60
+    try:
+        # slowapi expone el limit en exc.detail; parseamos cuando se puede
+        if hasattr(exc, "limit") and getattr(exc, "limit", None) is not None:
+            retry_after = int(getattr(exc.limit, "amount", 60) or 60)
+    except Exception:
+        retry_after = 60
+    client_ip = (request.client.host if request.client else "?")
+    path = request.url.path
+    logger.warning(f"[rate-limit] 429 {path} ip={client_ip} ua={request.headers.get('user-agent','-')[:60]}")
     return JSONResponse(
         status_code=429,
-        content={"detail": "Demasiados intentos. Espera 1 minuto."},
+        content={"error": "rate_limit_exceeded", "retry_after_seconds": retry_after},
+        headers={"Retry-After": str(retry_after)},
     )
 
 
@@ -99,10 +115,192 @@ async def root():
     return {"message": "LastMile OS API v1.0", "status": "running"}
 
 
+# P02: Health check completo y rapido (no requiere auth, usado por load balancer)
 @api_router.get("/health")
 async def health():
+    """Estado del sistema: DB + workers + storage + circuit breakers.
+
+    HTTP 200 si healthy/degraded, 503 si unhealthy. Cada check tiene timeout
+    individual de 300ms; si excede, se marca 'timeout' sin fallar el endpoint.
+    Respuesta total <= 500ms (paralelizado con asyncio.gather).
+    """
+    import asyncio as _aio
+    import os as _os
     from datetime import datetime, timezone
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    started = time.monotonic()
+
+    async def _check_db():
+        t0 = time.monotonic()
+        try:
+            await _aio.wait_for(db.command("ping"), timeout=0.3)
+            collections = await _aio.wait_for(db.list_collection_names(), timeout=0.3)
+            return {
+                "status": "ok",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+                "collections_accessible": len(collections),
+            }
+        except _aio.TimeoutError:
+            return {"status": "timeout", "latency_ms": round((time.monotonic() - t0) * 1000)}
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:120]}
+
+    async def _check_ai_eval():
+        try:
+            queue_depth = await _aio.wait_for(
+                db.ai_evaluation_jobs.count_documents({"status": "En_Cola"}),
+                timeout=0.3,
+            )
+            evaluating = await _aio.wait_for(
+                db.ai_evaluation_jobs.count_documents({"status": "Evaluando"}),
+                timeout=0.3,
+            )
+            last = await _aio.wait_for(
+                db.ai_evaluation_jobs.find_one(
+                    {"last_progress_at": {"$exists": True}},
+                    {"_id": 0, "last_progress_at": 1},
+                    sort=[("last_progress_at", -1)],
+                ),
+                timeout=0.3,
+            )
+            last_hb_ago = None
+            if last and last.get("last_progress_at"):
+                try:
+                    ts = datetime.fromisoformat(last["last_progress_at"].replace("Z", "+00:00"))
+                    last_hb_ago = round((datetime.now(timezone.utc) - ts).total_seconds())
+                except Exception:
+                    last_hb_ago = None
+            return {
+                "status": "ok",
+                "queue_depth": queue_depth,
+                "evaluating": evaluating,
+                "last_heartbeat_seconds_ago": last_hb_ago,
+            }
+        except _aio.TimeoutError:
+            return {"status": "timeout"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:120]}
+
+    async def _check_kosmo_sync():
+        try:
+            last = await _aio.wait_for(
+                db.journeys.find_one(
+                    {"last_kosmo_sync_at": {"$exists": True, "$ne": None}},
+                    {"_id": 0, "last_kosmo_sync_at": 1},
+                    sort=[("last_kosmo_sync_at", -1)],
+                ),
+                timeout=0.3,
+            )
+            last_hb_ago = None
+            if last and last.get("last_kosmo_sync_at"):
+                try:
+                    ts = datetime.fromisoformat(str(last["last_kosmo_sync_at"]).replace("Z", "+00:00"))
+                    last_hb_ago = round((datetime.now(timezone.utc) - ts).total_seconds())
+                except Exception:
+                    last_hb_ago = None
+            return {"status": "ok", "last_heartbeat_seconds_ago": last_hb_ago}
+        except _aio.TimeoutError:
+            return {"status": "timeout"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:120]}
+
+    def _check_storage():
+        # Storage actual: disco local del pod (Emergent native).
+        # Devolver 'local' implica: archivos NO sobreviven redeploy (riesgo conocido P0).
+        return {
+            "status": "ok",
+            "type": "s3" if _os.environ.get("S3_BUCKET_NAME") else "local",
+            "warning": None if _os.environ.get("S3_BUCKET_NAME") else "Local disk; files do not persist across redeploys",
+        }
+
+    def _check_circuit_breakers():
+        try:
+            from utils.circuit_breaker import all_breaker_status
+            return all_breaker_status()
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:80]}
+
+    db_check, ai_check, kosmo_check = await _aio.gather(
+        _check_db(), _check_ai_eval(), _check_kosmo_sync(),
+    )
+    storage_check = _check_storage()
+    breakers = _check_circuit_breakers()
+
+    # Overall status
+    if db_check.get("status") in ("error", "timeout"):
+        overall = "unhealthy"
+    elif (ai_check.get("last_heartbeat_seconds_ago") is not None and ai_check["last_heartbeat_seconds_ago"] > 600) or \
+         any(b.get("state") == "OPEN" for b in (breakers.values() if isinstance(breakers, dict) else [])):
+        overall = "degraded"
+    else:
+        overall = "healthy"
+
+    payload = {
+        "status": overall,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": _os.environ.get("APP_VERSION", "1.0.0"),
+        "elapsed_ms": round((time.monotonic() - started) * 1000),
+        "checks": {
+            "database": db_check,
+            "ai_eval_worker": ai_check,
+            "kosmo_sync": kosmo_check,
+            "storage": storage_check,
+            "circuit_breakers": breakers,
+        },
+    }
+    http_code = 200 if overall in ("healthy", "degraded") else 503
+    return JSONResponse(status_code=http_code, content=payload)
+
+
+# P03: Rate limit DEFAULTS aplicados a todos los endpoints (auth ya tiene su propio limit)
+# Endpoints excluidos: /api/health (load balancer), /api/docs.
+# Reglas:
+#  - 300 req/min para visitantes anonimos por IP
+#  - 1000 req/min para usuarios autenticados por user_id
+#  - 100 req/min en POST/PUT/DELETE para usuarios autenticados (escritura)
+@app.middleware("http")
+async def global_rate_limit_middleware(request: StarletteRequest, call_next):
+    path = request.url.path
+    # Excluir health y docs (y rutas no-API)
+    if path in ("/api/health", "/api/", "/api/docs", "/api/openapi.json") or not path.startswith("/api/"):
+        return await call_next(request)
+    # auth y upload tienen sus propios @limiter.limit, slowapi se encarga
+    if path.startswith("/api/auth/") or path.startswith("/api/uploads/"):
+        return await call_next(request)
+    # Resolve a key per request
+    user_id = None
+    try:
+        # Best-effort: read user from JWT (cookie or Bearer). NO bloquear si falta.
+        from dependencies import _resolve_user_from_request_unsafe  # type: ignore
+        user_id = await _resolve_user_from_request_unsafe(request)
+    except Exception:
+        user_id = None
+
+    is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
+    key = f"user:{user_id}" if user_id else f"ip:{request.client.host if request.client else 'unknown'}"
+
+    # Manual sliding-window check (in-memory; consistent with slowapi default store)
+    bucket = "write" if is_write and user_id else ("user" if user_id else "anon")
+    limit_per_min = {"write": 100, "user": 1000, "anon": 300}[bucket]
+    now_s = int(time.monotonic())
+    state_key = (key, bucket, now_s // 60)
+    cnt = _RATE_BUCKETS.get(state_key, 0) + 1
+    _RATE_BUCKETS[state_key] = cnt
+    # Cleanup ventanas viejas (mantener solo la actual + la previa)
+    if len(_RATE_BUCKETS) > 8000:
+        cutoff = now_s // 60 - 1
+        for k in list(_RATE_BUCKETS.keys()):
+            if k[2] < cutoff:
+                _RATE_BUCKETS.pop(k, None)
+
+    if cnt > limit_per_min:
+        logger.warning(f"[rate-limit-global] 429 {request.method} {path} key={key} count={cnt}/{limit_per_min}min")
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limit_exceeded", "retry_after_seconds": 60},
+            headers={"Retry-After": "60"},
+        )
+    return await call_next(request)
 
 
 # ==================== INCLUDE ALL ROUTE MODULES ====================
@@ -246,6 +444,7 @@ async def _create_indexes():
     # Audit logs
     await db.audit_logs.create_index("timestamp", background=True)
     await db.audit_logs.create_index([("user_id", 1), ("timestamp", -1)], background=True)
+    await db.audit_logs.create_index("action", background=True)  # P06: filtrar por accion
 
     # Webhooks
     await db.webhooks.create_index("is_active", background=True)
@@ -267,6 +466,8 @@ async def _create_indexes():
     await db.ai_evaluation_jobs.create_index("status", background=True)
     await db.ai_evaluation_jobs.create_index("fecha_creacion", background=True)
     await db.ai_evaluation_jobs.create_index([("priority", -1), ("fecha_creacion", 1)], background=True)
+    # P06: cleanup de jobs viejos por status (En_Cola/Error/Evaluada antiguas)
+    await db.ai_evaluation_jobs.create_index([("status", 1), ("fecha_creacion", 1)], background=True)
 
     logger.info("Production indexes created/verified")
 
