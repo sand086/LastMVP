@@ -39,6 +39,12 @@ DEFAULTS: Dict[str, Any] = {
     "pause_reason": None,
     "schedule_enabled": False,
     "schedule_windows": [],
+    # Smart autopause (P09): pausar si shadow_cost_pct excede umbral en ventana reciente
+    "shadow_autopause_enabled": True,
+    "shadow_threshold_pct": int(os.environ.get("AI_EVAL_SHADOW_THRESHOLD_PCT", "10")),  # 10% default
+    "shadow_window_minutes": int(os.environ.get("AI_EVAL_SHADOW_WINDOW_MINUTES", "15")),
+    "shadow_min_events": int(os.environ.get("AI_EVAL_SHADOW_MIN_EVENTS", "10")),  # baseline mínimo para evitar trigger con 1-2 fallos
+    "shadow_autopause_minutes": int(os.environ.get("AI_EVAL_SHADOW_AUTOPAUSE_MINUTES", "20")),  # cuánto pausar al disparar
 }
 
 VALID_BOUNDS = {
@@ -47,6 +53,10 @@ VALID_BOUNDS = {
     "max_routes_concurrent": (1, 5),
     "batch_size_per_route": (1, 10),
     "max_retries": (0, 5),
+    "shadow_threshold_pct": (1, 100),
+    "shadow_window_minutes": (5, 60),
+    "shadow_min_events": (1, 100),
+    "shadow_autopause_minutes": (5, 240),
 }
 
 DEFAULT_TZ = "America/Mexico_City"
@@ -72,6 +82,8 @@ def _validate(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 out[key] = default
         else:
             out[key] = val
+    # Normalize bool flag explicitly to avoid truthy strings persisting
+    out["shadow_autopause_enabled"] = bool(out.get("shadow_autopause_enabled", True))
     # Normalize schedule_windows
     windows = out.get("schedule_windows") or []
     if not isinstance(windows, list):

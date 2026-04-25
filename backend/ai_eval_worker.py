@@ -4,6 +4,7 @@ Uses MongoDB as job queue (no Redis/Celery dependency).
 """
 import os
 import asyncio
+import time
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
@@ -23,6 +24,81 @@ WORKER_POLL_SECONDS = 10
 
 _worker_task = None
 _cron_task = None
+# Smart autopause cooldown: after triggering, NO re-checkear por N segundos para
+# evitar que el worker quede atascado en pause/resume loop si la racha persiste
+_last_shadow_check_ts = 0.0
+SHADOW_CHECK_INTERVAL_SECONDS = 60  # cada 60s mientras el worker corre
+
+
+async def _check_shadow_autopause(db: AsyncIOMotorDatabase, cfg: dict) -> bool:
+    """Smart autopause: si shadow_cost_pct excede umbral en ventana reciente,
+    pausar el worker automaticamente. Retorna True si se disparó la pausa.
+
+    Usa pipelines paralelos para minimizar latencia (<50ms total).
+    """
+    if not cfg.get("shadow_autopause_enabled", True):
+        return False
+    threshold_pct = cfg.get("shadow_threshold_pct", 10)
+    window_min = cfg.get("shadow_window_minutes", 15)
+    min_events = cfg.get("shadow_min_events", 10)
+    pause_minutes = cfg.get("shadow_autopause_minutes", 20)
+
+    now_utc = datetime.now(timezone.utc)
+    cutoff = (now_utc - timedelta(minutes=window_min)).isoformat()
+
+    # Una sola pipeline que cuenta total events + shadow events + costos en una pasada
+    pipeline = [
+        {"$match": {
+            "timestamp": {"$gte": cutoff},
+            "entregable": {"$in": ["evaluacion", "evaluacion_ia"]},
+        }},
+        {"$group": {
+            "_id": None,
+            "total_events": {"$sum": 1},
+            "shadow_events": {"$sum": {"$cond": [{"$eq": ["$is_shadow_cost", True]}, 1, 0]}},
+            "total_cost": {"$sum": {"$ifNull": ["$cost_usd", 0]}},
+            "shadow_cost": {"$sum": {"$cond": [{"$eq": ["$is_shadow_cost", True]}, {"$ifNull": ["$cost_usd", 0]}, 0]}},
+        }},
+    ]
+    try:
+        result = await db.token_usage_log.aggregate(pipeline).to_list(1)
+    except Exception as e:
+        logger.warning(f"shadow autopause check failed: {e}")
+        return False
+    if not result:
+        return False
+    r = result[0]
+    total_events = r.get("total_events", 0)
+    shadow_events = r.get("shadow_events", 0)
+    total_cost = r.get("total_cost", 0) or 0
+    shadow_cost = r.get("shadow_cost", 0) or 0
+
+    # Necesitamos baseline mínimo para evitar disparar con 1 fallo aislado
+    if total_events < min_events:
+        return False
+
+    # Calcular pct: usar costo si hay datos, fallback a count si los costos son cero
+    if total_cost > 0:
+        actual_pct = round(shadow_cost / total_cost * 100, 1)
+    else:
+        actual_pct = round(shadow_events / total_events * 100, 1) if total_events else 0
+
+    if actual_pct < threshold_pct:
+        return False
+
+    # ¡Trigger! Pausar via set_ai_eval_config para que el cache se invalide.
+    from ai_eval_config import set_ai_eval_config
+    until = (now_utc + timedelta(minutes=pause_minutes)).isoformat()
+    reason = (
+        f"Autopause IA: {actual_pct}% shadow cost en ult. {window_min} min "
+        f"({shadow_events}/{total_events} eventos, ${shadow_cost:.4f}/${total_cost:.4f} USD)"
+    )
+    await set_ai_eval_config(db, {
+        "paused_until": until,
+        "pause_reason": reason[:200],
+    }, user_email="system_autopause")
+    logger.warning(f"[AUTOPAUSE TRIGGERED] {reason} — paused for {pause_minutes} min")
+    return True
 
 
 async def enqueue_job(
@@ -412,6 +488,7 @@ async def _kill_active_jobs_due_to_pause(db, reason: str) -> int:
 
 async def _worker_loop(db: AsyncIOMotorDatabase):
     """Main worker loop — polls for queued jobs and processes them."""
+    global _last_shadow_check_ts
     ticks_since_recovery = 0
     was_paused = False
     while True:
@@ -426,6 +503,15 @@ async def _worker_loop(db: AsyncIOMotorDatabase):
 
             # Lee configuración dinámica
             cfg = await get_ai_eval_config(db)
+
+            # Smart autopause: chequea shadow cost cada SHADOW_CHECK_INTERVAL_SECONDS
+            now_ts = time.monotonic()
+            if not was_paused and (now_ts - _last_shadow_check_ts) >= SHADOW_CHECK_INTERVAL_SECONDS:
+                _last_shadow_check_ts = now_ts
+                triggered = await _check_shadow_autopause(db, cfg)
+                if triggered:
+                    # Re-leer config para ver el pause aplicado
+                    cfg = await get_ai_eval_config(db, force_refresh=True)
 
             # Kill switch: si el worker está pausado, aborta jobs activos y no toma nuevos
             paused, reason = is_worker_paused(cfg)

@@ -356,6 +356,17 @@ export default function ModelConfigTab({ canEdit }) {
                 dirty={dirty}
             />
 
+            {/* Smart Autopause (P09) */}
+            <ShadowAutopauseSection
+                draft={draft}
+                update={update}
+                bounds={bounds}
+                canEdit={canEdit}
+                saving={saving}
+                dirty={dirty}
+                onSave={handleSave}
+            />
+
             {/* Savings estimate */}
             <section style={{ background: selectedModel.bg, border: `1px solid ${selectedModel.color}30`, borderRadius: T.radius, padding: 16 }}>
                 <div style={{ fontSize: 12, color: T.textSec, marginBottom: 6 }}>Estimación mensual (60,000 evaluaciones):</div>
@@ -763,6 +774,163 @@ function WindowRow({ idx, window: w, disabled, onUpdate, onRemove }) {
                 >
                     <X size={14} color={T.textTer} />
                 </button>
+            )}
+        </div>
+    );
+}
+
+
+
+/* ────────────────────────────────────────────────────────────────
+ * Shadow Autopause Section (P09)
+ *   Pausa automática del worker cuando el shadow_cost_pct excede el
+ *   umbral en una ventana reciente. Previene drenaje de saldo en
+ *   cascadas de fallos de Anthropic (timeouts/rate-limits).
+ * ──────────────────────────────────────────────────────────────── */
+function ShadowAutopauseSection({ draft, update, bounds, canEdit, saving, dirty, onSave }) {
+    const enabled = draft.shadow_autopause_enabled !== false; // default true
+    return (
+        <section
+            data-testid="shadow-autopause-section"
+            style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 20 }}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, color: T.textPri, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <AlertTriangle size={16} color={T.amber} />
+                        Autopause inteligente (shadow cost)
+                    </h3>
+                    <p style={{ fontSize: 11, color: T.textTer, margin: '4px 0 0 0' }}>
+                        Pausa el worker automáticamente cuando Anthropic factura sin entregar respuesta (timeouts/rate-limits) por encima de un umbral.
+                    </p>
+                </div>
+                <label
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: canEdit ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 600, color: enabled ? T.green : T.textTer }}
+                >
+                    <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(e) => update('shadow_autopause_enabled', e.target.checked)}
+                        disabled={!canEdit}
+                        data-testid="shadow-autopause-toggle"
+                    />
+                    {enabled ? 'Activado' : 'Desactivado'}
+                </label>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, opacity: enabled ? 1 : 0.45 }}>
+                <ShadowNumField
+                    label="Umbral shadow %"
+                    hint="Pausar si shadow ≥ X% del costo en la ventana"
+                    icon={AlertTriangle}
+                    min={bounds.shadow_threshold_pct?.[0] ?? 1}
+                    max={bounds.shadow_threshold_pct?.[1] ?? 100}
+                    value={draft.shadow_threshold_pct ?? 10}
+                    onChange={(v) => update('shadow_threshold_pct', v)}
+                    disabled={!canEdit || !enabled}
+                    suffix="%"
+                    testid="shadow-threshold-pct"
+                />
+                <ShadowNumField
+                    label="Ventana de medición"
+                    hint="Minutos hacia atrás para calcular el %"
+                    icon={Clock}
+                    min={bounds.shadow_window_minutes?.[0] ?? 5}
+                    max={bounds.shadow_window_minutes?.[1] ?? 60}
+                    value={draft.shadow_window_minutes ?? 15}
+                    onChange={(v) => update('shadow_window_minutes', v)}
+                    disabled={!canEdit || !enabled}
+                    suffix="min"
+                    testid="shadow-window-minutes"
+                />
+                <ShadowNumField
+                    label="Eventos mínimos"
+                    hint="Baseline para evitar disparar con 1-2 fallos"
+                    icon={Layers}
+                    min={bounds.shadow_min_events?.[0] ?? 1}
+                    max={bounds.shadow_min_events?.[1] ?? 100}
+                    value={draft.shadow_min_events ?? 10}
+                    onChange={(v) => update('shadow_min_events', v)}
+                    disabled={!canEdit || !enabled}
+                    testid="shadow-min-events"
+                />
+                <ShadowNumField
+                    label="Duración de pausa"
+                    hint="Cuánto tiempo pausar al disparar"
+                    icon={Pause}
+                    min={bounds.shadow_autopause_minutes?.[0] ?? 5}
+                    max={bounds.shadow_autopause_minutes?.[1] ?? 240}
+                    value={draft.shadow_autopause_minutes ?? 20}
+                    onChange={(v) => update('shadow_autopause_minutes', v)}
+                    disabled={!canEdit || !enabled}
+                    suffix="min"
+                    testid="shadow-autopause-minutes"
+                />
+            </div>
+
+            {dirty && canEdit && (
+                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        onClick={onSave}
+                        disabled={saving}
+                        data-testid="save-shadow-autopause-btn"
+                        style={{
+                            padding: '8px 14px', fontSize: 12, fontWeight: 600,
+                            background: T.amber, color: '#fff', border: 'none', borderRadius: 6,
+                            cursor: saving ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                        }}
+                    >
+                        {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                        Guardar autopause
+                    </button>
+                </div>
+            )}
+
+            <div style={{ marginTop: 12, padding: 10, background: T.amberLt, borderRadius: 6, fontSize: 11, color: '#92400E', lineHeight: 1.5 }}>
+                <strong>Cómo funciona:</strong> cada 60s mientras el worker procesa,
+                consulta los últimos {draft.shadow_window_minutes ?? 15} min de evaluaciones IA.
+                Si <strong>≥{draft.shadow_threshold_pct ?? 10}%</strong> del costo proviene de eventos shadow
+                (Anthropic facturó pero la respuesta falló) y hubo al menos <strong>{draft.shadow_min_events ?? 10}</strong> eventos,
+                pausa el worker por <strong>{draft.shadow_autopause_minutes ?? 20} min</strong> con un mensaje claro al operador.
+                Para reanudar antes, usa <strong>Reanudar</strong> en la sección superior.
+            </div>
+        </section>
+    );
+}
+
+function ShadowNumField({ label, hint, icon: Icon, min, max, value, onChange, disabled, suffix, testid }) {
+    return (
+        <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: T.textSec, marginBottom: 4 }}>
+                {Icon && <Icon size={12} color={T.textTer} />}
+                {label}
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                    type="number"
+                    min={min}
+                    max={max}
+                    value={value}
+                    onChange={(e) => {
+                        const v = parseInt(e.target.value || '0', 10);
+                        if (!isNaN(v)) onChange(Math.max(min, Math.min(max, v)));
+                    }}
+                    disabled={disabled}
+                    data-testid={testid}
+                    style={{
+                        flex: 1, padding: '8px 10px', fontSize: 13,
+                        border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                        background: disabled ? T.bg : T.surface, color: T.textPri,
+                        fontFamily: "'DM Mono', monospace",
+                    }}
+                />
+                {suffix && (
+                    <span style={{ fontSize: 12, color: T.textTer, fontWeight: 600, minWidth: 28 }}>{suffix}</span>
+                )}
+            </div>
+            {hint && (
+                <p style={{ fontSize: 10.5, color: T.textTer, margin: '3px 0 0 0' }}>{hint}</p>
             )}
         </div>
     );

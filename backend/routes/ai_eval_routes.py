@@ -312,6 +312,12 @@ class AiEvalConfigPatch(BaseModel):
     max_routes_concurrent: Optional[int] = None  # 1–5
     batch_size_per_route: Optional[int] = None   # 1–10
     max_retries: Optional[int] = None         # 0–5
+    # Smart autopause (P09)
+    shadow_autopause_enabled: Optional[bool] = None
+    shadow_threshold_pct: Optional[int] = None        # 1–100
+    shadow_window_minutes: Optional[int] = None       # 5–60
+    shadow_min_events: Optional[int] = None           # 1–100
+    shadow_autopause_minutes: Optional[int] = None    # 5–240
 
 
 @router.get("/config")
