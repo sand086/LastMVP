@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import pytest
+import pytest_asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -33,7 +34,7 @@ def fernet_key(monkeypatch):
     return key
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def init_enc(fernet_key):
     """Init the global Fernet for encryption helpers."""
     from utils import encryption
