@@ -297,3 +297,12 @@ export const getArchitectureHistory = (limit = 20) => api.get(`/architecture/his
 export const getArchitectureSnapshotById = (id) => api.get(`/architecture/snapshot/${id}`);
 export const getArchitectureDiff = (fromId, toId) => api.get(`/architecture/diff?from_id=${fromId}&to_id=${toId}`);
 export const getArchitectureChangelog = (limit = 50) => api.get(`/architecture/changelog?limit=${limit}`);
+
+// ─── R00A: Multi-tenant integrations (Routal/Kosmo/Manual) ───
+export const listIntegrations = () => api.get('/integrations');
+export const getIntegration = (clientId) => api.get(`/integrations/${clientId}`);
+export const upsertIntegration = (clientId, payload) => api.post(`/integrations/${clientId}`, payload);
+export const updateIntegrationStatus = (clientId, status) => api.patch(`/integrations/${clientId}/status`, { status });
+export const testIntegration = (clientId) => api.post(`/integrations/${clientId}/test`);
+export const deleteIntegration = (clientId) => api.delete(`/integrations/${clientId}`);
+export const getRoutalWebhookStatus = (clientId) => api.get(`/webhooks/routal/${clientId}/status`);

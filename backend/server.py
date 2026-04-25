@@ -55,6 +55,10 @@ async def lifespan(app: FastAPI):
     # ─── STARTUP ───
     await _create_indexes()
     await _auto_migrate_order_id()
+    await _auto_migrate_routal_source()
+    # R00A.2: initialize encryption (loads or auto-generates ENCRYPTION_KEY)
+    from utils.encryption import init_encryption
+    await init_encryption(db)
 
     # Leader election: when multiple Uvicorn workers run, only ONE spawns
     # background tasks (ai_eval_worker + kosmo_sync). Others skip.
@@ -269,6 +273,10 @@ async def global_rate_limit_middleware(request: StarletteRequest, call_next):
     # auth y upload tienen sus propios @limiter.limit, slowapi se encarga
     if path.startswith("/api/auth/") or path.startswith("/api/uploads/"):
         return await call_next(request)
+    # R00A: webhooks NO deben ser rate-limited globalmente (los proveedores externos
+    # pueden enviar ráfagas durante operaciones masivas; idempotency cubre dedup).
+    if path.startswith("/api/webhooks/"):
+        return await call_next(request)
     # Resolve a key per request
     user_id = None
     try:
@@ -329,6 +337,12 @@ api_router.include_router(driver_router)
 api_router.include_router(manual_router)
 api_router.include_router(ai_eval_router)
 api_router.include_router(architecture_router)
+
+# R00A: Multi-tenant integrations + Routal webhook
+from routes.integration_routes import router as integration_router
+from routes.routal_webhook_routes import router as routal_webhook_router
+api_router.include_router(integration_router)
+api_router.include_router(routal_webhook_router)
 
 app.include_router(api_router)
 
@@ -475,7 +489,33 @@ async def _create_indexes():
     # P06: cleanup de jobs viejos por status (En_Cola/Error/Evaluada antiguas)
     await db.ai_evaluation_jobs.create_index([("status", 1), ("fecha_creacion", 1)], background=True)
 
+    # R00A: Client integrations + Routal events (multi-tenant)
+    await db.client_integrations.create_index("client_id", unique=True, background=True)
+    await db.client_integrations.create_index("integration_type", background=True)
+    await db.client_integrations.create_index([("integration_type", 1), ("status", 1)], background=True)
+    await db.routal_events.create_index([("event_id", 1), ("client_id", 1)], unique=True, background=True)
+    await db.routal_events.create_index([("client_id", 1), ("processed", 1), ("received_at", -1)], background=True)
+    await db.routal_events.create_index([("processed", 1), ("received_at", 1)], background=True)
+    await db.journeys.create_index([("client_id", 1), ("source", 1)], background=True)
+    await db.journeys.create_index("routal_plan_id", background=True, sparse=True)
+    await db.packages.create_index([("client_id", 1), ("source", 1)], background=True)
+    await db.packages.create_index("routal_service_id", background=True, sparse=True)
+
     logger.info("Production indexes created/verified")
+
+
+async def _auto_migrate_routal_source():
+    """Schema migration: legacy journeys/packages get source='kosmo' (idempotent)."""
+    j_migrated = await db.journeys.update_many(
+        {"source": {"$exists": False}},
+        {"$set": {"source": "kosmo"}},
+    )
+    p_migrated = await db.packages.update_many(
+        {"source": {"$exists": False}},
+        {"$set": {"source": "kosmo"}},
+    )
+    if j_migrated.modified_count or p_migrated.modified_count:
+        logger.info(f"Schema migration: source=kosmo applied to {j_migrated.modified_count} journeys + {p_migrated.modified_count} packages")
 
 
 async def _auto_migrate_order_id():

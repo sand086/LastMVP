@@ -26,7 +26,7 @@ import {
 } from '../components/ui/alert-dialog';
 import { 
     Users, Building2, Truck, Shield, Database, Trash2, Key, Bell,
-    Loader2, X, Globe, Settings2, Calendar as CalendarIcon, AlertTriangle,
+    Loader2, X, Globe, Settings2, Calendar as CalendarIcon, AlertTriangle, Plug,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -38,13 +38,15 @@ import { SettingsUsersTab } from '../components/settings/SettingsUsersTab';
 import { SettingsClientsTab } from '../components/settings/SettingsClientsTab';
 import { SettingsProvidersTab } from '../components/settings/SettingsProvidersTab';
 import { SettingsSystemTab } from '../components/settings/SettingsSystemTab';
+import SettingsIntegrationsTab from '../components/settings/SettingsIntegrationsTab';
 import { SettingsDriversTab } from '../components/settings/SettingsDriversTab';
 
 const getRoleLabel = (role) => ({ agent: 'Agente', coordinator: 'Coordinador', executive: 'Ejecutivo', developer: 'Developer', proveedor: 'Proveedor' }[role] || role);
 const getRoleBadgeColor = (role) => ({ agent: 'bg-emerald-100 text-emerald-700', coordinator: 'bg-blue-100 text-blue-700', executive: 'bg-slate-100 text-slate-700', developer: 'bg-violet-100 text-violet-700', proveedor: 'bg-amber-100 text-amber-700' }[role] || 'bg-slate-100 text-slate-700');
 
 const Settings = () => {
-    const { isCoordinator } = useAuth();
+    const { isCoordinator, hasRole } = useAuth();
+    const isDeveloper = hasRole(['developer']);
     const [activeTab, setActiveTab] = useState('users');
     const [users, setUsers] = useState([]);
     const [clients, setClients] = useState([]);
@@ -333,13 +335,16 @@ const Settings = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-6">
+                <TabsList className={isDeveloper ? "grid w-full grid-cols-7" : "grid w-full grid-cols-6"}>
                     <TabsTrigger value="users" data-testid="tab-users"><Users className="w-4 h-4 mr-2" />Usuarios</TabsTrigger>
                     <TabsTrigger value="drivers" data-testid="tab-drivers"><Truck className="w-4 h-4 mr-2" />Drivers</TabsTrigger>
                     <TabsTrigger value="clients" data-testid="tab-clients"><Building2 className="w-4 h-4 mr-2" />Clientes</TabsTrigger>
                     <TabsTrigger value="providers" data-testid="tab-providers"><Truck className="w-4 h-4 mr-2" />Proveedores</TabsTrigger>
                     <TabsTrigger value="system" data-testid="tab-system"><Settings2 className="w-4 h-4 mr-2" />Sistema</TabsTrigger>
                     <TabsTrigger value="webhooks" data-testid="tab-webhooks"><Globe className="w-4 h-4 mr-2" />Webhooks</TabsTrigger>
+                    {isDeveloper && (
+                        <TabsTrigger value="integraciones" data-testid="tab-integraciones"><Plug className="w-4 h-4 mr-2" />Integraciones</TabsTrigger>
+                    )}
                 </TabsList>
 
                 <TabsContent value="users">
