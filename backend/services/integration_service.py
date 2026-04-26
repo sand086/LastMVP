@@ -126,7 +126,7 @@ class IntegrationService:
         creds = doc.get("credentials") or {}
         api_key = creds.get("routal_api_key")
         project_id = creds.get("routal_project_id")
-        if not api_key or not project_id:
+        if not api_key:
             return None
         return RoutalClient(api_key=api_key, project_id=project_id)
 

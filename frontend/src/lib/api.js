@@ -315,6 +315,12 @@ export const runSelection = (clientId, date) =>
     api.post(`/selection/run/${clientId}` + (date ? `?date=${date}` : ''));
 export const runSelectionRange = (clientId, dateFrom, dateTo) =>
     api.post(`/selection/run-range/${clientId}?date_from=${dateFrom}&date_to=${dateTo}`);
+export const backfillSelectionFromRoutal = (clientId, dateFrom, dateTo, autoRun = true) =>
+    api.post(
+        `/selection/backfill-from-routal/${clientId}?date_from=${dateFrom}&date_to=${dateTo}&auto_run_selection=${autoRun}`,
+        null,
+        { timeout: 180000 }
+    );
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
 export const getDriverAuditHistory = (driverId, clientId, days = 30) =>

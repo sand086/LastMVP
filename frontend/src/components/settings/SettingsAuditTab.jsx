@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     Loader2, ShieldAlert, ClipboardCheck, Clock, Users, Save,
     PlayCircle, RefreshCw, AlertTriangle, CheckCircle2, CalendarRange,
+    Download,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -10,7 +11,8 @@ import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
 import {
     listClientConfigs, getClients, patchClientConfig,
-    runSelection, runSelectionRange, getSelectionSummary,
+    runSelection, runSelectionRange, backfillSelectionFromRoutal,
+    getSelectionSummary,
 } from '../../lib/api';
 
 const formatDate = (d) => {
@@ -133,6 +135,7 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
     const [saving, setSaving] = useState(false);
     const [running, setRunning] = useState(false);
     const [runningRange, setRunningRange] = useState(false);
+    const [backfilling, setBackfilling] = useState(false);
     const [showRange, setShowRange] = useState(false);
     const today = new Date().toISOString().slice(0, 10);
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
@@ -213,6 +216,58 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
             toast.error(err.response?.data?.detail || 'Error ejecutando rango');
         } finally {
             setRunningRange(false);
+        }
+    };
+
+    const handleBackfill = async () => {
+        if (!rangeFrom || !rangeTo) {
+            toast.error('Selecciona ambas fechas');
+            return;
+        }
+        if (rangeFrom > rangeTo) {
+            toast.error('La fecha inicial debe ser anterior o igual a la final');
+            return;
+        }
+        const ok = window.confirm(
+            `Backfill desde Routal: descargará planes históricos del rango ${rangeFrom} → ${rangeTo} ` +
+            `vía API (sin esperar webhooks) y ejecutará el algoritmo SEL01 día por día.\n\n` +
+            `Cap de seguridad: máximo 200 planes por llamada. Si tu flota es grande, usa rangos más cortos.\n\n` +
+            `¿Continuar?`
+        );
+        if (!ok) return;
+        setBackfilling(true);
+        setRangeResult(null);
+        try {
+            const r = await backfillSelectionFromRoutal(client.id, rangeFrom, rangeTo, true);
+            const d = r.data;
+            setRangeResult({
+                days_in_range: (d.selection_results || []).length,
+                days_with_data: (d.selection_results || []).filter(x => x.total > 0).length,
+                total: d.selection_totals?.total || 0,
+                selected: d.selection_totals?.selected || 0,
+                phase_1: d.selection_totals?.phase_1 || 0,
+                phase_2: d.selection_totals?.phase_2 || 0,
+                unselected: (d.selection_totals?.total || 0) - (d.selection_totals?.selected || 0),
+                results: (d.selection_results || []).map(x => ({ ...x, ok: x.ok, error: x.error })),
+                _backfill: {
+                    pages_scanned: d.pages_scanned,
+                    plans_scanned: d.plans_scanned,
+                    plans_in_range: d.plans_in_range,
+                    staged: d.staged,
+                    skipped_no_driver: d.skipped_no_driver,
+                    skipped_error: d.skipped_error,
+                    truncated: d.truncated,
+                },
+            });
+            toast.success(
+                `Backfill OK: ${d.staged} planes hidratados · ${d.selection_totals?.selected || 0}/${d.selection_totals?.total || 0} drivers seleccionados` +
+                (d.truncated ? ' · ⚠ truncado al cap (200)' : '')
+            );
+            onChanged?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error en backfill');
+        } finally {
+            setBackfilling(false);
         }
     };
 
@@ -395,11 +450,12 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                         <div>
                             <p className="font-semibold">Recuperar rutas en rango histórico</p>
                             <p className="text-[11px] mt-0.5 leading-relaxed">
-                                Re-ejecuta el algoritmo de selección día por día sobre fechas pasadas. Útil para recuperar rutas de días donde el scheduler no corrió o estaba desactivado. Idempotente: drivers ya seleccionados se preservan, journeys NO se duplican. Máximo 90 días.
+                                <strong>Procesar staged:</strong> re-ejecuta el algoritmo SEL01 sobre los planes ya guardados en <code className="bg-white px-1 rounded">routal_daily_plans</code> (recibidos vía webhook).<br />
+                                <strong>Backfill Routal:</strong> descarga planes históricos consultando la API <code className="bg-white px-1 rounded">GET /v2/plans</code> directamente, los hidrata como si fueran webhooks, y luego corre SEL01 día por día. Útil cuando activaste <em>selection_enabled</em> recientemente y no tienes histórico. Idempotente · cap 200 planes por llamada · máx 90 días.
                             </p>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
                         <div className="space-y-1">
                             <Label className="text-xs text-slate-700">Desde</Label>
                             <Input
@@ -425,19 +481,43 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                         <div className="flex items-end">
                             <Button
                                 onClick={handleRunRange}
-                                disabled={runningRange}
+                                disabled={runningRange || backfilling}
                                 size="sm"
-                                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                                variant="outline"
+                                className="w-full"
+                                title="Re-ejecuta el algoritmo solo sobre planes ya staged en routal_daily_plans"
                                 data-testid={`run-range-${client.id}`}
                             >
                                 {runningRange ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <PlayCircle className="w-3.5 h-3.5 mr-1.5" />}
-                                Procesar rango
+                                Procesar staged
+                            </Button>
+                        </div>
+                        <div className="flex items-end">
+                            <Button
+                                onClick={handleBackfill}
+                                disabled={runningRange || backfilling}
+                                size="sm"
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                                title="Descarga planes históricos de Routal vía API y los hidrata en routal_daily_plans, luego ejecuta SEL01"
+                                data-testid={`backfill-${client.id}`}
+                            >
+                                {backfilling ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
+                                Backfill Routal
                             </Button>
                         </div>
                     </div>
 
                     {rangeResult && (
                         <div className="bg-white rounded p-2 text-xs space-y-1" data-testid={`range-result-${client.id}`}>
+                            {rangeResult._backfill && (
+                                <div className="bg-blue-50 border border-blue-200 rounded px-2 py-1.5 mb-1 text-[10px] text-blue-900">
+                                    <strong>Backfill Routal:</strong> {rangeResult._backfill.staged} planes hidratados de {rangeResult._backfill.plans_in_range} en rango
+                                    ({rangeResult._backfill.pages_scanned} pág. · {rangeResult._backfill.plans_scanned} scaneados)
+                                    {rangeResult._backfill.skipped_no_driver > 0 && <> · {rangeResult._backfill.skipped_no_driver} sin driver</>}
+                                    {rangeResult._backfill.skipped_error > 0 && <> · {rangeResult._backfill.skipped_error} con error</>}
+                                    {rangeResult._backfill.truncated && <span className="ml-1 text-amber-700 font-semibold">⚠ truncado al cap 200</span>}
+                                </div>
+                            )}
                             <div className="flex justify-between font-semibold text-slate-800">
                                 <span>{rangeResult.days_in_range} días procesados ({rangeResult.days_with_data} con datos)</span>
                                 <span className="text-emerald-700">{rangeResult.selected}/{rangeResult.total} drivers</span>

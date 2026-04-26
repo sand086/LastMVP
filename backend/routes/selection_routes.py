@@ -158,6 +158,224 @@ async def run_selection_range(
     }
 
 
+@router.post("/selection/backfill-from-routal/{client_id}")
+async def backfill_from_routal(
+    client_id: str,
+    date_from: str = Query(..., description="YYYY-MM-DD inicio (inclusivo)"),
+    date_to: str = Query(..., description="YYYY-MM-DD fin (inclusivo)"),
+    auto_run_selection: bool = Query(True, description="Ejecutar algoritmo SEL01 día por día tras el backfill"),
+    user: dict = Depends(get_current_user),
+):
+    """Hidrata `routal_daily_plans` consultando `GET /v2/plans` de Routal con paginación
+    y filtrando por execution_date dentro del rango. Útil cuando el usuario activó
+    `selection_enabled=true` recientemente y quiere recuperar planes históricos sin
+    esperar a que Routal reenvíe webhooks. Idempotente: usa upsert por (client_id, driver_id, date).
+
+    Caps de seguridad:
+      - Rango máximo 90 días.
+      - Máximo 50 páginas escaneadas (5000 plans).
+      - Máximo 200 plans hidratados por llamada (re-ejecuta con rangos más cortos si tu flota es grande).
+    """
+    _require_role(user, ["developer"])
+
+    df = _parse_date(date_from)
+    dt = _parse_date(date_to)
+    if df > dt:
+        raise HTTPException(status_code=400, detail="date_from debe ser ≤ date_to")
+    if (dt - df).days + 1 > 90:
+        raise HTTPException(status_code=400, detail="Rango máximo 90 días")
+
+    cfg = await db.client_config.find_one({"client_id": client_id}, {"_id": 0})
+    if not cfg:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Este cliente no tiene configuración SEL01. Ve a Settings → Auditorías, "
+                "selecciona el cliente, activa el switch 'Selección habilitada' y guarda."
+            ),
+        )
+    if not cfg.get("selection_enabled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"El cliente '{cfg.get('client_name', client_id)}' tiene selección desactivada. Actívala primero.",
+        )
+
+    from services.integration_service import IntegrationService
+    svc = IntegrationService(db)
+    rc = await svc.get_routal_client(client_id)
+    if not rc:
+        raise HTTPException(
+            status_code=400,
+            detail="La integración Routal no está activa para este cliente o faltan credenciales (API key).",
+        )
+
+    df_dt = datetime(df.year, df.month, df.day, tzinfo=timezone.utc)
+    dt_dt_excl = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc) + timedelta(days=1)
+
+    PAGE_SIZE = 100
+    MAX_PAGES = 50
+    MAX_HYDRATE = 200
+
+    pages_scanned = 0
+    plans_scanned = 0
+    in_range_plans = []
+    consecutive_below = 0
+
+    try:
+        for page in range(MAX_PAGES):
+            try:
+                data = await rc._request("GET", "/v2/plans", params={"limit": PAGE_SIZE, "offset": page * PAGE_SIZE})
+            except Exception as e:
+                logger.error(f"[backfill] list_plans error page={page}: {e}")
+                raise HTTPException(status_code=502, detail=f"Error consultando Routal: {str(e)[:200]}")
+            plans = data if isinstance(data, list) else (data.get("docs") or data.get("data") or data.get("plans") or [])
+            if not plans:
+                break
+            pages_scanned += 1
+            plans_scanned += len(plans)
+            page_below = 0
+            for p in plans:
+                exd = p.get("execution_date")
+                if not exd:
+                    continue
+                try:
+                    pdt = datetime.fromisoformat(str(exd).replace("Z", "+00:00"))
+                except Exception:
+                    continue
+                if pdt < df_dt:
+                    page_below += 1
+                    continue
+                if pdt >= dt_dt_excl:
+                    continue
+                in_range_plans.append(p)
+                if len(in_range_plans) >= MAX_HYDRATE:
+                    break
+            if len(in_range_plans) >= MAX_HYDRATE:
+                logger.warning(f"[backfill] reached MAX_HYDRATE={MAX_HYDRATE}; truncating")
+                break
+            # Routal returns plans newest-first → si toda la página está bajo el rango, terminamos
+            if page_below >= len(plans) * 0.9:
+                consecutive_below += 1
+                if consecutive_below >= 2:
+                    break
+            else:
+                consecutive_below = 0
+            if len(plans) < PAGE_SIZE:
+                break
+
+        # Hydrate each in-range plan
+        staged = 0
+        skipped_no_driver = 0
+        skipped_error = 0
+        for p in in_range_plans:
+            plan_id = p.get("id") or p.get("plan_id")
+            if not plan_id:
+                skipped_error += 1
+                continue
+            try:
+                detail = await rc.get_plan(plan_id)
+            except Exception as e:
+                logger.warning(f"[backfill] get_plan {plan_id} failed: {e}")
+                skipped_error += 1
+                continue
+            exd = p.get("execution_date") or detail.get("execution_date")
+            try:
+                pdt = datetime.fromisoformat(str(exd).replace("Z", "+00:00"))
+                plan_date = datetime(pdt.year, pdt.month, pdt.day, tzinfo=timezone.utc)
+                date_str = plan_date.strftime("%Y-%m-%d")
+            except Exception:
+                skipped_error += 1
+                continue
+            stops = detail.get("stops") or []
+            routes = detail.get("routes") or detail.get("drivers") or []
+            if not routes:
+                skipped_no_driver += 1
+                continue
+            for route in routes:
+                drv_id = route.get("external_id") or route.get("id")
+                drv_name = route.get("label") or "Sin asignar"
+                if not drv_id:
+                    skipped_no_driver += 1
+                    continue
+                payload = {
+                    "id": plan_id,
+                    "plan_id": plan_id,
+                    "date": date_str,
+                    "driver": {"id": drv_id, "name": drv_name},
+                    "driver_id": drv_id,
+                    "driver_name": drv_name,
+                    "stops": stops,
+                    "services": stops,
+                    "_backfilled": True,
+                    "_backfilled_at": datetime.now(timezone.utc).isoformat(),
+                }
+                await db.routal_daily_plans.update_one(
+                    {"client_id": client_id, "driver_id": drv_id, "date": plan_date},
+                    {"$set": {
+                        "client_id": client_id,
+                        "driver_id": drv_id,
+                        "driver_name": drv_name,
+                        "date": plan_date,
+                        "plan_id_routal": plan_id,
+                        "route_metadata": payload,
+                        "received_at": datetime.now(timezone.utc).isoformat(),
+                        "processed": False,
+                        "source": "backfill",
+                    }},
+                    upsert=True,
+                )
+                staged += 1
+
+        # Run selection per day in range
+        selection_results = []
+        totals = {"selected": 0, "total": 0, "phase_1": 0, "phase_2": 0}
+        if auto_run_selection:
+            from datetime import timedelta as _td
+            cur = df
+            while cur <= dt:
+                try:
+                    s = await run_daily_selection(db, client_id, target_date=cur)
+                    selection_results.append({
+                        "date": str(cur),
+                        "ok": s.get("ok"),
+                        "total": s.get("total", 0),
+                        "selected": s.get("selected", 0),
+                        "phase_1": s.get("phase_1", 0),
+                        "phase_2": s.get("phase_2", 0),
+                    })
+                    if s.get("ok"):
+                        totals["total"] += s.get("total", 0)
+                        totals["selected"] += s.get("selected", 0)
+                        totals["phase_1"] += s.get("phase_1", 0)
+                        totals["phase_2"] += s.get("phase_2", 0)
+                except Exception as e:
+                    logger.error(f"[backfill] selection day {cur} error: {e}")
+                    selection_results.append({"date": str(cur), "ok": False, "error": str(e)[:200]})
+                cur = cur + _td(days=1)
+
+        return {
+            "client_id": client_id,
+            "date_from": str(df),
+            "date_to": str(dt),
+            "pages_scanned": pages_scanned,
+            "plans_scanned": plans_scanned,
+            "plans_in_range": len(in_range_plans),
+            "staged": staged,
+            "skipped_no_driver": skipped_no_driver,
+            "skipped_error": skipped_error,
+            "truncated": len(in_range_plans) >= MAX_HYDRATE,
+            "max_hydrate_cap": MAX_HYDRATE,
+            "auto_run_selection": auto_run_selection,
+            "selection_totals": totals,
+            "selection_results": selection_results,
+        }
+    finally:
+        try:
+            await rc.aclose()
+        except Exception:
+            pass
+
+
 @router.get("/selection/summary/{client_id}")
 async def get_selection_summary(
     client_id: str,
