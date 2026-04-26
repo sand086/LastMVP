@@ -217,13 +217,13 @@ async def test_integration(client_id: str, user: dict = Depends(get_current_user
 
     # ─── Routal: real API call with credentials ───
     if integration_type != "routal":
-        return {"ok": False, "error": f"Tipo desconocido: {integration_type}", "latency_ms": 0}
+        return {"ok": False, "error": f"Tipo desconocido: {integration_type}", "latency_ms": 0, "type": integration_type}
 
     creds = full.get("credentials") or {}
     api_key = creds.get("routal_api_key")
     project_id = creds.get("routal_project_id")
     if not api_key or not project_id:
-        return {"ok": False, "error": "Faltan API key o Project ID", "latency_ms": 0}
+        return {"ok": False, "error": "Faltan API key o Project ID", "latency_ms": 0, "type": "routal"}
 
     from services.routal_client import RoutalClient
     rc = RoutalClient(api_key=api_key, project_id=project_id)
