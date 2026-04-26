@@ -40,17 +40,35 @@ async def receive_routal_event(client_id: str, request: Request):
         {"_id": 0, "credentials_encrypted": 1, "client_id": 1},
     )
     if not integ:
-        raise HTTPException(status_code=404, detail="Integración no encontrada o inactiva")
+        # More descriptive 404 — helps the integrator diagnose what's missing
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Integración Routal no encontrada o inactiva para este client_id. "
+                "Verifica en /settings → Integraciones que existe un registro "
+                "type=routal y status=active. Si acabas de crearlo, recarga e inténtalo de nuevo."
+            ),
+        )
 
     body = await request.body()
     creds = decrypt_credentials(integ.get("credentials_encrypted") or "")
     secret = creds.get("routal_webhook_secret")
 
     if secret:
-        sig = request.headers.get("X-Routal-Signature", "")
+        sig = (
+            request.headers.get("X-Routal-Signature")
+            or request.headers.get("X-Webhook-Signature")
+            or request.headers.get("X-Hub-Signature-256")
+            or ""
+        )
         if not _verify_hmac(secret, body, sig):
             logger.warning(f"[routal-webhook] invalid signature for client {client_id}")
             raise HTTPException(status_code=401, detail="Firma inválida")
+
+    # Empty body is acceptable for "test webhook" pings — return 200 so the
+    # integrator's UI shows success.
+    if not body:
+        return {"ok": True, "test": True, "note": "empty body accepted as healthcheck"}
 
     try:
         payload = await request.json()
@@ -64,7 +82,11 @@ async def receive_routal_event(client_id: str, request: Request):
     )
     event_type = payload.get("event") or payload.get("type") or payload.get("event_type") or "unknown"
 
+    # Routal "test webhook" payloads sometimes lack event_id — accept them as ping
     if not event_id:
+        if event_type in ("test", "ping", "unknown") or payload.get("test") is True:
+            logger.info(f"[routal-webhook] test ping received for client {client_id}")
+            return {"ok": True, "test": True, "note": "no event_id; treated as test ping"}
         raise HTTPException(status_code=400, detail="event_id requerido")
 
     # Idempotencia
@@ -90,6 +112,36 @@ async def receive_routal_event(client_id: str, request: Request):
     asyncio.create_task(process_routal_event(db, event_id, client_id))
 
     return {"ok": True, "event_id": event_id}
+
+
+@router.get("/routal/{client_id}")
+async def receive_routal_event_healthcheck(client_id: str):
+    """Public GET handler. Many SaaS dashboards (Routal included) hit GET on the
+    webhook URL to verify it exists and is reachable BEFORE sending a POST test.
+    Returns 200 with metadata so the dashboard shows the URL as 'reachable'.
+    """
+    integ = await db.client_integrations.find_one(
+        {"client_id": client_id, "integration_type": "routal"},
+        {"_id": 0, "status": 1},
+    )
+    return {
+        "service": "lastmile-os",
+        "endpoint": "routal-webhook-receiver",
+        "client_id": client_id,
+        "integration_active": bool(integ and integ.get("status") == "active"),
+        "expected_method": "POST",
+        "expected_signature_header": "X-Routal-Signature",
+        "note": "Send POST with JSON body and HMAC-SHA256 signature (hex) over the raw body.",
+    }
+
+
+@router.options("/routal/{client_id}")
+async def receive_routal_event_preflight(client_id: str):
+    """Explicit OPTIONS handler for CORS preflight. Returns 200 with empty body
+    so external dashboards (Routal) don't get 405 when their browser sends a
+    preflight before the actual POST.
+    """
+    return JSONResponse(content={}, status_code=200)
 
 
 @router.get("/routal/{client_id}/status")
