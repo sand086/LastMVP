@@ -129,12 +129,15 @@ async def test_integration(client_id: str, user: dict = Depends(get_current_user
         from datetime import datetime, timezone, timedelta
         now = datetime.now(timezone.utc)
         # Last successful Kosmo sync on any journey for this client
+        # NOTE: kosmo_sync worker persists the cycle timestamp as `last_sync_at`
+        # on each journey it processes (kosmo_sync.py:331). Use that field as
+        # source-of-truth — `last_kosmo_sync_at` was a misnamed legacy ref.
         last_journey = await db.journeys.find_one(
-            {"client_id": client_id, "last_kosmo_sync_at": {"$exists": True, "$ne": None}},
-            {"_id": 0, "last_kosmo_sync_at": 1},
-            sort=[("last_kosmo_sync_at", -1)],
+            {"client_id": client_id, "last_sync_at": {"$exists": True, "$ne": None}},
+            {"_id": 0, "last_sync_at": 1},
+            sort=[("last_sync_at", -1)],
         )
-        last_sync_at = last_journey.get("last_kosmo_sync_at") if last_journey else None
+        last_sync_at = last_journey.get("last_sync_at") if last_journey else None
         last_sync_age_hours = None
         if last_sync_at:
             try:

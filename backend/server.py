@@ -197,18 +197,21 @@ async def health():
 
     async def _check_kosmo_sync():
         try:
+            # Source of truth: kosmo_sync writes `last_sync_at` on every cycle
+            # (see kosmo_sync.py:331). The journey with the freshest stamp
+            # represents the worker's last activity.
             last = await _aio.wait_for(
                 db.journeys.find_one(
-                    {"last_kosmo_sync_at": {"$exists": True, "$ne": None}},
-                    {"_id": 0, "last_kosmo_sync_at": 1},
-                    sort=[("last_kosmo_sync_at", -1)],
+                    {"last_sync_at": {"$exists": True, "$ne": None}},
+                    {"_id": 0, "last_sync_at": 1},
+                    sort=[("last_sync_at", -1)],
                 ),
                 timeout=0.3,
             )
             last_hb_ago = None
-            if last and last.get("last_kosmo_sync_at"):
+            if last and last.get("last_sync_at"):
                 try:
-                    ts = datetime.fromisoformat(str(last["last_kosmo_sync_at"]).replace("Z", "+00:00"))
+                    ts = datetime.fromisoformat(str(last["last_sync_at"]).replace("Z", "+00:00"))
                     last_hb_ago = round((datetime.now(timezone.utc) - ts).total_seconds())
                 except Exception:
                     last_hb_ago = None
