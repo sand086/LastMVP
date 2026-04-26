@@ -125,6 +125,7 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
         "id": journey_id,
         "routal_plan_id": plan_id,
         "routal_plan_label": plan_label,
+        "routal_project_id": payload.get("project_id") or payload.get("organization_id"),
         "source": "routal",
         "client_id": client_id,
         "driver_name": driver_name,

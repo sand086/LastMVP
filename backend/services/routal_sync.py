@@ -94,12 +94,16 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
              "recipient_name": 1, "address": 1, "tracking_number": 1, "order_reference_id": 1},
         ).to_list(length=10000)
 
-        # If journey doesn't have routal_plan_label yet, persist it
+        # If journey doesn't have routal_plan_label/project_id yet, persist them
         plan_label = detail.get("label")
-        await db.journeys.update_one(
-            {"id": journey_id, "client_id": client_id, "routal_plan_label": {"$in": [None, ""]}},
-            {"$set": {"routal_plan_label": plan_label}} if plan_label else {"$set": {}},
-        )
+        project_id_from_detail = detail.get("project_id") or detail.get("organization_id")
+        meta_set = {}
+        if plan_label:
+            meta_set["routal_plan_label"] = plan_label
+        if project_id_from_detail:
+            meta_set["routal_project_id"] = project_id_from_detail
+        if meta_set:
+            await db.journeys.update_one({"id": journey_id, "client_id": client_id}, {"$set": meta_set})
 
         from workers.routal_event_processor import map_routal_stop_to_pkg_fields
         from utils.pii import encrypt_pkg_pii, ENC_PREFIX as _ENC_PREFIX

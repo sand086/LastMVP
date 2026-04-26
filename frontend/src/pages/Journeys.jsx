@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { 
     Truck, Calendar as CalendarIcon, Eye, Upload, AlertTriangle,
     Filter, X, Search, Trash2, Loader2, ChevronLeft, ChevronRight,
+    ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -113,7 +114,9 @@ const Journeys = () => {
             (j.order_id || '').toLowerCase().includes(q) ||
             (j.driver_name || '').toLowerCase().includes(q) ||
             (j.client_name || '').toLowerCase().includes(q) ||
-            (j.provider_name || '').toLowerCase().includes(q)
+            (j.provider_name || '').toLowerCase().includes(q) ||
+            (j.routal_plan_id || '').toLowerCase().includes(q) ||
+            (j.routal_plan_label || '').toLowerCase().includes(q)
         );
     }, [journeys, searchQuery]);
 
@@ -162,7 +165,7 @@ const Journeys = () => {
                     <div className="relative w-64">
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <Input
-                            placeholder="Buscar Order ID, driver..."
+                            placeholder="Buscar Order ID, plan Routal, driver..."
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                             className="pl-9 h-9 text-sm"
@@ -278,7 +281,7 @@ const Journeys = () => {
                                 <table className="data-table w-full">
                                     <thead>
                                         <tr>
-                                            <th>Order ID</th>
+                                            <th>Origen / ID</th>
                                             <th>Fecha</th>
                                             <th>Driver</th>
                                             <th>Cliente</th>
@@ -298,8 +301,37 @@ const Journeys = () => {
                                             const progressColor = getProgressColor(deliveryRate);
                                             return (
                                                 <tr key={journey.id} data-testid={`journey-item-${journey.id}`}>
-                                                    <td className="font-mono text-xs text-blue-700 max-w-[120px] truncate" title={journey.order_id}>
-                                                        {journey.order_id || '—'}
+                                                    <td className="max-w-[180px]" data-testid={`journey-source-${journey.id}`}>
+                                                        {journey.source === 'routal' && journey.routal_plan_id ? (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200 text-[10px] font-semibold uppercase shrink-0">Routal</span>
+                                                                <span
+                                                                    className="font-mono text-xs text-slate-700 truncate"
+                                                                    title={journey.routal_plan_id}
+                                                                >
+                                                                    {journey.routal_plan_label || journey.routal_plan_id.slice(0, 10) + '…'}
+                                                                </span>
+                                                                {journey.routal_project_id && (
+                                                                    <a
+                                                                        href={`https://planner.routal.com/h/${journey.routal_project_id}/planner/plan/${journey.routal_plan_id}/stops`}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        title="Abrir en Routal Planner"
+                                                                        className="text-emerald-600 hover:text-emerald-800 shrink-0"
+                                                                        data-testid={`open-routal-${journey.id}`}
+                                                                    >
+                                                                        <ExternalLink className="w-3.5 h-3.5" />
+                                                                    </a>
+                                                                )}
+                                                            </div>
+                                                        ) : journey.order_id ? (
+                                                            <span className="font-mono text-xs text-blue-700 truncate inline-block max-w-full" title={journey.order_id}>
+                                                                {journey.order_id}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-400">—</span>
+                                                        )}
                                                     </td>
                                                     <td className="font-mono text-sm">{formatDate(journey.date)}</td>
                                                     <td className="text-sm max-w-[120px] truncate" title={journey.driver_name}>
