@@ -46,12 +46,20 @@ export default function AdminPage() {
         }
     }, [user, navigate]);
 
-    const fetchSummary = useCallback(async () => {
+    const fetchSummary = useCallback(async (attempt = 1) => {
         setLoading(true);
         try {
             const res = await api.get('/admin/summary', { params: { period, client_id: clientId || undefined } });
             setSummary(res.data);
-        } catch (err) { console.error("AdminPage error:", err);
+        } catch (err) {
+            // Cold-start tolerance: silent retry on transient 5xx/network
+            const status = err?.response?.status;
+            const transient = !status || status >= 500 || status === 0;
+            if (transient && attempt < 2) {
+                setTimeout(() => fetchSummary(attempt + 1), 1500);
+                return;
+            }
+            console.error("AdminPage error:", err);
             toast.error('Error al cargar resumen admin');
         } finally {
             setLoading(false);

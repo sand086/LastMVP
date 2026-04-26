@@ -495,9 +495,10 @@ async def _worker_loop(db: AsyncIOMotorDatabase):
         try:
             await asyncio.sleep(WORKER_POLL_SECONDS)
 
-            # Cada ~5 min (30 ticks de 10s) revisar orphans/stuck jobs
+            # Cada ~3 min (18 ticks de 10s) revisar orphans/stuck jobs
+            # (antes 30 ticks = 5 min, bajado para detectar zombis más rápido).
             ticks_since_recovery += 1
-            if ticks_since_recovery >= 30:
+            if ticks_since_recovery >= 18:
                 ticks_since_recovery = 0
                 await _recover_orphan_jobs(db)
 

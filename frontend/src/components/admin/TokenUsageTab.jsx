@@ -31,7 +31,7 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
     const [lastFetch, setLastFetch] = useState(null);
     const [nowTick, setNowTick] = useState(Date.now());
 
-    const fetchEvents = useCallback(async (page = 1) => {
+    const fetchEvents = useCallback(async (page = 1, attempt = 1) => {
         setLoading(true);
         try {
             const params = { period, page, page_size: pagination.page_size };
@@ -43,7 +43,17 @@ export default function TokenUsageTab({ summary, period, setPeriod, clientId, se
             setPagination(res.data.pagination);
             setDetailSummary(res.data.summary);
             setLastFetch(Date.now());
-        } catch (err) { console.error("Admin component error:", err);
+        } catch (err) {
+            // Cold-start tolerance: retry once on transient 5xx/network without toasting.
+            // Toast only after 2 failed attempts so the user doesn't see spurious errors
+            // while the pod is warming up.
+            const status = err?.response?.status;
+            const transient = !status || status >= 500 || status === 0;
+            if (transient && attempt < 2) {
+                setTimeout(() => fetchEvents(page, attempt + 1), 1500);
+                return;
+            }
+            console.error("Admin component error:", err);
             toast.error('Error al cargar eventos de tokens');
         } finally {
             setLoading(false);

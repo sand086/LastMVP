@@ -381,6 +381,13 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
         system_message=system_prompt,
     )
     chat.with_model("anthropic", model_id)
+    # Hard timeout on the LLM call — prevents the worker from hanging forever
+    # if Anthropic is slow/overloaded. Honored both by litellm AND by our outer
+    # asyncio.wait_for as defense-in-depth (the SDK timeout is best-effort).
+    try:
+        chat.with_params(timeout=cfg.get("llm_timeout_seconds", 90))
+    except Exception:
+        pass  # SDK might not support — outer wait_for still protects us
 
     context = _build_user_context(tracking, status, driver_note, len(valid_images), training_context)
     file_contents = [ImageContent(image_base64=img) for img in valid_images]
@@ -397,8 +404,25 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
     # Cualquier excepción a partir de aquí significa que Anthropic YA recibió
     # (o probablemente recibió) el request → debemos loguear el costo aunque la
     # respuesta no llegue, para evitar consumo invisible.
+    hard_timeout = cfg.get("llm_timeout_seconds", 90) + 10  # outer guard slightly above SDK
     try:
-        response_text = await chat.send_message(user_msg)
+        response_text = await asyncio.wait_for(
+            chat.send_message(user_msg),
+            timeout=hard_timeout,
+        )
+    except asyncio.TimeoutError as te:
+        cb.record_failure()
+        await _log_ai_token_usage(
+            tracking=tracking,
+            context=context,
+            response_text="",
+            system_prompt=system_prompt,
+            model_alias=model_alias,
+            image_count=image_count,
+            is_shadow_cost=True,
+            shadow_kind="hard_timeout_exceeded",
+        )
+        raise Exception(f"LLM hard timeout exceeded ({hard_timeout}s) — Anthropic possibly hung") from te
     except Exception as send_err:
         cb.record_failure()
         # Shadow log con el contexto REAL armado (system + user prompt + image count).
