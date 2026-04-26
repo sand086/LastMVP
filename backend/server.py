@@ -19,6 +19,7 @@ from dependencies import db, limiter, mongo_client
 from middleware import AuditMiddleware, SecurityHeadersMiddleware
 from kosmo_sync import start_periodic_sync, stop_periodic_sync, close_http_client
 from ai_eval_worker import start_ai_eval_worker, stop_ai_eval_worker
+from workers.routal_selection_worker import start_selection_scheduler, stop_selection_scheduler
 from ws_manager import ws_manager
 
 from routes import (
@@ -60,14 +61,22 @@ async def lifespan(app: FastAPI):
     from utils.encryption import init_encryption
     await init_encryption(db)
 
+    # R00B / SEL01: bootstrap default client_config (Cubbo)
+    try:
+        from services.client_config_service import bootstrap_default_clients
+        await bootstrap_default_clients(db)
+    except Exception as e:
+        logger.warning(f"[client_config] bootstrap failed: {e}")
+
     # Leader election: when multiple Uvicorn workers run, only ONE spawns
     # background tasks (ai_eval_worker + kosmo_sync). Others skip.
     # Single-worker deploys (current preview) always become leader.
     elected = await acquire_leader(db, role="bg_tasks")
     if elected:
-        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync")
+        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler")
         start_periodic_sync(db)
         start_ai_eval_worker(db)
+        start_selection_scheduler(db)
     else:
         logger.info(f"[bg] Worker {worker_id()} is FOLLOWER — skipping background tasks")
 
@@ -77,6 +86,7 @@ async def lifespan(app: FastAPI):
     if is_leader("bg_tasks"):
         stop_periodic_sync()
         stop_ai_eval_worker()
+        stop_selection_scheduler()
         await release_leader(db, role="bg_tasks")
     await close_http_client()
     mongo_client.close()
@@ -344,6 +354,10 @@ from routes.routal_webhook_routes import router as routal_webhook_router
 api_router.include_router(integration_router)
 api_router.include_router(routal_webhook_router)
 
+# R00B / SEL01: Selection module + client config
+from routes.selection_routes import router as selection_router
+api_router.include_router(selection_router)
+
 app.include_router(api_router)
 
 
@@ -500,6 +514,23 @@ async def _create_indexes():
     await db.journeys.create_index("routal_plan_id", background=True, sparse=True)
     await db.packages.create_index([("client_id", 1), ("source", 1)], background=True)
     await db.packages.create_index("routal_service_id", background=True, sparse=True)
+
+    # R00B / SEL01: Selection module collections
+    await db.client_config.create_index("client_id", unique=True, background=True)
+    await db.routal_daily_plans.create_index([("client_id", 1), ("date", 1)], background=True)
+    await db.routal_daily_plans.create_index(
+        [("client_id", 1), ("driver_id", 1), ("date", 1)], unique=True, background=True
+    )
+    await db.routal_daily_plans.create_index(
+        [("client_id", 1), ("date", 1), ("processed", 1)], background=True
+    )
+    await db.driver_audit_log.create_index([("client_id", 1), ("date", 1)], background=True)
+    await db.driver_audit_log.create_index(
+        [("client_id", 1), ("driver_id", 1), ("date", 1)], unique=True, background=True
+    )
+    await db.driver_audit_log.create_index(
+        [("client_id", 1), ("date", 1), ("selection_status", 1)], background=True
+    )
 
     logger.info("Production indexes created/verified")
 

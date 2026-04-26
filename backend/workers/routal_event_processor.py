@@ -17,7 +17,11 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
+async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
+    """Original behavior: insert Journey + Packages directly.
+    Reused by selection worker after deciding a driver should be audited.
+    Returns journey_id (str) on success, or status string when skipped.
+    """
     plan_id = payload.get("plan_id") or payload.get("id")
     if not plan_id:
         return "skipped: no plan_id"
@@ -27,7 +31,7 @@ async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
         {"_id": 0, "id": 1},
     )
     if existing:
-        return f"skipped: journey already exists ({existing['id']})"
+        return existing["id"]
 
     driver_name = (payload.get("driver") or {}).get("name") or payload.get("driver_name") or "Sin asignar"
     services = payload.get("services") or payload.get("stops") or []
@@ -72,7 +76,57 @@ async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
         await db.packages.insert_many(pkg_docs)
 
     logger.info(f"[routal] plan_created plan={plan_id} client={client_id} pkgs={len(pkg_docs)}")
-    return f"created journey {journey_id} with {len(pkg_docs)} packages"
+    return journey_id
+
+
+async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
+    """SEL01: when client has selection_enabled=True, stage the plan instead of
+    creating the Journey immediately. The selection worker will later create
+    Journeys only for selected drivers. Falls back to direct creation otherwise.
+    """
+    cfg = await db.client_config.find_one(
+        {"client_id": client_id},
+        {"_id": 0, "selection_enabled": 1, "active": 1},
+    )
+    if not cfg or not cfg.get("selection_enabled") or not cfg.get("active", True):
+        # Non-breaking path
+        result = await _handle_plan_created_direct(db, payload, client_id)
+        # _handle_plan_created_direct returns either journey_id (uuid) or "skipped: ..." string
+        if result and not str(result).startswith("skipped"):
+            return f"created journey {result}"
+        return result
+
+    # Selection-enabled path: stage in routal_daily_plans
+    plan_id = payload.get("plan_id") or payload.get("id")
+    if not plan_id:
+        return "skipped: no plan_id"
+    drv = (payload.get("driver") or {}).get("id") or payload.get("driver_id")
+    if not drv:
+        return "skipped: no driver_id (selection requires driver)"
+    drv_name = (payload.get("driver") or {}).get("name") or payload.get("driver_name") or "Sin asignar"
+    plan_date_str = payload.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        plan_date = datetime.strptime(plan_date_str[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        plan_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Idempotent staging by (client_id, driver_id, date)
+    await db.routal_daily_plans.update_one(
+        {"client_id": client_id, "driver_id": drv, "date": plan_date},
+        {"$set": {
+            "client_id": client_id,
+            "driver_id": drv,
+            "driver_name": drv_name,
+            "date": plan_date,
+            "plan_id_routal": plan_id,
+            "route_metadata": payload,
+            "received_at": _now_iso(),
+            "processed": False,
+        }},
+        upsert=True,
+    )
+    logger.info(f"[selection] plan staged plan={plan_id} client={client_id} driver={drv}")
+    return f"staged plan {plan_id} for selection (driver={drv})"
 
 
 async def _handle_plan_started(db, payload: dict, client_id: str) -> str:

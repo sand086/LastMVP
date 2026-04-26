@@ -26,7 +26,7 @@ import {
 } from '../components/ui/alert-dialog';
 import { 
     Users, Building2, Truck, Shield, Database, Trash2, Key, Bell,
-    Loader2, X, Globe, Settings2, Calendar as CalendarIcon, AlertTriangle, Plug,
+    Loader2, X, Globe, Settings2, Calendar as CalendarIcon, AlertTriangle, Plug, ClipboardCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -39,6 +39,7 @@ import { SettingsClientsTab } from '../components/settings/SettingsClientsTab';
 import { SettingsProvidersTab } from '../components/settings/SettingsProvidersTab';
 import { SettingsSystemTab } from '../components/settings/SettingsSystemTab';
 import SettingsIntegrationsTab from '../components/settings/SettingsIntegrationsTab';
+import SettingsAuditTab from '../components/settings/SettingsAuditTab';
 import { SettingsDriversTab } from '../components/settings/SettingsDriversTab';
 
 const getRoleLabel = (role) => ({ agent: 'Agente', coordinator: 'Coordinador', executive: 'Ejecutivo', developer: 'Developer', proveedor: 'Proveedor' }[role] || role);
@@ -335,7 +336,7 @@ const Settings = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className={isDeveloper ? "grid w-full grid-cols-7" : "grid w-full grid-cols-6"}>
+                <TabsList className={isDeveloper ? "grid w-full grid-cols-8" : "grid w-full grid-cols-6"}>
                     <TabsTrigger value="users" data-testid="tab-users"><Users className="w-4 h-4 mr-2" />Usuarios</TabsTrigger>
                     <TabsTrigger value="drivers" data-testid="tab-drivers"><Truck className="w-4 h-4 mr-2" />Drivers</TabsTrigger>
                     <TabsTrigger value="clients" data-testid="tab-clients"><Building2 className="w-4 h-4 mr-2" />Clientes</TabsTrigger>
@@ -344,6 +345,9 @@ const Settings = () => {
                     <TabsTrigger value="webhooks" data-testid="tab-webhooks"><Globe className="w-4 h-4 mr-2" />Webhooks</TabsTrigger>
                     {isDeveloper && (
                         <TabsTrigger value="integraciones" data-testid="tab-integraciones"><Plug className="w-4 h-4 mr-2" />Integraciones</TabsTrigger>
+                    )}
+                    {isDeveloper && (
+                        <TabsTrigger value="auditorias" data-testid="tab-auditorias"><ClipboardCheck className="w-4 h-4 mr-2" />Auditorías</TabsTrigger>
                     )}
                 </TabsList>
 
@@ -366,6 +370,11 @@ const Settings = () => {
                 {isDeveloper && (
                     <TabsContent value="integraciones">
                         <SettingsIntegrationsTab isDeveloper={isDeveloper} />
+                    </TabsContent>
+                )}
+                {isDeveloper && (
+                    <TabsContent value="auditorias">
+                        <SettingsAuditTab isDeveloper={isDeveloper} />
                     </TabsContent>
                 )}
             </Tabs>

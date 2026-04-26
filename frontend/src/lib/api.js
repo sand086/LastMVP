@@ -306,3 +306,15 @@ export const updateIntegrationStatus = (clientId, status) => api.patch(`/integra
 export const testIntegration = (clientId) => api.post(`/integrations/${clientId}/test`);
 export const deleteIntegration = (clientId) => api.delete(`/integrations/${clientId}`);
 export const getRoutalWebhookStatus = (clientId) => api.get(`/webhooks/routal/${clientId}/status`);
+
+// ─── R00B / SEL01: Selection module + client config ───
+export const listClientConfigs = () => api.get('/client-config');
+export const getClientConfig = (clientId) => api.get(`/client-config/${clientId}`);
+export const patchClientConfig = (clientId, payload) => api.patch(`/client-config/${clientId}`, payload);
+export const runSelection = (clientId, date) =>
+    api.post(`/selection/run/${clientId}` + (date ? `?date=${date}` : ''));
+export const getSelectionSummary = (clientId, date) =>
+    api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
+export const getDriverAuditHistory = (driverId, clientId, days = 30) =>
+    api.get(`/drivers/audit-history/${driverId}?client_id=${clientId}&days=${days}`);
+
