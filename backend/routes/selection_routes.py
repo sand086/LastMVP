@@ -376,6 +376,97 @@ async def backfill_from_routal(
             pass
 
 
+@router.post("/selection/reconcile-dates/{client_id}")
+async def reconcile_journey_dates(
+    client_id: str,
+    days_back: int = Query(30, ge=1, le=365, description="Cuántos días atrás revisar (default 30)"),
+    dry_run: bool = Query(True, description="Si true, solo reporta sin escribir cambios"),
+    user: dict = Depends(get_current_user),
+):
+    """Reconcilia journey.date contra Routal execution_date para journeys creados vía webhook.
+
+    Lee `journeys` con source='routal' creados en los últimos N días. Para cada uno consulta
+    `GET /v2/plan/{routal_plan_id}` y extrae la fecha autoritativa (execution_date). Si difiere
+    de journey.date, lista o corrige (según dry_run).
+
+    Resuelve la discrepancia de 1 día reportada cuando webhooks Routal envían `payload.date`
+    en formato/timezone inconsistente (vs. `execution_date` que es estable).
+    """
+    _require_role(user, ["developer"])
+
+    cfg = await db.client_config.find_one({"client_id": client_id}, {"_id": 0})
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Cliente sin config SEL01")
+
+    from services.integration_service import IntegrationService
+    from workers.routal_event_processor import _extract_plan_date
+    svc = IntegrationService(db)
+    rc = await svc.get_routal_client(client_id)
+    if not rc:
+        raise HTTPException(status_code=400, detail="Integración Routal inactiva")
+
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days_back)
+    cutoff_iso = cutoff_dt.isoformat()
+
+    cursor = db.journeys.find(
+        {
+            "client_id": client_id,
+            "source": "routal",
+            "routal_plan_id": {"$exists": True, "$ne": None},
+            "created_at": {"$gte": cutoff_iso},
+        },
+        {"_id": 0, "id": 1, "routal_plan_id": 1, "date": 1, "driver_name": 1},
+    )
+    journeys = [j async for j in cursor]
+
+    discrepancies = []
+    fixed = 0
+    errors = 0
+    try:
+        for j in journeys:
+            plan_id = j["routal_plan_id"]
+            try:
+                detail = await rc.get_plan(plan_id)
+            except Exception as e:
+                errors += 1
+                logger.warning(f"[reconcile] get_plan {plan_id} failed: {e}")
+                continue
+            authoritative_date = _extract_plan_date(detail)
+            current_date = j.get("date")
+            if current_date != authoritative_date:
+                discrepancies.append({
+                    "journey_id": j["id"],
+                    "routal_plan_id": plan_id,
+                    "driver_name": j.get("driver_name"),
+                    "current_date": current_date,
+                    "authoritative_date": authoritative_date,
+                    "execution_date": detail.get("execution_date"),
+                    "label": detail.get("label"),
+                })
+                if not dry_run:
+                    await db.journeys.update_one(
+                        {"id": j["id"], "client_id": client_id},
+                        {"$set": {"date": authoritative_date, "updated_at": _date_to_dt(datetime.now().date()).isoformat()}},
+                    )
+                    fixed += 1
+    finally:
+        try:
+            await rc.aclose()
+        except Exception:
+            pass
+
+    return {
+        "client_id": client_id,
+        "days_back": days_back,
+        "dry_run": dry_run,
+        "journeys_checked": len(journeys),
+        "discrepancies_found": len(discrepancies),
+        "fixed": fixed,
+        "errors": errors,
+        "discrepancies": discrepancies[:100],
+    }
+
+
 @router.get("/selection/summary/{client_id}")
 async def get_selection_summary(
     client_id: str,

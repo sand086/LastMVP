@@ -17,6 +17,41 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _extract_plan_date(payload: dict) -> str:
+    """Determine the plan's calendar date (YYYY-MM-DD) from a Routal webhook/API payload.
+
+    Priority:
+      1. execution_date (ISO 8601, authoritative — matches Routal UI label exactly).
+      2. date (string or ISO).
+      3. UTC today (last-resort fallback).
+
+    Routal stores execution_date as `YYYY-MM-DDT18:00:00.000Z` for CDMX operations
+    (18:00 UTC = 12:00 CDMX), which yields the same calendar day in both UTC and
+    America/Mexico_City. Earlier code used `payload.get("date")` first, but that
+    field is sometimes absent or in a different timezone, producing 1-day offsets
+    vs. the Routal Planner UI.
+    """
+    exd = payload.get("execution_date")
+    if exd:
+        try:
+            pdt = datetime.fromisoformat(str(exd).replace("Z", "+00:00"))
+            return pdt.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            pass
+    raw = payload.get("date")
+    if raw:
+        s = str(raw)
+        # Plain "YYYY-MM-DD" — keep as-is (already a calendar date)
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s
+        try:
+            pdt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return pdt.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            pass
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
 async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
     """Original behavior: insert Journey + Packages directly.
     Reused by selection worker after deciding a driver should be audited.
@@ -35,6 +70,7 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
 
     driver_name = (payload.get("driver") or {}).get("name") or payload.get("driver_name") or "Sin asignar"
     services = payload.get("services") or payload.get("stops") or []
+    plan_date_str = _extract_plan_date(payload)
 
     journey_id = str(uuid.uuid4())
     journey = {
@@ -44,7 +80,7 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
         "client_id": client_id,
         "driver_name": driver_name,
         "routal_driver_id": (payload.get("driver") or {}).get("id"),
-        "date": payload.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "date": plan_date_str,
         "status": "planificada",
         "packages_total": len(services),
         "packages_delivered": 0,
@@ -108,9 +144,9 @@ async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
     if not drv:
         return "skipped: no driver_id (selection requires driver)"
     drv_name = (payload.get("driver") or {}).get("name") or payload.get("driver_name") or "Sin asignar"
-    plan_date_str = payload.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    plan_date_str = _extract_plan_date(payload)
     try:
-        plan_date = datetime.strptime(plan_date_str[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        plan_date = datetime.strptime(plan_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
         plan_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
