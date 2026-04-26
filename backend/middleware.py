@@ -31,7 +31,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "img-src 'self' data: blob: https:; "
             "connect-src 'self' https://api.openai.com https://*.emergentagent.com wss://*.emergentagent.com"
         )
-        if request.url.path.startswith("/api/"):
+        # Default no-store for /api/* (sensitive data) — but skip for static/immutable
+        # asset endpoints that benefit from long browser caching (e.g. Routal image
+        # proxy serves URL-by-id assets that never change).
+        path = request.url.path
+        is_immutable_asset = (
+            path.startswith("/api/integrations/routal/image/")
+            or path.startswith("/api/integrations/routal/signature/")
+        )
+        if is_immutable_asset:
+            # Force long browser cache; immutable per (report_id, image_id)
+            response.headers["Cache-Control"] = "private, max-age=2592000, immutable"
+            if "Pragma" in response.headers:
+                del response.headers["Pragma"]
+        elif path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
             response.headers["Pragma"] = "no-cache"
         return response

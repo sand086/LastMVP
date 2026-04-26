@@ -287,4 +287,7 @@ async def get_routal_image(
     if not result:
         raise HTTPException(status_code=404, detail="Imagen no disponible en Routal")
     content, ctype = result
-    return Response(content=content, media_type=ctype, headers={"Cache-Control": "private, max-age=3600"})
+    return Response(content=content, media_type=ctype, headers={
+        "Cache-Control": "private, max-age=2592000, immutable",
+        "ETag": f'W/"{report_id}-{image_id}"',
+    })

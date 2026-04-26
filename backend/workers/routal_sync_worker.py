@@ -45,25 +45,47 @@ async def _sync_one(db, journey, api_base, sem):
 
 
 async def _tick(db):
-    """Single sync tick: find candidate journeys and sync them in parallel."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=JOURNEY_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    """Single sync tick: find candidate journeys and sync them in parallel.
+
+    Skips journeys synced in the last MIN_RESYNC_INTERVAL_MIN minutes (default 5)
+    AND already 100% delivered/failed (no pending packages) — these are stable
+    and don't need re-checking until something changes.
+    """
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=JOURNEY_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    min_resync_minutes = int(os.environ.get("ROUTAL_SYNC_MIN_RESYNC_MIN", "5"))
+    skip_synced_after = (datetime.now(timezone.utc) - timedelta(minutes=min_resync_minutes)).isoformat()
+
     cursor = db.journeys.find(
         {
             "source": "routal",
             "status": {"$in": ["planificada", "en_ruta"]},
-            "date": {"$gte": cutoff},
+            "date": {"$gte": cutoff_date},
             "routal_plan_id": {"$exists": True, "$ne": None},
+            "$or": [
+                {"routal_synced_at": {"$exists": False}},
+                {"routal_synced_at": {"$lt": skip_synced_after}},
+            ],
         },
-        {"_id": 0, "id": 1, "client_id": 1, "routal_plan_id": 1, "date": 1, "driver_name": 1},
+        {"_id": 0, "id": 1, "client_id": 1, "routal_plan_id": 1, "date": 1, "driver_name": 1,
+         "packages_total": 1, "packages_delivered": 1, "packages_failed": 1},
     ).sort("date", -1).limit(200)
     journeys = [j async for j in cursor]
-    if not journeys:
+    # Skip already-stable journeys (all packages resolved)
+    candidates = []
+    for j in journeys:
+        total = j.get("packages_total") or 0
+        resolved = (j.get("packages_delivered") or 0) + (j.get("packages_failed") or 0)
+        if total > 0 and resolved >= total:
+            # already fully resolved; don't re-fetch (would still cost a Routal API call)
+            continue
+        candidates.append(j)
+    if not candidates:
         return 0
 
     api_base = os.environ.get("REACT_APP_BACKEND_URL", "")
     sem = asyncio.Semaphore(MAX_CONCURRENT)
-    await asyncio.gather(*[_sync_one(db, j, api_base, sem) for j in journeys], return_exceptions=True)
-    return len(journeys)
+    await asyncio.gather(*[_sync_one(db, j, api_base, sem) for j in candidates], return_exceptions=True)
+    return len(candidates)
 
 
 async def _loop(db):

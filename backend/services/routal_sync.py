@@ -13,13 +13,65 @@ Policy:
 
 Idempotent: re-runs do not duplicate evidence and only update changed fields.
 Image URLs are proxified through `/api/integrations/routal/image/...` to avoid
-exposing the Routal API key in the browser.
+exposing the Routal API key in the browser. Image bytes are cached on disk
+(`/tmp/routal_image_cache/`) with 7-day TTL — Routal images are immutable per
+(report_id, image_id) so the cache is safe.
 """
+import os
 import logging
+import hashlib
+import asyncio
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# ─────────────── Image cache (P0 perf fix) ───────────────
+_CACHE_DIR = Path(os.environ.get("ROUTAL_IMAGE_CACHE_DIR", "/tmp/routal_image_cache"))
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_CACHE_TTL_SECS = int(os.environ.get("ROUTAL_IMAGE_CACHE_TTL_SECS", str(7 * 24 * 3600)))
+_CACHE_LOCKS: dict = {}  # serialize concurrent fetches per key
+
+
+def _cache_key(client_id: str, report_id: str, image_id: str) -> str:
+    h = hashlib.sha1(f"{client_id}/{report_id}/{image_id}".encode()).hexdigest()
+    return h
+
+
+def _cache_paths(key: str) -> tuple:
+    return _CACHE_DIR / f"{key}.bin", _CACHE_DIR / f"{key}.ctype"
+
+
+def _read_cache(key: str) -> Optional[tuple]:
+    bin_path, ctype_path = _cache_paths(key)
+    if not bin_path.exists():
+        return None
+    age = datetime.now().timestamp() - bin_path.stat().st_mtime
+    if age > _CACHE_TTL_SECS:
+        try:
+            bin_path.unlink()
+            ctype_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+    try:
+        ctype = ctype_path.read_text() if ctype_path.exists() else "image/jpeg"
+        return bin_path.read_bytes(), ctype
+    except OSError as e:
+        logger.warning(f"[routal-cache] read error: {e}")
+        return None
+
+
+def _write_cache(key: str, content: bytes, ctype: str) -> None:
+    bin_path, ctype_path = _cache_paths(key)
+    try:
+        tmp = bin_path.with_suffix(".tmp")
+        tmp.write_bytes(content)
+        tmp.replace(bin_path)
+        ctype_path.write_text(ctype)
+    except OSError as e:
+        logger.warning(f"[routal-cache] write error: {e}")
 
 
 def _now_iso() -> str:
@@ -260,29 +312,47 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
 
 
 async def proxy_routal_image(db, client_id: str, report_id: str, image_id: str) -> Optional[tuple]:
-    """Fetches a Routal report image as bytes using the client's API key.
+    """Fetches a Routal report image bytes using the client's API key.
     Returns (content_bytes, content_type) or None if unavailable.
+
+    Uses on-disk cache: first hit fetches from Routal (~1s for 1.4MB), subsequent
+    hits read from /tmp in <5ms. Routal images are immutable per (report_id,
+    image_id) so 7-day TTL is safe. Concurrent requests for the same key are
+    coalesced via per-key asyncio.Lock to avoid duplicate Routal fetches.
     """
-    from services.integration_service import IntegrationService
-    svc = IntegrationService(db)
-    rc = await svc.get_routal_client(client_id)
-    if not rc:
-        return None
-    try:
-        # Routal v3 endpoint serves image binary at /v3/stop/report/{report_id}/image/{image_id}
-        url = f"{rc._base_url}/v3/stop/report/{report_id}/image/{image_id}"
-        params = {"private_key": rc._api_key}
-        r = await rc._client.get(url, params=params)
-        if r.status_code != 200:
-            logger.warning(f"[routal-image-proxy] {report_id}/{image_id} → HTTP {r.status_code}")
+    key = _cache_key(client_id, report_id, image_id)
+    cached = _read_cache(key)
+    if cached:
+        return cached
+
+    # Coalesce concurrent fetches for the same key
+    lock = _CACHE_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        # Re-check after acquiring lock (someone else may have populated)
+        cached = _read_cache(key)
+        if cached:
+            return cached
+
+        from services.integration_service import IntegrationService
+        svc = IntegrationService(db)
+        rc = await svc.get_routal_client(client_id)
+        if not rc:
             return None
-        content_type = r.headers.get("content-type", "image/jpeg")
-        return r.content, content_type
-    except Exception as e:
-        logger.error(f"[routal-image-proxy] error {report_id}/{image_id}: {e}")
-        return None
-    finally:
         try:
-            await rc.aclose()
-        except Exception:
-            pass
+            url = f"{rc._base_url}/v3/stop/report/{report_id}/image/{image_id}"
+            params = {"private_key": rc._api_key}
+            r = await rc._client.get(url, params=params)
+            if r.status_code != 200:
+                logger.warning(f"[routal-image-proxy] {report_id}/{image_id} → HTTP {r.status_code}")
+                return None
+            content_type = r.headers.get("content-type", "image/jpeg")
+            _write_cache(key, r.content, content_type)
+            return r.content, content_type
+        except Exception as e:
+            logger.error(f"[routal-image-proxy] error {report_id}/{image_id}: {e}")
+            return None
+        finally:
+            try:
+                await rc.aclose()
+            except Exception:
+                pass
