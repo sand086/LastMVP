@@ -149,6 +149,74 @@ class RetryErrorsRequest(BaseModel):
     max_jobs: int = 50
 
 
+# ── POST /api/ai-evaluation/recover-stuck ───────────────────────
+class RecoverStuckRequest(BaseModel):
+    stuck_minutes: int = 5      # progreso=0 + tokens=0 más viejo que esto → Error
+    queue_hours: int = 2         # En_Cola más viejo que esto → Error
+
+
+@router.post("/recover-stuck")
+async def recover_stuck_jobs(
+    data: RecoverStuckRequest = RecoverStuckRequest(),
+    user: dict = Depends(require_role(["coordinator", "developer"])),
+):
+    """Manual recovery for stuck jobs. Use cuando:
+       - 3 jobs Evaluando ocupan los slots pero no progresan (tokens=0, progress=0%)
+       - El cron de orphan recovery (every 30min) aún no llega.
+
+    Marca como Error:
+       - Evaluando con last_progress_at >= stuck_minutes (default 5)
+       - Evaluando sin last_progress_at + fecha_inicio >= stuck_minutes (zombi post-restart)
+       - Evaluando con tokens_consumidos==0 y progreso 0/N + fecha_inicio >= stuck_minutes (worker stuck on Claude call)
+       - En_Cola más viejos que queue_hours (default 2)
+
+    Idempotente. Después de ejecutar, llama a /jobs/retry-errors para reencolar.
+    """
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    stuck_iso = (now - timedelta(minutes=max(1, data.stuck_minutes))).isoformat()
+    queue_iso = (now - timedelta(hours=max(1, data.queue_hours))).isoformat()
+
+    # 1. Heartbeat estancado
+    r1 = await db.ai_evaluation_jobs.update_many(
+        {"status": "Evaluando", "last_progress_at": {"$lt": stuck_iso}},
+        {"$set": {
+            "status": "Error", "fecha_termino": now.isoformat(),
+            "error_detail": f"Stuck (no progress >{data.stuck_minutes}min) — manual recovery",
+        }},
+    )
+
+    # 2. Zombi: started but never progressed
+    r2 = await db.ai_evaluation_jobs.update_many(
+        {"status": "Evaluando",
+         "$or": [{"last_progress_at": {"$exists": False}}, {"last_progress_at": None}],
+         "fecha_inicio": {"$lt": stuck_iso, "$ne": None}},
+        {"$set": {
+            "status": "Error", "fecha_termino": now.isoformat(),
+            "error_detail": f"Zombi (started but tokens=0 >{data.stuck_minutes}min) — manual recovery",
+        }},
+    )
+
+    # 3. Cola atascada
+    r3 = await db.ai_evaluation_jobs.update_many(
+        {"status": "En_Cola", "fecha_creacion": {"$lt": queue_iso}},
+        {"$set": {
+            "status": "Error", "fecha_termino": now.isoformat(),
+            "error_detail": f"En_Cola >{data.queue_hours}h — manual recovery",
+        }},
+    )
+
+    total = (r1.modified_count or 0) + (r2.modified_count or 0) + (r3.modified_count or 0)
+    return {
+        "message": f"Recovered {total} stuck jobs",
+        "stuck_progress": r1.modified_count,
+        "stuck_zombi": r2.modified_count,
+        "stuck_queue": r3.modified_count,
+        "thresholds": {"stuck_minutes": data.stuck_minutes, "queue_hours": data.queue_hours},
+        "next_step": "Llama POST /api/ai-evaluation/jobs/retry-errors para reencolar",
+    }
+
+
 @router.post("/jobs/retry-errors")
 async def retry_error_jobs(
     data: RetryErrorsRequest = RetryErrorsRequest(),

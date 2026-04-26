@@ -613,13 +613,14 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
 
 async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
     """Recupera jobs 'Evaluando' y 'En_Cola' estancados por reinicio o saturación.
-    - Evaluando sin progreso >15 min (last_progress_at) → Error
-    - Evaluando iniciados hace >30 min sin heartbeat (legacy) → Error
+    - Evaluando sin progreso >10 min (last_progress_at) → Error
+    - Evaluando iniciados hace >15 min sin heartbeat (legacy/post-restart) → Error
     - En_Cola esperando >2h → Error (probable saturación de créditos/workers)
-    Idempotente."""
+    Idempotente. Para recovery manual con thresholds más agresivos, usa
+    POST /api/ai-evaluation/recover-stuck."""
     now = datetime.now(timezone.utc)
-    stuck_cutoff = (now - timedelta(minutes=15)).isoformat()
-    legacy_cutoff = (now - timedelta(minutes=30)).isoformat()
+    stuck_cutoff = (now - timedelta(minutes=10)).isoformat()
+    legacy_cutoff = (now - timedelta(minutes=15)).isoformat()
     queue_cutoff = (now - timedelta(hours=2)).isoformat()
 
     # 1) Jobs con heartbeat estancado (>15 min sin progreso)
@@ -631,7 +632,7 @@ async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
             "error_detail": "Job estancado (sin progreso >15 min). Posible saturación o error de integración. Usa 'Reintentar' para reencolar.",
         }},
     )
-    # 2) Legacy (sin heartbeat) iniciados hace >30 min
+    # 2) Legacy (sin heartbeat) iniciados hace >15 min
     result2 = await db.ai_evaluation_jobs.update_many(
         {"status": "Evaluando", "last_progress_at": {"$exists": False}, "$or": [
             {"fecha_inicio": {"$lt": legacy_cutoff}},
@@ -640,7 +641,7 @@ async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
         {"$set": {
             "status": "Error",
             "fecha_termino": now.isoformat(),
-            "error_detail": "Job huérfano por reinicio de backend. Usa 'Reintentar' para reencolar.",
+            "error_detail": "Job huérfano (sin heartbeat >15 min). Probable reinicio del backend o fallo en primera llamada Claude. Usa 'Reintentar' para reencolar.",
         }},
     )
     # 3) En_Cola >2h — no fueron tomados por el worker
