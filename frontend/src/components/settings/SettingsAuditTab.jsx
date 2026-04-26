@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     Loader2, ShieldAlert, ClipboardCheck, Clock, Users, Save,
-    PlayCircle, RefreshCw, AlertTriangle, CheckCircle2,
+    PlayCircle, RefreshCw, AlertTriangle, CheckCircle2, CalendarRange,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -10,7 +10,7 @@ import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
 import {
     listClientConfigs, getClients, patchClientConfig,
-    runSelection, getSelectionSummary,
+    runSelection, runSelectionRange, getSelectionSummary,
 } from '../../lib/api';
 
 const formatDate = (d) => {
@@ -132,6 +132,13 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
     const [active, setActive] = useState(cfg.active ?? true);
     const [saving, setSaving] = useState(false);
     const [running, setRunning] = useState(false);
+    const [runningRange, setRunningRange] = useState(false);
+    const [showRange, setShowRange] = useState(false);
+    const today = new Date().toISOString().slice(0, 10);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const [rangeFrom, setRangeFrom] = useState(sevenDaysAgo);
+    const [rangeTo, setRangeTo] = useState(today);
+    const [rangeResult, setRangeResult] = useState(null);
 
     const dirty = (
         enabled !== (cfg.selection_enabled ?? false) ||
@@ -180,6 +187,32 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
             toast.error(err.response?.data?.detail || 'Error ejecutando selección');
         } finally {
             setRunning(false);
+        }
+    };
+
+    const handleRunRange = async () => {
+        if (!rangeFrom || !rangeTo) {
+            toast.error('Selecciona ambas fechas');
+            return;
+        }
+        if (rangeFrom > rangeTo) {
+            toast.error('La fecha inicial debe ser anterior o igual a la final');
+            return;
+        }
+        setRunningRange(true);
+        setRangeResult(null);
+        try {
+            const r = await runSelectionRange(client.id, rangeFrom, rangeTo);
+            const d = r.data;
+            setRangeResult(d);
+            toast.success(
+                `Rango procesado: ${d.days_in_range} días · ${d.selected}/${d.total} drivers seleccionados`
+            );
+            onChanged?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error ejecutando rango');
+        } finally {
+            setRunningRange(false);
         }
     };
 
@@ -331,6 +364,18 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                         Ejecutar ahora
                     </Button>
                 )}
+                {enabled && (
+                    <Button
+                        onClick={() => setShowRange(v => !v)}
+                        size="sm"
+                        variant="outline"
+                        className={showRange ? 'bg-slate-100' : ''}
+                        data-testid={`toggle-range-${client.id}`}
+                    >
+                        <CalendarRange className="w-3.5 h-3.5 mr-1.5" />
+                        Recuperar rango
+                    </Button>
+                )}
                 <Button
                     onClick={() => onChanged?.()}
                     size="sm"
@@ -341,6 +386,82 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                     <RefreshCw className="w-3.5 h-3.5" />
                 </Button>
             </div>
+
+            {/* Range picker */}
+            {enabled && showRange && (
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md" data-testid={`range-panel-${client.id}`}>
+                    <div className="flex items-start gap-2 mb-3 text-xs text-blue-900">
+                        <CalendarRange className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <p className="font-semibold">Recuperar rutas en rango histórico</p>
+                            <p className="text-[11px] mt-0.5 leading-relaxed">
+                                Re-ejecuta el algoritmo de selección día por día sobre fechas pasadas. Útil para recuperar rutas de días donde el scheduler no corrió o estaba desactivado. Idempotente: drivers ya seleccionados se preservan, journeys NO se duplican. Máximo 90 días.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                        <div className="space-y-1">
+                            <Label className="text-xs text-slate-700">Desde</Label>
+                            <Input
+                                type="date"
+                                value={rangeFrom}
+                                max={today}
+                                onChange={(e) => setRangeFrom(e.target.value)}
+                                className="font-mono"
+                                data-testid={`range-from-${client.id}`}
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <Label className="text-xs text-slate-700">Hasta</Label>
+                            <Input
+                                type="date"
+                                value={rangeTo}
+                                max={today}
+                                onChange={(e) => setRangeTo(e.target.value)}
+                                className="font-mono"
+                                data-testid={`range-to-${client.id}`}
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <Button
+                                onClick={handleRunRange}
+                                disabled={runningRange}
+                                size="sm"
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                                data-testid={`run-range-${client.id}`}
+                            >
+                                {runningRange ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <PlayCircle className="w-3.5 h-3.5 mr-1.5" />}
+                                Procesar rango
+                            </Button>
+                        </div>
+                    </div>
+
+                    {rangeResult && (
+                        <div className="bg-white rounded p-2 text-xs space-y-1" data-testid={`range-result-${client.id}`}>
+                            <div className="flex justify-between font-semibold text-slate-800">
+                                <span>{rangeResult.days_in_range} días procesados ({rangeResult.days_with_data} con datos)</span>
+                                <span className="text-emerald-700">{rangeResult.selected}/{rangeResult.total} drivers</span>
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                                P1: {rangeResult.phase_1} · P2: {rangeResult.phase_2} · No selec: {rangeResult.unselected}
+                            </div>
+                            <details className="mt-1">
+                                <summary className="cursor-pointer text-slate-600 hover:text-slate-900 text-[11px]">Ver detalle por día</summary>
+                                <div className="mt-1 max-h-40 overflow-y-auto space-y-0.5">
+                                    {rangeResult.results.map(r => (
+                                        <div key={r.date} className={`flex justify-between font-mono text-[10px] px-1 py-0.5 ${r.ok ? '' : 'bg-red-50 text-red-700'}`}>
+                                            <span>{r.date}</span>
+                                            <span className="text-slate-600">
+                                                {r.ok ? `${r.selected}/${r.total} (P1:${r.phase_1} P2:${r.phase_2})` : (r.error || 'error')}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </details>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {enabled && summary?.selected > 0 && (
                 <details className="mt-3 text-xs">

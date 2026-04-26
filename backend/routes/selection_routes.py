@@ -59,6 +59,77 @@ async def run_selection(
     return summary
 
 
+@router.post("/selection/run-range/{client_id}")
+async def run_selection_range(
+    client_id: str,
+    date_from: str = Query(..., description="YYYY-MM-DD inicio del rango (inclusivo)"),
+    date_to: str = Query(..., description="YYYY-MM-DD fin del rango (inclusivo)"),
+    user: dict = Depends(get_current_user),
+):
+    """Ejecuta el algoritmo de selección día por día sobre un rango de fechas.
+
+    Útil para recuperar rutas históricas que NO fueron procesadas (ej. por bug,
+    pod down, o porque selection_enabled estaba apagado entonces). Re-ejecutar
+    sobre fechas ya procesadas es idempotente: drivers ya marcados 'selected'
+    se preservan, los Journeys NO se duplican, los 'unselected' se recalculan.
+
+    Limita a 90 días para evitar runs accidentales muy grandes.
+    """
+    _require_role(user, ["developer", "coordinator"])
+
+    df = _parse_date(date_from)
+    dt = _parse_date(date_to)
+    if df > dt:
+        raise HTTPException(status_code=400, detail="date_from debe ser ≤ date_to")
+    delta_days = (dt - df).days + 1
+    if delta_days > 90:
+        raise HTTPException(status_code=400, detail=f"Rango demasiado grande ({delta_days} días). Máximo 90.")
+
+    cfg = await db.client_config.find_one({"client_id": client_id}, {"_id": 0})
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"client_config no existe para {client_id}")
+
+    from datetime import timedelta as _td
+    daily_results = []
+    totals = {"total": 0, "selected": 0, "unselected": 0, "phase_1": 0, "phase_2": 0, "days_processed": 0, "days_with_data": 0}
+    cur = df
+    while cur <= dt:
+        try:
+            s = await run_daily_selection(db, client_id, target_date=cur)
+            daily_results.append({
+                "date": str(cur),
+                "ok": s.get("ok"),
+                "total": s.get("total", 0),
+                "selected": s.get("selected", 0),
+                "unselected": s.get("unselected", 0),
+                "phase_1": s.get("phase_1", 0),
+                "phase_2": s.get("phase_2", 0),
+                "error": s.get("error"),
+            })
+            if s.get("ok"):
+                totals["days_processed"] += 1
+                if s.get("total", 0) > 0:
+                    totals["days_with_data"] += 1
+                totals["total"] += s.get("total", 0)
+                totals["selected"] += s.get("selected", 0)
+                totals["unselected"] += s.get("unselected", 0)
+                totals["phase_1"] += s.get("phase_1", 0)
+                totals["phase_2"] += s.get("phase_2", 0)
+        except Exception as e:
+            logger.error(f"[selection.run-range] error día {cur}: {e}")
+            daily_results.append({"date": str(cur), "ok": False, "error": str(e)[:200]})
+        cur = cur + _td(days=1)
+
+    return {
+        "client_id": client_id,
+        "date_from": str(df),
+        "date_to": str(dt),
+        "days_in_range": delta_days,
+        **totals,
+        "results": daily_results,
+    }
+
+
 @router.get("/selection/summary/{client_id}")
 async def get_selection_summary(
     client_id: str,
