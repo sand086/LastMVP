@@ -54,6 +54,7 @@ class PackageBase(BaseModel):
     address: str
     zone: str
     delivery_window: str
+    recipient_phone: Optional[str] = None
     status: str = "pending"
     failure_reason: Optional[str] = None
 

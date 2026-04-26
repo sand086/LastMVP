@@ -185,6 +185,18 @@ async def test_no_role_defaults_to_plain(init_enc):
     assert pkg["recipient_name"] == "Sys User"
 
 
+@pytest.mark.asyncio
+async def test_unknown_role_defaults_to_masked(init_enc):
+    """Defense-in-depth: any role NOT in PLAIN_ROLES is masked (fail-secure)."""
+    from utils.pii import encrypt_pkg_pii, apply_pii_visibility_pkg
+    pkg = {"recipient_name": "Future Role User", "address": "Calle 1 100", "recipient_phone": "5512345678"}
+    encrypt_pkg_pii(pkg)
+    apply_pii_visibility_pkg(pkg, "future_unknown_role")
+    assert pkg["recipient_name"] == "Future R*** U***"  # masked
+    assert "***" in pkg["address"]
+    assert pkg["recipient_phone"] == "55****5678"
+
+
 # ─────────────── ENCRYPT-ON-WRITE HELPER ───────────────
 
 @pytest.mark.asyncio

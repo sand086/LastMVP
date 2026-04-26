@@ -226,6 +226,7 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
             "tracking_number": pkg.get("tracking_number", ""),
             "recipient_name": pkg.get("recipient_name", ""),
             "address": pkg.get("address", ""),
+            "recipient_phone": pkg.get("recipient_phone", ""),
             "zone": pkg.get("zone", ""),
             "delivery_window": pkg.get("delivery_window", ""),
             "status": "pending",

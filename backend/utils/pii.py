@@ -123,12 +123,18 @@ def mask_address(value: Optional[str]) -> str:
 # ─────────────── ROLE-BASED VISIBILITY ───────────────
 
 def _visibility(role: Optional[str]) -> str:
-    """Returns 'plain' | 'masked' | 'plain' (default for unknown — fail-secure)"""
+    """Returns 'plain' | 'masked'.
+
+    SECURITY: fail-secure for unknown roles → masked. Only roles explicitly
+    in PLAIN_ROLES see decrypted plain text. Internal/system code (no role at
+    all) gets plain (e.g. webhook processors that need to decrypt for downstream
+    workers).
+    """
+    if role is None:
+        return "plain"  # internal/system contexts (None role) get plain
     if role in PLAIN_ROLES:
         return "plain"
-    if role in MASKED_ROLES:
-        return "masked"
-    return "plain"  # admin/system internal calls (no role) get plain
+    return "masked"  # MASKED_ROLES + any unknown role → fail-secure
 
 
 def apply_pii_visibility_pkg(pkg: dict, role: Optional[str]) -> dict:
