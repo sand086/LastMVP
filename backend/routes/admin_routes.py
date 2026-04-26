@@ -26,7 +26,7 @@ async def get_upload_history(user: dict = Depends(get_current_user)):
 
 
 @router.post("/upload-history")
-async def create_upload_history(data: dict, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def create_upload_history(data: dict, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     history_entry = {
         "id": str(uuid.uuid4()),
         "date": data.get("date"),

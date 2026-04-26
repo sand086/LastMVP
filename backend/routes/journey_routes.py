@@ -18,7 +18,7 @@ from models import (
 )
 from pydantic import BaseModel
 from middleware import log_audit_event
-from utils.pii import encrypt_pkg_pii, apply_pii_visibility_pkg, apply_pii_visibility_pkgs
+from utils.pii import encrypt_pkg_pii, apply_pii_visibility_pkgs
 from evidence_scoring import (
     evaluate_packages_for_journey,
     evaluate_single_package_for_journey,
@@ -195,7 +195,7 @@ async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/journeys")
-async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     journey_id = str(uuid.uuid4())
     journey = {
         "id": journey_id,
@@ -384,7 +384,7 @@ async def get_incidents(
 
 
 @router.post("/incidents", response_model=IncidentResponse)
-async def create_incident(data: IncidentCreate, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def create_incident(data: IncidentCreate, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     # Validar catalogo nuevo de tipos. Catalogo viejo sigue permitido para compatibilidad
     # con scripts/tests existentes, pero si viene del nuevo catalogo y es 'otro' se
     # requiere comentario_asesor.
@@ -444,7 +444,7 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
 
 
 @router.put("/incidents/{incident_id}")
-async def update_incident(incident_id: str, data: dict, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def update_incident(incident_id: str, data: dict, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     update_data = {k: v for k, v in data.items() if k not in ["id", "_id"]}
     if data.get("status") == "resolved":
         update_data["resolved_at"] = datetime.now(timezone.utc).isoformat()
@@ -456,7 +456,7 @@ async def update_incident(incident_id: str, data: dict, user: dict = Depends(req
 
 
 @router.delete("/incidents/{incident_id}")
-async def delete_incident(incident_id: str, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def delete_incident(incident_id: str, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     result = await db.incidents.delete_one({"id": incident_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Incidencia no encontrada")
@@ -506,7 +506,7 @@ async def delete_journey(journey_id: str, user: dict = Depends(require_role(["co
 
 
 @router.put("/incidents/journey/{journey_id}/resolve-all")
-async def resolve_all_incidents(journey_id: str, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def resolve_all_incidents(journey_id: str, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     now = datetime.now(timezone.utc).isoformat()
     result = await db.incidents.update_many(
         {"journey_id": journey_id, "status": "open"},
