@@ -99,7 +99,7 @@ async def get_clients(user: dict = Depends(get_current_user)):
 
 
 @router.post("/clients", response_model=ClientResponse)
-async def create_client(data: ClientBase, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def create_client(data: ClientBase, user: dict = Depends(require_role(["coordinator", "developer"]))):
     new_client = {
         "id": str(uuid.uuid4()),
         "name": data.name,
@@ -139,7 +139,7 @@ async def get_providers(user: dict = Depends(get_current_user)):
 
 
 @router.post("/providers", response_model=ProviderResponse)
-async def create_provider(data: ProviderBase, user: dict = Depends(require_role(["coordinator", "agent"]))):
+async def create_provider(data: ProviderBase, user: dict = Depends(require_role(["coordinator", "developer"]))):
     new_provider = {
         "id": str(uuid.uuid4()),
         "name": data.name,
