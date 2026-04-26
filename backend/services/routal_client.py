@@ -42,16 +42,20 @@ def _redact(s: Optional[str]) -> str:
 
 
 class RoutalClient:
-    def __init__(self, api_key: str, project_id: str, base_url: str = ROUTAL_BASE_URL):
-        if not api_key or not project_id:
-            raise ValueError("RoutalClient requires both api_key and project_id")
+    def __init__(self, api_key: str, project_id: Optional[str] = None, base_url: str = ROUTAL_BASE_URL):
+        if not api_key:
+            raise ValueError("RoutalClient requires api_key")
         self._api_key = api_key
-        self._project_id = project_id
+        self._project_id = project_id or None  # optional for /v2/plans test
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=ROUTAL_TIMEOUT)
 
     def _params(self, extra: Optional[dict] = None) -> dict:
-        out = {"private_key": self._api_key, "project_id": self._project_id}
+        # private_key is the actual query-param name (Routal v2 docs label it
+        # "api_key" as auth-type, but the wire param is private_key).
+        out: dict = {"private_key": self._api_key}
+        if self._project_id:
+            out["project_id"] = self._project_id
         if extra:
             out.update(extra)
         return out
@@ -90,13 +94,17 @@ class RoutalClient:
         # Routal v2 uses singular `/plan/{id}` for retrieval
         return await self._request("GET", f"/v2/plan/{plan_id}")
 
-    async def list_plans(self, date: str, page: int = 1, page_size: int = 50) -> list:
-        # Routal v2: GET /v2/plans (plural for list)
-        data = await self._request("GET", "/v2/plans", params={"date": date, "page": page, "page_size": page_size})
-        # Response shape varies; normalize to list
+    async def list_plans(self, date: Optional[str] = None, limit: int = 50, offset: int = 0) -> list:
+        # Routal v2: GET /v2/plans (plural for list). Params: limit, offset, project_id, status, text
+        params: dict = {"limit": limit, "offset": offset}
+        if date:
+            # Routal v2 doesn't have a "date" filter on list — keep param-less
+            # to avoid 400. Date filter is at the plan level (execution_date).
+            pass
+        data = await self._request("GET", "/v2/plans", params=params)
         if isinstance(data, list):
             return data
-        return data.get("data") or data.get("plans") or []
+        return data.get("docs") or data.get("data") or data.get("plans") or []
 
     async def get_plan_stops(self, plan_id: str) -> list:
         # Routal v2 swagger: GET /v2/plan/{id}/stops (singular plan)
@@ -110,7 +118,7 @@ class RoutalClient:
         import time
         t0 = time.monotonic()
         try:
-            await self._request("GET", "/v2/plans", params={"page_size": 1})
+            await self._request("GET", "/v2/plans", params={"limit": 1})
             return {"ok": True, "error": None, "latency_ms": round((time.monotonic() - t0) * 1000)}
         except RoutalAuthError as e:
             return {"ok": False, "error": f"auth: {e}", "latency_ms": round((time.monotonic() - t0) * 1000)}
