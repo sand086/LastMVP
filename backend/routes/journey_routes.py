@@ -18,6 +18,7 @@ from models import (
 )
 from pydantic import BaseModel
 from middleware import log_audit_event
+from utils.pii import encrypt_pkg_pii, apply_pii_visibility_pkg, apply_pii_visibility_pkgs
 from evidence_scoring import (
     evaluate_packages_for_journey,
     evaluate_single_package_for_journey,
@@ -121,6 +122,7 @@ async def get_journey(journey_id: str, user: dict = Depends(get_current_user)):
     journey["provider_name"] = provider["name"] if provider else ""
 
     packages = await db.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(1000)
+    apply_pii_visibility_pkgs(packages, user.get("role"))
 
     order_refs = [p.get("order_reference_id") for p in packages if p.get("order_reference_id")]
     if order_refs:
@@ -229,6 +231,9 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
             "status": "pending",
             "is_retry": False,
         } for pkg in data.packages]
+        # PII at-rest: encrypt sensitive fields before insert
+        for d in pkg_docs:
+            encrypt_pkg_pii(d)
         await db.packages.insert_many(pkg_docs)
 
     # Bulk update retry packages with a single update_many call
@@ -804,6 +809,8 @@ async def create_journeys_from_cosmo(
                 "is_retry": attempt_counts.get(order_ref, 1) > 1,
                 **_normalize_address(order.get("recipient_address", "")),
             }
+            # PII at-rest encryption (idempotent, safe on retry)
+            encrypt_pkg_pii(package)
             await db.packages.insert_one(package)
             total_new_packages += 1
             if package["status"] == "delivered":

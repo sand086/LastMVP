@@ -72,7 +72,11 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
             "status": "pending",
             "created_at": _now_iso(),
         })
+    # PII at-rest: encrypt before insert
     if pkg_docs:
+        from utils.pii import encrypt_pkg_pii
+        for d in pkg_docs:
+            encrypt_pkg_pii(d)
         await db.packages.insert_many(pkg_docs)
 
     logger.info(f"[routal] plan_created plan={plan_id} client={client_id} pkgs={len(pkg_docs)}")

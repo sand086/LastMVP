@@ -796,6 +796,9 @@ async def report_packages(
         pkg_query["status"] = status
 
     packages = await db.packages.find(pkg_query, {"_id": 0}).to_list(50000)
+    # PII at-rest: decrypt + apply role-based mask
+    from utils.pii import apply_pii_visibility_pkgs
+    apply_pii_visibility_pkgs(packages, user.get("role"))
 
     journeys_list = await db.journeys.find({"id": {"$in": journey_ids}}, {"_id": 0}).to_list(10000)
     journeys_map = {j["id"]: j for j in journeys_list}

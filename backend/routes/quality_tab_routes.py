@@ -143,6 +143,9 @@ async def get_packages_quality(
     packages = await db.packages.find(
         query, {"_id": 0}
     ).sort("evidence_score", 1).skip(skip).limit(page_size).to_list(page_size)
+    # PII at-rest: decrypt + role-based mask
+    from utils.pii import apply_pii_visibility_pkgs
+    apply_pii_visibility_pkgs(packages, user.get("role"))
 
     # Enrich packages with structured quality fields
     result = []
