@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     Loader2, ShieldAlert, ClipboardCheck, Clock, Users, Save,
     PlayCircle, RefreshCw, AlertTriangle, CheckCircle2, CalendarRange,
-    Download,
+    Download, CalendarSync,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import {
     listClientConfigs, getClients, patchClientConfig,
     runSelection, runSelectionRange, backfillSelectionFromRoutal,
-    getSelectionSummary,
+    reconcileJourneyDates, getSelectionSummary,
 } from '../../lib/api';
 
 const formatDate = (d) => {
@@ -136,6 +136,10 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
     const [running, setRunning] = useState(false);
     const [runningRange, setRunningRange] = useState(false);
     const [backfilling, setBackfilling] = useState(false);
+    const [reconciling, setReconciling] = useState(false);
+    const [reconcileResult, setReconcileResult] = useState(null);
+    const [reconcileDays, setReconcileDays] = useState(30);
+    const [showReconcile, setShowReconcile] = useState(false);
     const [showRange, setShowRange] = useState(false);
     const today = new Date().toISOString().slice(0, 10);
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
@@ -268,6 +272,48 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
             toast.error(err.response?.data?.detail || 'Error en backfill');
         } finally {
             setBackfilling(false);
+        }
+    };
+
+    const handleReconcileDryRun = async () => {
+        setReconciling(true);
+        setReconcileResult(null);
+        try {
+            const r = await reconcileJourneyDates(client.id, reconcileDays, true);
+            setReconcileResult(r.data);
+            const found = r.data.discrepancies_found || 0;
+            if (found === 0) {
+                toast.success(`Sin discrepancias en ${r.data.journeys_checked} journeys revisados`);
+            } else {
+                toast.warning(`${found} discrepancia(s) detectada(s) de ${r.data.journeys_checked} journeys`);
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error consultando reconciliación');
+        } finally {
+            setReconciling(false);
+        }
+    };
+
+    const handleReconcileApply = async () => {
+        if (!reconcileResult || !reconcileResult.discrepancies_found) {
+            toast.error('Primero corre un dry-run y revisa las discrepancias');
+            return;
+        }
+        const ok = window.confirm(
+            `Se actualizarán ${reconcileResult.discrepancies_found} journey(s) para que su fecha coincida con Routal.\n\n` +
+            `Esto afecta solo el campo journey.date (no toca paquetes ni incidencias).\n\n¿Continuar?`
+        );
+        if (!ok) return;
+        setReconciling(true);
+        try {
+            const r = await reconcileJourneyDates(client.id, reconcileDays, false);
+            setReconcileResult(r.data);
+            toast.success(`✔ ${r.data.fixed} journey(s) corregido(s) · ${r.data.errors} error(es)`);
+            onChanged?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error aplicando reconciliación');
+        } finally {
+            setReconciling(false);
         }
     };
 
@@ -431,6 +477,19 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                         Recuperar rango
                     </Button>
                 )}
+                {enabled && (
+                    <Button
+                        onClick={() => setShowReconcile(v => !v)}
+                        size="sm"
+                        variant="outline"
+                        className={showReconcile ? 'bg-slate-100' : ''}
+                        title="Compara journey.date contra Routal execution_date y corrige discrepancias"
+                        data-testid={`toggle-reconcile-${client.id}`}
+                    >
+                        <CalendarSync className="w-3.5 h-3.5 mr-1.5" />
+                        Reconciliar fechas
+                    </Button>
+                )}
                 <Button
                     onClick={() => onChanged?.()}
                     size="sm"
@@ -538,6 +597,103 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                                     ))}
                                 </div>
                             </details>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Reconcile dates panel */}
+            {enabled && showReconcile && (
+                <div className="mt-3 p-3 bg-violet-50 border border-violet-200 rounded-md" data-testid={`reconcile-panel-${client.id}`}>
+                    <div className="flex items-start gap-2 mb-3 text-xs text-violet-900">
+                        <CalendarSync className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <p className="font-semibold">Reconciliar fechas con Routal</p>
+                            <p className="text-[11px] mt-0.5 leading-relaxed">
+                                Compara <code className="bg-white px-1 rounded">journey.date</code> contra <code className="bg-white px-1 rounded">execution_date</code> de Routal (autoritativo). Detecta journeys con offset de fecha (típicamente 1 día por timezone/payload inconsistente). <strong>Dry-run primero</strong> para revisar; luego <strong>Aplicar fix</strong>.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                        <div className="space-y-1">
+                            <Label className="text-xs text-slate-700">Días hacia atrás</Label>
+                            <Input
+                                type="number"
+                                min="1"
+                                max="365"
+                                value={reconcileDays}
+                                onChange={(e) => setReconcileDays(Number(e.target.value) || 30)}
+                                className="font-mono"
+                                data-testid={`reconcile-days-${client.id}`}
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <Button
+                                onClick={handleReconcileDryRun}
+                                disabled={reconciling}
+                                size="sm"
+                                variant="outline"
+                                className="w-full"
+                                data-testid={`reconcile-dryrun-${client.id}`}
+                            >
+                                {reconciling ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <CalendarSync className="w-3.5 h-3.5 mr-1.5" />}
+                                Detectar discrepancias
+                            </Button>
+                        </div>
+                        <div className="flex items-end">
+                            <Button
+                                onClick={handleReconcileApply}
+                                disabled={reconciling || !reconcileResult || !reconcileResult.discrepancies_found}
+                                size="sm"
+                                className="w-full bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50"
+                                data-testid={`reconcile-apply-${client.id}`}
+                            >
+                                {reconciling ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+                                Aplicar fix
+                            </Button>
+                        </div>
+                    </div>
+
+                    {reconcileResult && (
+                        <div className="bg-white rounded p-2 text-xs space-y-2" data-testid={`reconcile-result-${client.id}`}>
+                            <div className="flex justify-between font-semibold text-slate-800">
+                                <span>
+                                    {reconcileResult.journeys_checked} journeys revisados ·{' '}
+                                    {reconcileResult.discrepancies_found > 0 ? (
+                                        <span className="text-amber-700">{reconcileResult.discrepancies_found} discrepancia(s)</span>
+                                    ) : (
+                                        <span className="text-emerald-700">sin discrepancias ✓</span>
+                                    )}
+                                </span>
+                                <span className="text-slate-500">
+                                    {reconcileResult.dry_run ? 'dry-run' : `${reconcileResult.fixed} corregidos`}
+                                    {reconcileResult.errors > 0 && ` · ${reconcileResult.errors} errores`}
+                                </span>
+                            </div>
+                            {reconcileResult.discrepancies && reconcileResult.discrepancies.length > 0 && (
+                                <div className="max-h-64 overflow-y-auto border-t border-slate-200 pt-1">
+                                    <table className="w-full text-[10px] font-mono">
+                                        <thead className="text-slate-500 sticky top-0 bg-white">
+                                            <tr>
+                                                <th className="text-left py-1">Driver</th>
+                                                <th className="text-left">Plan Routal</th>
+                                                <th className="text-center">LastMile</th>
+                                                <th className="text-center">→ Routal</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {reconcileResult.discrepancies.map(d => (
+                                                <tr key={d.journey_id} className="border-b border-slate-100 hover:bg-violet-50">
+                                                    <td className="py-1 truncate max-w-[160px]" title={d.driver_name}>{d.driver_name || '—'}</td>
+                                                    <td className="text-slate-500" title={d.label}>{d.routal_plan_id?.slice(0, 8)}…</td>
+                                                    <td className="text-center text-red-600">{d.current_date}</td>
+                                                    <td className="text-center text-emerald-700 font-semibold">{d.authoritative_date}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

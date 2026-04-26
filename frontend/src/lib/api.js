@@ -321,6 +321,12 @@ export const backfillSelectionFromRoutal = (clientId, dateFrom, dateTo, autoRun 
         null,
         { timeout: 180000 }
     );
+export const reconcileJourneyDates = (clientId, daysBack = 30, dryRun = true) =>
+    api.post(
+        `/selection/reconcile-dates/${clientId}?days_back=${daysBack}&dry_run=${dryRun}`,
+        null,
+        { timeout: 180000 }
+    );
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
 export const getDriverAuditHistory = (driverId, clientId, days = 30) =>
