@@ -176,13 +176,45 @@ def calculate_evidence_score(package: dict, has_incident: bool = False) -> dict 
     return calculate_evidence_score_rules(package, has_incident)
 
 
-async def _download_image_as_base64(url: str) -> Optional[str]:
-    """Download an image from URL and return base64 string."""
+async def _download_image_as_base64(url: str, db=None) -> Optional[str]:
+    """Download an image and return base64 string.
+
+    Two paths:
+      - Internal Routal proxy URLs (`/api/integrations/routal/image/{client_id}/{report_id}/{image_id}`):
+        bypass HTTP+auth and call `proxy_routal_image` directly. This benefits from
+        the on-disk cache and avoids auth/proxy round-trip.
+      - External absolute URLs (Kosmo S3/CDN, full Routal URLs, etc.): standard HTTP GET.
+    """
     try:
+        # Detect internal Routal proxy URLs (relative or absolute against our backend)
+        path = url
+        if "://" in url:
+            try:
+                from urllib.parse import urlparse
+                path = urlparse(url).path or url
+            except Exception:
+                path = url
+        if path.startswith("/api/integrations/routal/image/") and db is not None:
+            parts = path.split("/")
+            # /api/integrations/routal/image/{client_id}/{report_id}/{image_id}
+            if len(parts) >= 8:
+                client_id = parts[5]
+                report_id = parts[6]
+                image_id = parts[7]
+                from services.routal_sync import proxy_routal_image
+                result = await proxy_routal_image(db, client_id, report_id, image_id)
+                if result:
+                    content, _ = result
+                    if len(content) > 100:
+                        return base64.b64encode(content).decode("utf-8")
+            logger.warning(f"[ai-eval] could not parse Routal proxy URL: {url}")
+            return None
+
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             resp = await client.get(url)
             if resp.status_code == 200 and len(resp.content) > 100:
                 return base64.b64encode(resp.content).decode("utf-8")
+            logger.warning(f"[ai-eval] image fetch HTTP {resp.status_code} for {url[:80]}")
     except Exception as e:
         logger.warning(f"Failed to download image: {e}")
     return None
@@ -240,10 +272,15 @@ def _build_ai_result(ai_result: dict, package: dict, has_incident: bool, proof_u
 async def evaluate_single_package_ai(
     package: dict,
     has_incident: bool = False,
+    db=None,
 ) -> dict:
     """
     Evaluate a single package's evidence using AI Vision.
     Falls back to rule-based scoring if AI evaluation fails.
+
+    `db` is required when packages reference internal Routal proxy URLs
+    (`/api/integrations/routal/image/...`); without it those images can't be
+    fetched and we fall back to rules.
     """
     status = package.get("status")
     if status not in ("delivered", "failed"):
@@ -256,8 +293,9 @@ async def evaluate_single_package_ai(
     if not proof_urls:
         return _rules_fallback(package, has_incident)
 
-    # Download images concurrently
-    tasks = [_download_image_as_base64(url) for url in proof_urls[:6]]
+    # Download images concurrently. Pass db so internal Routal URLs are resolved
+    # via direct call to proxy_routal_image (no HTTP round-trip, uses disk cache).
+    tasks = [_download_image_as_base64(url, db=db) for url in proof_urls[:6]]
     base64_images = await asyncio.gather(*tasks)
     valid_images = [img for img in base64_images if img]
 
@@ -562,7 +600,7 @@ async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incide
         tn = (pkg.get("tracking_number") or "").strip().lower()
         has_incident = tn in incident_tracking_numbers if tn else False
         async with sem:
-            result = await evaluate_single_package_ai(pkg, has_incident)
+            result = await evaluate_single_package_ai(pkg, has_incident, db=db)
         if result and "error" not in result:
             await db.packages.update_one({"id": pkg["id"]}, {"$set": result})
         elif result and "error" in result:
@@ -653,7 +691,7 @@ async def evaluate_single_package_for_journey(
     has_incident = incident is not None
 
     if use_ai:
-        result = await evaluate_single_package_ai(pkg, has_incident)
+        result = await evaluate_single_package_ai(pkg, has_incident, db=db)
     else:
         result = calculate_evidence_score_rules(pkg, has_incident)
 
