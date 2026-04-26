@@ -114,12 +114,110 @@ async def update_status(
 @router.post("/{client_id}/test")
 async def test_integration(client_id: str, user: dict = Depends(get_current_user)):
     _require_developer(user)
+    import time as _time
+    t0 = _time.monotonic()
+
     svc = IntegrationService(db)
     full = await svc.get_client_integration(client_id)
     if not full:
         raise HTTPException(status_code=404, detail="Integración no encontrada")
-    if full.get("integration_type") != "routal":
-        return {"ok": False, "error": "El tipo manual/kosmo no requiere test de credenciales", "latency_ms": 0}
+
+    integration_type = full.get("integration_type")
+
+    # ─── Kosmo health: no creds; checks scraper freshness for this client ───
+    if integration_type == "kosmo":
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        # Last successful Kosmo sync on any journey for this client
+        last_journey = await db.journeys.find_one(
+            {"client_id": client_id, "last_kosmo_sync_at": {"$exists": True, "$ne": None}},
+            {"_id": 0, "last_kosmo_sync_at": 1},
+            sort=[("last_kosmo_sync_at", -1)],
+        )
+        last_sync_at = last_journey.get("last_kosmo_sync_at") if last_journey else None
+        last_sync_age_hours = None
+        if last_sync_at:
+            try:
+                ts = datetime.fromisoformat(str(last_sync_at).replace("Z", "+00:00"))
+                last_sync_age_hours = round((now - ts).total_seconds() / 3600, 2)
+            except Exception:
+                last_sync_age_hours = None
+
+        today = now.strftime("%Y-%m-%d")
+        active_today = await db.journeys.count_documents(
+            {"client_id": client_id, "date": today, "status": {"$in": ["in_progress", "planificada"]}},
+        )
+        pending_sync = await db.journeys.count_documents(
+            {"client_id": client_id, "next_sync_at": {"$exists": True, "$lt": now.isoformat()}},
+        )
+
+        if last_sync_age_hours is None:
+            scraper_status = "never_synced"
+        elif last_sync_age_hours <= 2:
+            scraper_status = "ok"
+        elif last_sync_age_hours <= 12:
+            scraper_status = "stale"
+        else:
+            scraper_status = "down"
+
+        return {
+            "ok": scraper_status in ("ok", "stale"),
+            "error": None if scraper_status in ("ok", "stale") else f"scraper {scraper_status}",
+            "latency_ms": round((_time.monotonic() - t0) * 1000),
+            "type": "kosmo",
+            "scraper_status": scraper_status,
+            "last_sync_at": last_sync_at,
+            "last_sync_age_hours": last_sync_age_hours,
+            "journeys_active_today": active_today,
+            "journeys_pending_sync": pending_sync,
+            "note": "Kosmo no requiere API key — operado por scraper interno",
+        }
+
+    # ─── Manual health: client uploads via Layouts (CSV/XLSX) ───
+    if integration_type == "manual":
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        thirty_d_ago = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        last_journey = await db.journeys.find_one(
+            {"client_id": client_id},
+            {"_id": 0, "date": 1, "created_at": 1},
+            sort=[("date", -1)],
+        )
+        latest_date = last_journey.get("date") if last_journey else None
+        latest_created = last_journey.get("created_at") if last_journey else None
+
+        total_journeys = await db.journeys.count_documents({"client_id": client_id})
+        recent_journeys = await db.journeys.count_documents(
+            {"client_id": client_id, "date": {"$gte": thirty_d_ago}},
+        )
+
+        if total_journeys == 0:
+            manual_status = "empty"
+            error = "Sin layouts cargados. Sube uno en /upload."
+        elif recent_journeys == 0:
+            manual_status = "dormant"
+            error = f"Sin actividad en últimos 30 días (último: {latest_date})"
+        else:
+            manual_status = "ok"
+            error = None
+
+        return {
+            "ok": manual_status == "ok",
+            "error": error,
+            "latency_ms": round((_time.monotonic() - t0) * 1000),
+            "type": "manual",
+            "manual_status": manual_status,
+            "total_journeys": total_journeys,
+            "recent_journeys_30d": recent_journeys,
+            "latest_journey_date": latest_date,
+            "latest_journey_created_at": latest_created,
+            "note": "Manual: cliente sube data vía Layouts (CSV/XLSX) — sin sync automático",
+        }
+
+    # ─── Routal: real API call with credentials ───
+    if integration_type != "routal":
+        return {"ok": False, "error": f"Tipo desconocido: {integration_type}", "latency_ms": 0}
 
     creds = full.get("credentials") or {}
     api_key = creds.get("routal_api_key")
@@ -133,7 +231,7 @@ async def test_integration(client_id: str, user: dict = Depends(get_current_user
         result = await rc.test_connection()
     finally:
         await rc.aclose()
-    return result
+    return {**result, "type": "routal"}
 
 
 @router.delete("/{client_id}")

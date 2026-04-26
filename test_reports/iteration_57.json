@@ -1,0 +1,43 @@
+{
+  "summary": "iter57 — Kosmo & Manual /test handlers + Manual seed v2 (14 entries, upsert-by-slug). 19/19 backend pytest pass + 100% frontend flows pass. iter55 (28) + iter56 (9) regressions still green. No bugs found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/integrations/{cid}/test (routal, no creds)", "issue": "When integration_type='routal' but credentials missing, response returns {ok:false, error, latency_ms} WITHOUT 'type:routal' field. Pre-existing iter55 inconsistency; not iter57 regression. Spec asked for type:'routal' in shape — only present on the success path."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter57_kosmo_manual_seed.py",
+    "/app/test_reports/pytest/iter57_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL minor polish: integration_routes.py:220 — when routal creds missing, include 'type':'routal' in response for shape consistency (cosmetic, not blocking)."
+  ],
+  "critical_code_review_comments": [
+    "OK: integration_routes.py:128-174 Kosmo branch correctly classifies scraper_status from last_sync_age_hours thresholds (2h ok, 12h stale, >12h down, none never_synced); ok=True iff status in (ok,stale).",
+    "OK: integration_routes.py:177-216 Manual branch counts journeys + 30d-recent + latest; manual_status ok/dormant/empty derived from total + recent counts; ok=True only when status='ok'.",
+    "OK: data/manual_seed.py exposes get_manuals_seed() returning exactly 14 dicts with valid block types {callout, section, table, tip, warning} and the 6 canonical sections.",
+    "OK: manual_routes.py:211 seed endpoint upserts by slug. force=False skips existing slugs (updated stays 0 on re-run); force=True overwrites meta + content + bumps version. Returns {inserted, updated, total_catalog, force} envelope.",
+    "OK: ClientIntegrationCard.jsx:347 button disabled gate `disabled={testing || (isRoutal && !summary.has_api_key)}` — Kosmo/Manual always enabled (when client_id exists); Routal still gated on api_key presence.",
+    "OK: ClientIntegrationCard.jsx:303-322 test-result renders type-specific UI: Kosmo shows 'scraper {status}' + sync_age + active/pending; Manual shows 'estado {status}' + total/recent_30d/latest_date; Routal fallback shows latency.",
+    "OK: RBAC consistent — _require_developer raises 403 for coordinator/agent/proveedor on /test; require_role(['coordinator','developer']) on /seed → 403 for agent/proveedor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter57_kosmo_manual_seed.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 iter57 + 28/28 iter55 regression + 9/9 iter56 regression)",
+    "frontend": "100% (manuales count=16, all 6 sections, navigation to auditorias-sel01 with content blocks, Kosmo/Manual test buttons enabled, test-result shows type-specific text)"
+  },
+  "test_credentials": "dev@me.mx, yael@me.mx, agente@me.mx, proveedor@me.mx — all LastMile2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "No seed data created. Cubbo client_id (0b6590e9-234a-4111-ae5a-e49ebdaf8261) was temporarily switched to kosmo/manual via POST /api/integrations and restored to integration_type='routal', status='active', webhook_secret='whsec_e2e_test_iter55' at module teardown via autouse fixture. iter55 e2e suite (28 tests) verified green AFTER iter57 run. Manuals seed force=true was executed leaving 14 catalog entries upserted; 2 legacy manuals (arquitectura-codigo, vista-movil) untouched → total live = 16.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter57 fully validated. test_iter57_kosmo_manual_seed.py is the regression suite — uses module-scoped autouse fixture to restore Cubbo to routal at teardown. Frontend validation: select trigger [data-testid='integration-type-{cid}'] → option role='option' with text 'Kosmo'/'Manual'/'Routal' → save-integration-{cid} → test-integration-{cid} → test-result-{cid}. Manuals: 16 cards, header text matches /(\\d+) manuales/, manual-card-{slug} clickable, /manuales/{slug} renders content list with valid block types. Pre-existing minor: routal /test missing 'type' key when creds absent (line 220). Cubbo's has_api_key is False after iter55 left it that way — Routal 'Probar conexión' button is disabled by design until api_key is saved.",
+  "rca of the issue": "N/A — no bugs found. iter57 implementation matches spec: (1) Kosmo handler queries journeys.last_kosmo_sync_at + counts active_today + pending_sync; (2) Manual handler queries journeys count + recent_30d + latest date; (3) seed force=false skips (updated=0), force=true upserts (updated=14 on re-run after first force); (4) catalog has exactly 14 entries spanning 6 sections; (5) frontend ClientIntegrationCard branches handleTest by type and renders type-specific test-result. iter55+iter56 regressions confirmed green."
+}

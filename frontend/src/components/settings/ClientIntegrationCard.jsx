@@ -89,8 +89,18 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
         try {
             const r = await testIntegration(client.id);
             setTestResult(r.data);
-            if (r.data.ok) toast.success(`Conexión OK (${r.data.latency_ms}ms)`);
-            else toast.error(`Error: ${r.data.error}`);
+            const t = r.data.type || 'routal';
+            if (r.data.ok) {
+                if (t === 'kosmo') {
+                    toast.success(`Kosmo OK · scraper ${r.data.scraper_status} · ${r.data.journeys_active_today} rutas hoy`);
+                } else if (t === 'manual') {
+                    toast.success(`Manual OK · ${r.data.recent_journeys_30d} rutas últimos 30d`);
+                } else {
+                    toast.success(`Conexión OK (${r.data.latency_ms}ms)`);
+                }
+            } else {
+                toast.error(`Error: ${r.data.error}`);
+            }
         } catch (err) {
             toast.error(err.response?.data?.detail || 'Error probando conexión');
         } finally {
@@ -289,9 +299,33 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
                     data-testid={`test-result-${client.id}`}
                 >
                     {testResult.ok ? <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
-                    <span>
-                        {testResult.ok ? `Conexión exitosa (${testResult.latency_ms}ms)` : testResult.error}
-                    </span>
+                    <div className="flex-1">
+                        {testResult.type === 'kosmo' && (
+                            <>
+                                <p className="font-semibold">Kosmo · scraper {testResult.scraper_status}</p>
+                                <p className="mt-0.5">
+                                    {testResult.last_sync_age_hours != null
+                                        ? `Último sync hace ${testResult.last_sync_age_hours}h · `
+                                        : 'Sin syncs · '}
+                                    {testResult.journeys_active_today} rutas activas hoy · {testResult.journeys_pending_sync} pendientes
+                                </p>
+                            </>
+                        )}
+                        {testResult.type === 'manual' && (
+                            <>
+                                <p className="font-semibold">Manual · estado {testResult.manual_status}</p>
+                                <p className="mt-0.5">
+                                    {testResult.total_journeys} rutas total · {testResult.recent_journeys_30d} últimos 30d
+                                    {testResult.latest_journey_date && ` · última: ${testResult.latest_journey_date}`}
+                                </p>
+                            </>
+                        )}
+                        {testResult.type !== 'kosmo' && testResult.type !== 'manual' && (
+                            <span>
+                                {testResult.ok ? `Conexión exitosa (${testResult.latency_ms}ms)` : testResult.error}
+                            </span>
+                        )}
+                    </div>
                 </div>
             )}
 
@@ -307,10 +341,10 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
                     {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
                     Guardar
                 </Button>
-                {isRoutal && existing.client_id && (
+                {existing.client_id && (
                     <Button
                         onClick={handleTest}
-                        disabled={testing || !summary.has_api_key}
+                        disabled={testing || (isRoutal && !summary.has_api_key)}
                         size="sm"
                         variant="outline"
                         data-testid={`test-integration-${client.id}`}
