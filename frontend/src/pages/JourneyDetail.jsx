@@ -753,6 +753,21 @@ const JourneyDetail = () => {
                                 {journey.cosmo_route_id}
                             </span>
                         )}
+                        {journey.source === 'routal' && journey.routal_plan_id && (
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard?.writeText(journey.routal_plan_id);
+                                    toast.success('Routal Plan ID copiado');
+                                }}
+                                className="text-xs text-slate-500 font-mono mt-1 inline-flex items-center gap-1 hover:text-slate-700 transition-colors"
+                                title={journey.routal_plan_label ? `${journey.routal_plan_label} · click para copiar` : 'click para copiar'}
+                                data-testid="routal-plan-id"
+                            >
+                                <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200 text-[10px] font-semibold uppercase">Routal</span>
+                                {journey.routal_plan_label || journey.routal_plan_id.slice(0, 12) + '…'}
+                                <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                            </button>
+                        )}
                         <p className="text-slate-500 text-xs sm:text-sm mt-1 flex flex-wrap items-center gap-x-1">
                             {journey.driver_name && (
                                 <span className="font-medium text-slate-700">{journey.driver_name} •</span>

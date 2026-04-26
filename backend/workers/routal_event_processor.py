@@ -52,6 +52,53 @@ def _extract_plan_date(payload: dict) -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _format_routal_address(location: dict) -> str:
+    """Build a single human-readable address string from Routal stop.location dict."""
+    if not isinstance(location, dict):
+        return ""
+    if location.get("label"):
+        return location["label"]
+    parts = []
+    street = location.get("street") or ""
+    house = location.get("house_number") or ""
+    if street:
+        parts.append(f"{street} {house}".strip())
+    if location.get("postal_code"):
+        parts.append(f"CP {location['postal_code']}")
+    if location.get("city"):
+        parts.append(location["city"])
+    if location.get("state"):
+        parts.append(location["state"])
+    return ", ".join(p for p in parts if p)
+
+
+def map_routal_stop_to_pkg_fields(stop: dict) -> dict:
+    """Extract recipient_name / address / phone / tracking from a Routal stop doc.
+    Used by _handle_plan_created_direct and routal_sync to keep field semantics
+    consistent. Mimics the Kosmo pipeline (which already populates these fields).
+    """
+    label = stop.get("label") or ""
+    recipient_name = (stop.get("recipient") or {}).get("name") or stop.get("recipient_name") or label
+    location = stop.get("location") or {}
+    address = stop.get("address") or _format_routal_address(location)
+    phone = stop.get("phone") or (stop.get("recipient") or {}).get("phone")
+    tracking = (
+        stop.get("tracking_number")
+        or stop.get("reference")
+        or stop.get("client_external_id")
+        or stop.get("fixed_id")
+        or stop.get("id")
+    )
+    order_ref = stop.get("client_external_id") or stop.get("fixed_id") or stop.get("id")
+    return {
+        "recipient_name": recipient_name,
+        "address": address,
+        "recipient_phone": phone,
+        "tracking_number": tracking,
+        "order_reference_id": order_ref,
+    }
+
+
 async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
     """Original behavior: insert Journey + Packages directly.
     Reused by selection worker after deciding a driver should be audited.
@@ -71,11 +118,13 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
     driver_name = (payload.get("driver") or {}).get("name") or payload.get("driver_name") or "Sin asignar"
     services = payload.get("services") or payload.get("stops") or []
     plan_date_str = _extract_plan_date(payload)
+    plan_label = payload.get("label") or payload.get("plan_label")
 
     journey_id = str(uuid.uuid4())
     journey = {
         "id": journey_id,
         "routal_plan_id": plan_id,
+        "routal_plan_label": plan_label,
         "source": "routal",
         "client_id": client_id,
         "driver_name": driver_name,
@@ -95,16 +144,19 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
         svc_id = svc.get("id") or svc.get("service_id")
         if not svc_id:
             continue
+        mapped = map_routal_stop_to_pkg_fields(svc)
         pkg_docs.append({
             "id": str(uuid.uuid4()),
             "journey_id": journey_id,
             "client_id": client_id,
             "source": "routal",
             "routal_service_id": svc_id,
-            "tracking_number": svc.get("tracking_number") or svc.get("reference") or svc_id,
+            "tracking_number": mapped["tracking_number"] or svc_id,
             "tracking_url": svc.get("tracking_url"),
-            "recipient_name": (svc.get("recipient") or {}).get("name") or svc.get("recipient_name"),
-            "address": svc.get("address") or (svc.get("location") or {}).get("address"),
+            "order_reference_id": mapped["order_reference_id"],
+            "recipient_name": mapped["recipient_name"],
+            "recipient_phone": mapped["recipient_phone"],
+            "address": mapped["address"],
             "status": "pending",
             "created_at": _now_iso(),
         })

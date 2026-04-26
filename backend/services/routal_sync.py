@@ -90,14 +90,45 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
         # Index packages by routal_service_id (was set at journey creation time)
         packages = await db.packages.find(
             {"journey_id": journey_id, "client_id": client_id},
-            {"_id": 0, "id": 1, "routal_service_id": 1, "status": 1, "kosmo_proof_count": 1},
+            {"_id": 0, "id": 1, "routal_service_id": 1, "status": 1, "kosmo_proof_count": 1,
+             "recipient_name": 1, "address": 1, "tracking_number": 1, "order_reference_id": 1},
         ).to_list(length=10000)
+
+        # If journey doesn't have routal_plan_label yet, persist it
+        plan_label = detail.get("label")
+        await db.journeys.update_one(
+            {"id": journey_id, "client_id": client_id, "routal_plan_label": {"$in": [None, ""]}},
+            {"$set": {"routal_plan_label": plan_label}} if plan_label else {"$set": {}},
+        )
+
+        from workers.routal_event_processor import map_routal_stop_to_pkg_fields
+        from utils.pii import encrypt_pkg_pii, ENC_PREFIX as _ENC_PREFIX
 
         delivered = 0
         failed = 0
         pending = 0
         unchanged = 0
         no_match = 0
+        recipient_filled = 0
+
+        def _build_recipient_update(stop, pkg):
+            """Returns dict with PII-encrypted recipient fields if missing locally."""
+            mapped = map_routal_stop_to_pkg_fields(stop)
+            ru = {}
+            current_recipient = pkg.get("recipient_name") or ""
+            if mapped.get("recipient_name") and not current_recipient.startswith(_ENC_PREFIX) and not current_recipient:
+                ru["recipient_name"] = mapped["recipient_name"]
+            current_addr = pkg.get("address") or ""
+            if mapped.get("address") and not current_addr.startswith(_ENC_PREFIX) and not current_addr:
+                ru["address"] = mapped["address"]
+            if not pkg.get("order_reference_id") and mapped.get("order_reference_id"):
+                ru["order_reference_id"] = mapped["order_reference_id"]
+            if ru:
+                pii_fields = {k: v for k, v in ru.items() if k in ("recipient_name", "address", "recipient_phone")}
+                if pii_fields:
+                    encrypt_pkg_pii(pii_fields)
+                    ru.update(pii_fields)
+            return ru
 
         for pkg in packages:
             svc_id = pkg.get("routal_service_id")
@@ -130,7 +161,15 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
                         update["routal_signature_url"] = evidence["signature_url"]
                     if evidence.get("report_id"):
                         update["routal_report_id"] = evidence["report_id"]
-                if pkg.get("status") == "delivered" and pkg.get("kosmo_proof_count") == evidence.get("proof_count"):
+                ru = _build_recipient_update(stop, pkg)
+                update.update(ru)
+                if ru:
+                    recipient_filled += 1
+                if (
+                    pkg.get("status") == "delivered"
+                    and pkg.get("kosmo_proof_count") == evidence.get("proof_count")
+                    and not ru
+                ):
                     unchanged += 1
                     continue
                 await db.packages.update_one(
@@ -145,7 +184,8 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
                     reports[0] if reports else None,
                 )
                 evidence = _extract_evidence(failed_report, client_id, api_base) if failed_report else {}
-                if pkg.get("status") == "failed":
+                ru = _build_recipient_update(stop, pkg)
+                if pkg.get("status") == "failed" and not ru:
                     unchanged += 1
                     continue
                 update = {
@@ -158,6 +198,9 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
                 if evidence:
                     update["kosmo_proof_urls"] = evidence["proof_urls"]
                     update["kosmo_proof_count"] = evidence["proof_count"]
+                update.update(ru)
+                if ru:
+                    recipient_filled += 1
                 await db.packages.update_one(
                     {"id": pkg["id"], "client_id": client_id},
                     {"$set": update},
@@ -165,6 +208,15 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
                 failed += 1
             else:
                 pending += 1
+                # Even for pending stops, fill in destination if empty
+                ru = _build_recipient_update(stop, pkg)
+                if ru:
+                    ru["routal_synced_at"] = _now_iso()
+                    await db.packages.update_one(
+                        {"id": pkg["id"], "client_id": client_id},
+                        {"$set": ru},
+                    )
+                    recipient_filled += 1
 
         # Recalculate journey counters
         agg = await db.packages.aggregate([
@@ -186,6 +238,7 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
             "ok": True,
             "journey_id": journey_id,
             "plan_id": plan_id,
+            "plan_label": plan_label,
             "stops_in_routal": len(stops_by_id),
             "packages_in_journey": len(packages),
             "delivered_synced": delivered,
@@ -193,6 +246,7 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
             "still_pending": pending,
             "unchanged": unchanged,
             "no_routal_match": no_match,
+            "recipient_filled": recipient_filled,
         }
     finally:
         try:

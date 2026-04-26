@@ -20,6 +20,7 @@ from middleware import AuditMiddleware, SecurityHeadersMiddleware
 from kosmo_sync import start_periodic_sync, stop_periodic_sync, close_http_client
 from ai_eval_worker import start_ai_eval_worker, stop_ai_eval_worker
 from workers.routal_selection_worker import start_selection_scheduler, stop_selection_scheduler
+from workers.routal_sync_worker import start_routal_sync_worker, stop_routal_sync_worker
 from ws_manager import ws_manager
 
 from routes import (
@@ -73,10 +74,11 @@ async def lifespan(app: FastAPI):
     # Single-worker deploys (current preview) always become leader.
     elected = await acquire_leader(db, role="bg_tasks")
     if elected:
-        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler")
+        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync")
         start_periodic_sync(db)
         start_ai_eval_worker(db)
         start_selection_scheduler(db)
+        start_routal_sync_worker(db)
     else:
         logger.info(f"[bg] Worker {worker_id()} is FOLLOWER — skipping background tasks")
 
@@ -87,6 +89,7 @@ async def lifespan(app: FastAPI):
         stop_periodic_sync()
         stop_ai_eval_worker()
         stop_selection_scheduler()
+        stop_routal_sync_worker()
         await release_leader(db, role="bg_tasks")
     await close_http_client()
     mongo_client.close()
