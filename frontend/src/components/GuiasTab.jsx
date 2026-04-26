@@ -4,6 +4,7 @@ import {
     evaluatePackageEvidence,
     evaluateAllEvidence,
     batchRescrapeJourney,
+    syncJourneyFromRoutal,
     reviewPackageWithNote,
     evaluateConfidence,
     reviewDiscrepancy,
@@ -268,6 +269,21 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
         finally { setSyncing(false); }
     };
 
+    const handleResyncRoutal = async () => {
+        setSyncing(true);
+        try {
+            const res = await syncJourneyFromRoutal(journey.id);
+            const d = res.data;
+            toast.success(
+                `Routal sync: ${d.delivered_synced} entregadas, ${d.failed_synced} fallidas, ${d.still_pending} pendientes`
+                + (d.no_routal_match > 0 ? ` · ${d.no_routal_match} sin match` : '')
+            );
+            onRefreshJourney?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error sincronizando con Routal');
+        } finally { setSyncing(false); }
+    };
+
     const openCarousel = (pkg, startIndex = 0) => {
         const urls = pkg.kosmo_proof_urls || [];
         const photoAnalyses = pkg.evidence_detail?.photos_analysis || [];
@@ -317,9 +333,15 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                 <h3 className="font-heading text-base font-semibold text-slate-800">Guías de la ruta</h3>
                 {!isReadOnly && (
                     <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" onClick={handleResync} disabled={syncing} data-testid="resync-kosmo-btn">
-                            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncing ? 'animate-spin' : ''}`} /> Re-sincronizar Kosmo
-                        </Button>
+                        {journey.source === 'routal' ? (
+                            <Button variant="outline" size="sm" onClick={handleResyncRoutal} disabled={syncing} data-testid="resync-routal-btn">
+                                <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncing ? 'animate-spin' : ''}`} /> Re-sincronizar Routal
+                            </Button>
+                        ) : (
+                            <Button variant="outline" size="sm" onClick={handleResync} disabled={syncing} data-testid="resync-kosmo-btn">
+                                <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncing ? 'animate-spin' : ''}`} /> Re-sincronizar Kosmo
+                            </Button>
+                        )}
                         <Button variant="outline" size="sm" onClick={handleEvaluateConfidence} disabled={evaluatingConfidence} data-testid="evaluate-confidence-btn">
                             {evaluatingConfidence ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <ShieldAlert className="w-3.5 h-3.5 mr-1.5" />}
                             Evaluar confianza

@@ -327,6 +327,8 @@ export const reconcileJourneyDates = (clientId, daysBack = 30, dryRun = true) =>
         null,
         { timeout: 180000 }
     );
+export const syncJourneyFromRoutal = (journeyId) =>
+    api.post(`/integrations/routal/sync-journey/${journeyId}`, null, { timeout: 60000 });
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
 export const getDriverAuditHistory = (driverId, clientId, days = 30) =>

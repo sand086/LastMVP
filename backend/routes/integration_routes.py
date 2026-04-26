@@ -246,3 +246,45 @@ async def delete_integration(client_id: str, user: dict = Depends(get_current_us
         raise HTTPException(status_code=404, detail="Integración no encontrada")
     logger.warning(f"[integrations] {user.get('email')} soft-deleted client {client_id}")
     return {"ok": True}
+
+
+# ─────────────── Routal sync (R00C / iter64) ───────────────
+
+@router.post("/routal/sync-journey/{journey_id}")
+async def sync_journey_from_routal(
+    journey_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Pulls live state of a journey's stops from Routal API and reconciles
+    onto LastMile packages (status + evidence). Used when webhook deliveries
+    are missed or arrived without evidence. Idempotent.
+    """
+    if user.get("role") not in {"developer", "coordinator", "agent"}:
+        raise HTTPException(status_code=403, detail="Solo developer/coordinator/agent pueden sincronizar")
+    from services.routal_sync import sync_journey_from_routal as _do_sync
+    api_base = os.environ.get("REACT_APP_BACKEND_URL", "")
+    summary = await _do_sync(db, journey_id, api_base)
+    if not summary.get("ok"):
+        raise HTTPException(status_code=400, detail=summary.get("error", "sync failed"))
+    return summary
+
+
+@router.get("/routal/image/{client_id}/{report_id}/{image_id}")
+async def get_routal_image(
+    client_id: str,
+    report_id: str,
+    image_id: str,
+    kind: str = "image",
+    user: dict = Depends(get_current_user),
+):
+    """Authenticated proxy: fetches Routal report image bytes using the client's
+    encrypted API key (never exposed to browser). Frontend can use this URL
+    directly in <img src=...> with the user's session cookie.
+    """
+    from fastapi import Response
+    from services.routal_sync import proxy_routal_image
+    result = await proxy_routal_image(db, client_id, report_id, image_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Imagen no disponible en Routal")
+    content, ctype = result
+    return Response(content=content, media_type=ctype, headers={"Cache-Control": "private, max-age=3600"})
