@@ -87,17 +87,20 @@ class RoutalClient:
             return {"raw": r.text}
 
     async def get_plan(self, plan_id: str) -> dict:
-        return await self._request("GET", f"/plans/{plan_id}")
+        # Routal v2 uses singular `/plan/{id}` for retrieval
+        return await self._request("GET", f"/v2/plan/{plan_id}")
 
     async def list_plans(self, date: str, page: int = 1, page_size: int = 50) -> list:
-        data = await self._request("GET", "/plans", params={"date": date, "page": page, "page_size": page_size})
+        # Routal v2: GET /v2/plans (plural for list)
+        data = await self._request("GET", "/v2/plans", params={"date": date, "page": page, "page_size": page_size})
         # Response shape varies; normalize to list
         if isinstance(data, list):
             return data
         return data.get("data") or data.get("plans") or []
 
     async def get_plan_stops(self, plan_id: str) -> list:
-        data = await self._request("GET", f"/plans/{plan_id}/stops")
+        # Routal v2 swagger: GET /v2/plan/{id}/stops (singular plan)
+        data = await self._request("GET", f"/v2/plan/{plan_id}/stops")
         if isinstance(data, list):
             return data
         return data.get("data") or data.get("stops") or []
@@ -107,7 +110,7 @@ class RoutalClient:
         import time
         t0 = time.monotonic()
         try:
-            await self._request("GET", "/plans", params={"page_size": 1})
+            await self._request("GET", "/v2/plans", params={"page_size": 1})
             return {"ok": True, "error": None, "latency_ms": round((time.monotonic() - t0) * 1000)}
         except RoutalAuthError as e:
             return {"ok": False, "error": f"auth: {e}", "latency_ms": round((time.monotonic() - t0) * 1000)}
