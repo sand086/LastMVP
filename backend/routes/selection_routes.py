@@ -50,9 +50,25 @@ async def run_selection(
 ):
     _require_role(user, ["developer", "coordinator"])
     target = _parse_date(date)
+
     cfg = await db.client_config.find_one({"client_id": client_id}, {"_id": 0})
     if not cfg:
-        raise HTTPException(status_code=404, detail=f"client_config no existe para {client_id}")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Este cliente no tiene configuración SEL01. Ve a Settings → Auditorías, "
+                "selecciona el cliente, activa el switch 'Selección habilitada' y guarda. "
+                "Luego intenta de nuevo."
+            ),
+        )
+    if not cfg.get("selection_enabled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"El cliente '{cfg.get('client_name', client_id)}' tiene selección desactivada (auto-crear legacy). Activa 'Selección habilitada' primero.",
+        )
+    if not cfg.get("active", True):
+        raise HTTPException(status_code=400, detail="Cliente marcado inactivo en client_config.")
+
     summary = await run_daily_selection(db, client_id, target_date=target)
     if not summary.get("ok"):
         raise HTTPException(status_code=400, detail=summary.get("error", "selection failed"))
@@ -68,12 +84,10 @@ async def run_selection_range(
 ):
     """Ejecuta el algoritmo de selección día por día sobre un rango de fechas.
 
-    Útil para recuperar rutas históricas que NO fueron procesadas (ej. por bug,
-    pod down, o porque selection_enabled estaba apagado entonces). Re-ejecutar
-    sobre fechas ya procesadas es idempotente: drivers ya marcados 'selected'
-    se preservan, los Journeys NO se duplican, los 'unselected' se recalculan.
-
-    Limita a 90 días para evitar runs accidentales muy grandes.
+    IMPORTANTE: solo procesa planes que ya están staged en `routal_daily_plans`,
+    es decir, planes que llegaron vía webhook Routal `plan.created` cuando
+    `selection_enabled=true` estaba activo. NO re-procesa journeys creados
+    directamente por Cosmo o Manual.
     """
     _require_role(user, ["developer", "coordinator"])
 
@@ -87,7 +101,21 @@ async def run_selection_range(
 
     cfg = await db.client_config.find_one({"client_id": client_id}, {"_id": 0})
     if not cfg:
-        raise HTTPException(status_code=404, detail=f"client_config no existe para {client_id}")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Este cliente no tiene configuración SEL01. Ve a Settings → Auditorías, "
+                "selecciona el cliente, activa el switch 'Selección habilitada' y guarda. "
+                "Luego intenta de nuevo."
+            ),
+        )
+    if not cfg.get("selection_enabled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"El cliente '{cfg.get('client_name', client_id)}' tiene selección desactivada (auto-crear legacy). Activa 'Selección habilitada' primero.",
+        )
+    if not cfg.get("active", True):
+        raise HTTPException(status_code=400, detail="Cliente marcado inactivo en client_config.")
 
     from datetime import timedelta as _td
     daily_results = []
