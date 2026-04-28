@@ -31,6 +31,150 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@router.post("/integrations/routal/restore-orphan-incidents/{client_id}")
+async def restore_orphan_incidents(
+    client_id: str,
+    dry_run: bool = Query(True, description="Si true, no aplica cambios — solo reporta qué se haría"),
+    branch_id: Optional[str] = Query(None, description="Si se da, limita a una sucursal"),
+    user: dict = Depends(get_current_user),
+):
+    """Restaura incidencias huérfanas tras la migración legacy iter79.
+
+    **Por qué existen huérfanas:** El schema `incidents` usa `tracking_number` (no
+    `package_id`). El UPDATE de iter79 buscaba `incidents.package_id ∈ pkg_ids`
+    → matched ZERO. Resultado: todas las incidencias quedaron apuntando a la
+    journey legacy, que ahora está oculta por el filtro `migrated_to_journeys`.
+
+    **Estrategia:**
+      1. Encontrar journeys legacy migradas (`migrated_to_journeys[]` set)
+      2. Por cada incidencia apuntando a una de esas legacy:
+         a) Buscar el package con ese `tracking_number` en alguna de las journeys
+            nuevas (legacy.migrated_to_journeys[])
+         b) Si encuentra → mover incidencia a esa nueva journey
+         c) Si no → fallback: primera nueva journey del split
+
+    Returns: counts + sample of changes.
+    """
+    if user.get("role") not in {"developer", "coordinator"}:
+        raise HTTPException(status_code=403, detail="Solo developer/coordinator pueden restaurar")
+
+    # Find legacy migrated journeys for this client/branch
+    legacy_query = {
+        "client_id": client_id,
+        "migrated_to_journeys": {"$exists": True, "$ne": []},
+    }
+    if branch_id:
+        legacy_query["branch_id"] = branch_id
+
+    legacy_journeys = [
+        j async for j in db.journeys.find(
+            legacy_query,
+            {"_id": 0, "id": 1, "migrated_to_journeys": 1, "date": 1, "driver_name": 1},
+        )
+    ]
+    if not legacy_journeys:
+        return {
+            "client_id": client_id,
+            "dry_run": dry_run,
+            "legacy_journeys_inspected": 0,
+            "orphan_incidents_found": 0,
+            "restored_by_tracking": 0,
+            "restored_by_fallback": 0,
+            "could_not_restore": 0,
+            "details": [],
+        }
+
+    legacy_ids = [j["id"] for j in legacy_journeys]
+    legacy_to_new_map = {j["id"]: j.get("migrated_to_journeys", []) for j in legacy_journeys}
+
+    # Find orphan incidents
+    orphan_incidents = [
+        inc async for inc in db.incidents.find(
+            {"journey_id": {"$in": legacy_ids}},
+            {"_id": 0, "id": 1, "journey_id": 1, "tracking_number": 1, "incident_type": 1},
+        )
+    ]
+
+    restored_by_tracking = 0
+    restored_by_fallback = 0
+    could_not_restore = 0
+    details = []
+    bulk_updates = []
+
+    for inc in orphan_incidents:
+        legacy_id = inc["journey_id"]
+        new_journeys_for_this_legacy = legacy_to_new_map.get(legacy_id, [])
+        if not new_journeys_for_this_legacy:
+            could_not_restore += 1
+            details.append({
+                "incident_id": inc["id"],
+                "tracking_number": inc.get("tracking_number"),
+                "status": "could_not_restore",
+                "reason": "legacy has no migrated_to_journeys",
+            })
+            continue
+
+        target_journey = None
+        match_method = None
+        tn = inc.get("tracking_number")
+        if tn:
+            # Try to find the package with this tracking_number among the new journeys
+            pkg = await db.packages.find_one(
+                {
+                    "tracking_number": tn,
+                    "journey_id": {"$in": new_journeys_for_this_legacy},
+                },
+                {"_id": 0, "journey_id": 1},
+            )
+            if pkg and pkg.get("journey_id"):
+                target_journey = pkg["journey_id"]
+                match_method = "tracking_number"
+
+        if not target_journey:
+            # Fallback to first new journey
+            target_journey = new_journeys_for_this_legacy[0]
+            match_method = "fallback_first"
+
+        if match_method == "tracking_number":
+            restored_by_tracking += 1
+        else:
+            restored_by_fallback += 1
+
+        bulk_updates.append((inc["id"], target_journey))
+        details.append({
+            "incident_id": inc["id"][:8],
+            "tracking_number": tn,
+            "type": inc.get("incident_type"),
+            "from_legacy": legacy_id[:8],
+            "to_journey": target_journey[:8],
+            "method": match_method,
+        })
+
+    if not dry_run and bulk_updates:
+        # Apply updates
+        for inc_id, new_jid in bulk_updates:
+            await db.incidents.update_one(
+                {"id": inc_id},
+                {"$set": {"journey_id": new_jid, "_restored_at": _now_iso()}},
+            )
+        logger.info(
+            f"[restore-incidents] client={client_id} restored="
+            f"{len(bulk_updates)} (tracking={restored_by_tracking} fallback={restored_by_fallback})"
+        )
+
+    return {
+        "client_id": client_id,
+        "branch_id": branch_id,
+        "dry_run": dry_run,
+        "legacy_journeys_inspected": len(legacy_journeys),
+        "orphan_incidents_found": len(orphan_incidents),
+        "restored_by_tracking": restored_by_tracking,
+        "restored_by_fallback": restored_by_fallback,
+        "could_not_restore": could_not_restore,
+        "details": details[:200],
+    }
+
+
 @router.post("/integrations/routal/migrate-legacy-journeys/{client_id}")
 async def migrate_legacy_journeys(
     client_id: str,
@@ -223,11 +367,20 @@ async def migrate_legacy_journeys(
                                 "updated_at": _now_iso(),
                             }},
                         )
-                        # Also propagate to incidents
-                        await db.incidents.update_many(
-                            {"package_id": {"$in": pkg_ids}, "journey_id": legacy_id},
-                            {"$set": {"journey_id": doc["id"]}},
-                        )
+                        # Move incidents matched by tracking_number → new journey
+                        # NOTE: incidents schema uses tracking_number (not package_id).
+                        # iter79 originally tried package_id and matched 0 → orphan bug.
+                        tracking_nums = [
+                            p.get("tracking_number") for p in pkgs if p.get("tracking_number")
+                        ]
+                        if tracking_nums:
+                            await db.incidents.update_many(
+                                {
+                                    "tracking_number": {"$in": tracking_nums},
+                                    "journey_id": legacy_id,
+                                },
+                                {"$set": {"journey_id": doc["id"]}},
+                            )
                         packages_moved += len(pkgs)
 
                 # Handle leftover packages (stops without route_id or unknown) — keep in legacy

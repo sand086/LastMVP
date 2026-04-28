@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import {
     upsertIntegration, updateIntegrationStatus, testIntegration,
     deleteIntegration, getRoutalWebhookStatus, migrateRoutalLegacyJourneys,
+    restoreOrphanIncidents,
 } from '../../lib/api';
 
 const PLACEHOLDER_MASK = '••••••••••••';
@@ -45,6 +46,32 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
     const [migrateRunning, setMigrateRunning] = useState(false);
     const [migrateDryResult, setMigrateDryResult] = useState(null);
     const [migrateAppliedResult, setMigrateAppliedResult] = useState(null);
+    // iter82 — Restaurar incidencias huérfanas (bug iter79)
+    const [restoreRunning, setRestoreRunning] = useState(false);
+    const [restoreResult, setRestoreResult] = useState(null);
+
+    const handleRestoreIncidents = async (dry = true) => {
+        if (!existing.client_id) return;
+        setRestoreRunning(true);
+        if (dry) setRestoreResult(null);
+        try {
+            const r = await restoreOrphanIncidents(existing.client_id, dry, null);
+            setRestoreResult(r.data);
+            const found = r.data.orphan_incidents_found || 0;
+            if (dry) {
+                if (found === 0) toast.success('Sin incidencias huérfanas');
+                else toast.warning(`${found} incidencia(s) huérfana(s) detectada(s)`);
+            } else {
+                const restored = (r.data.restored_by_tracking || 0) + (r.data.restored_by_fallback || 0);
+                toast.success(`✔ ${restored} incidencia(s) restaurada(s) (${r.data.restored_by_tracking} tracking + ${r.data.restored_by_fallback} fallback)`);
+                onChanged?.();
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error restaurando incidencias');
+        } finally {
+            setRestoreRunning(false);
+        }
+    };
 
     const handleMigrateDryRun = async () => {
         if (!existing.client_id) return;
@@ -568,6 +595,81 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
                             )}
                         </div>
                     )}
+
+                    {/* iter82 — Restaurar incidencias huérfanas */}
+                    <div className="mt-3 pt-3 border-t border-amber-200">
+                        <div className="flex items-start gap-2 mb-2 text-xs text-amber-900">
+                            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                            <div>
+                                <p className="font-semibold">Restaurar incidencias huérfanas</p>
+                                <p className="text-[11px] mt-0.5 leading-relaxed">
+                                    Si tras "Aplicar migración" notaste incidencias faltantes en
+                                    rutas migradas, este fix las re-asigna a las journeys nuevas
+                                    matcheando por <code className="bg-white px-1 rounded">tracking_number</code>.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                onClick={() => handleRestoreIncidents(true)}
+                                disabled={restoreRunning}
+                                size="sm"
+                                variant="outline"
+                                className="flex-1"
+                                data-testid={`restore-incidents-dryrun-${client.id}`}
+                            >
+                                {restoreRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
+                                Detectar huérfanas
+                            </Button>
+                            <Button
+                                onClick={() => handleRestoreIncidents(false)}
+                                disabled={restoreRunning || !restoreResult || !restoreResult.orphan_incidents_found}
+                                size="sm"
+                                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50"
+                                data-testid={`restore-incidents-apply-${client.id}`}
+                            >
+                                {restoreRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+                                Restaurar incidencias
+                            </Button>
+                        </div>
+                        {restoreResult && (
+                            <div
+                                className="bg-white rounded p-2 text-xs mt-2"
+                                data-testid={`restore-incidents-result-${client.id}`}
+                            >
+                                <div className="flex items-center justify-between font-semibold text-slate-800 mb-1">
+                                    <span>
+                                        {restoreResult.orphan_incidents_found} huérfana(s) detectada(s) ·{' '}
+                                        {restoreResult.legacy_journeys_inspected} journeys legacy
+                                    </span>
+                                    <span className="text-slate-500 text-[10px] uppercase">
+                                        {restoreResult.dry_run ? 'dry-run' : 'aplicado'}
+                                    </span>
+                                </div>
+                                {restoreResult.orphan_incidents_found > 0 && (
+                                    <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
+                                        <div className="bg-emerald-50 rounded px-2 py-1">
+                                            <div className="text-slate-500">Por tracking</div>
+                                            <div className="font-bold text-emerald-700">{restoreResult.restored_by_tracking}</div>
+                                        </div>
+                                        <div className="bg-blue-50 rounded px-2 py-1">
+                                            <div className="text-slate-500">Por fallback</div>
+                                            <div className="font-bold text-blue-700">{restoreResult.restored_by_fallback}</div>
+                                        </div>
+                                        <div className="bg-red-50 rounded px-2 py-1">
+                                            <div className="text-slate-500">Sin restaurar</div>
+                                            <div className="font-bold text-red-700">{restoreResult.could_not_restore}</div>
+                                        </div>
+                                    </div>
+                                )}
+                                {restoreResult.orphan_incidents_found === 0 && (
+                                    <p className="text-emerald-700 text-[11px]">
+                                        ✓ No hay incidencias huérfanas. Todas apuntan a journeys correctas.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
         </div>

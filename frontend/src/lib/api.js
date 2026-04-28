@@ -361,6 +361,15 @@ export const migrateRoutalLegacyJourneys = (clientId, daysBack = 30, dryRun = tr
         { timeout: 120000 },
     );
 };
+export const restoreOrphanIncidents = (clientId, dryRun = true, branchId = null) => {
+    const params = new URLSearchParams({ dry_run: String(dryRun) });
+    if (branchId) params.append('branch_id', branchId);
+    return api.post(
+        `/integrations/routal/restore-orphan-incidents/${clientId}?${params.toString()}`,
+        null,
+        { timeout: 60000 },
+    );
+};
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
 export const getBranchHistory = (clientId, days = 14) =>
