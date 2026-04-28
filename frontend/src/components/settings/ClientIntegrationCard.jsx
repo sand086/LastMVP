@@ -549,6 +549,27 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
                                     {migrateAppliedResult ? `aplicado · ${migrateAppliedResult.migrated} migradas` : 'dry-run'}
                                 </span>
                             </div>
+                            {migrateDryResult.incidents_pre_check && migrateDryResult.incidents_pre_check.checked > 0 && (
+                                <div
+                                    className={`rounded px-2 py-1.5 text-[11px] ${
+                                        migrateDryResult.incidents_pre_check.would_be_orphan > 0
+                                            ? 'bg-red-50 border border-red-200 text-red-900'
+                                            : 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+                                    }`}
+                                    data-testid={`incidents-pre-check-${client.id}`}
+                                >
+                                    <strong>FIX 2 · Validación incidencias:</strong>{' '}
+                                    {migrateDryResult.incidents_pre_check.checked} verificadas ·{' '}
+                                    {migrateDryResult.incidents_pre_check.covered} OK ·{' '}
+                                    <strong>{migrateDryResult.incidents_pre_check.would_be_orphan} quedarían huérfanas</strong>
+                                    {migrateDryResult.incidents_pre_check.would_be_orphan > 0 && (
+                                        <p className="mt-1 text-[10px] italic">
+                                            ⚠ Apply automáticamente skipea legacies con orphan-risk.
+                                            Para forzar, usa el flag <code>force=true</code> (no recomendado).
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                             {migrateDryResult.scanned === 0 && (
                                 <p className="text-emerald-700 text-[11px]">
                                     ✓ Sin journeys legacy en últimos {migrateDryResult.days_back} días.

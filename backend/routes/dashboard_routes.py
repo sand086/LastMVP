@@ -58,8 +58,11 @@ async def get_dashboard_stats(
         base_query = {"date": {"$gte": today, "$lt": _next_day(today)}}
 
     base_query = apply_assignment_filter(user, base_query)
-    # Hide legacy plan-based Routal journeys (iter79 migration)
-    base_query["migrated_to_journeys"] = {"$exists": False}
+    # FIX 3 (iter83): Hide legacy only if no orphan incidents remain
+    base_query["$or"] = [
+        {"migrated_to_journeys": {"$exists": False}},
+        {"_legacy_incidents_remaining": {"$gt": 0}},
+    ]
 
     # Parallel: count journeys by status + fetch all journeys
     active_q = {**base_query, "status": "in_progress"}
@@ -129,7 +132,10 @@ async def get_incidents_breakdown(
         date_to = date_from
     j_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}}
     j_query = apply_assignment_filter(user, j_query)
-    j_query["migrated_to_journeys"] = {"$exists": False}
+    j_query["$or"] = [
+        {"migrated_to_journeys": {"$exists": False}},
+        {"_legacy_incidents_remaining": {"$gt": 0}},
+    ]
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(500)
     journey_ids = [j["id"] for j in journeys]
     incidents = await db.incidents.find(
@@ -165,7 +171,10 @@ async def get_provider_comparison(
         j_query = {
             "provider_id": provider["id"],
             "date": {"$gte": date_from, "$lt": _next_day(date_to)},
-            "migrated_to_journeys": {"$exists": False},
+            "$or": [
+                {"migrated_to_journeys": {"$exists": False}},
+                {"_legacy_incidents_remaining": {"$gt": 0}},
+            ],
         }
         if assigned_clients:
             j_query["client_id"] = {"$in": assigned_clients}

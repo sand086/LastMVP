@@ -363,7 +363,7 @@ async def generate_report(data: ReportRequest, user: dict = Depends(get_current_
     j_query = _apply_id_filter(j_query, "provider_id", data.provider_id)
     j_query = _apply_id_filter(j_query, "branch_id", data.branch_id)
     # Hide legacy plan-based Routal journeys (iter79 migration)
-    j_query["migrated_to_journeys"] = {"$exists": False}
+    j_query["$or"] = [{"migrated_to_journeys": {"$exists": False}}, {"_legacy_incidents_remaining": {"$gt": 0}}]
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     if not journeys:
@@ -488,7 +488,7 @@ async def generate_report_excel(data: ReportRequest, user: dict = Depends(get_cu
     j_query = _apply_id_filter(j_query, "client_id", data.client_id)
     j_query = _apply_id_filter(j_query, "provider_id", data.provider_id)
     j_query = _apply_id_filter(j_query, "branch_id", data.branch_id)
-    j_query["migrated_to_journeys"] = {"$exists": False}
+    j_query["$or"] = [{"migrated_to_journeys": {"$exists": False}}, {"_legacy_incidents_remaining": {"$gt": 0}}]
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     journey_ids = [j["id"] for j in journeys]
@@ -593,7 +593,7 @@ async def export_journeys(
     query = _apply_id_filter(query, "client_id", client_id)
     query = _apply_id_filter(query, "provider_id", provider_id)
     query = _apply_id_filter(query, "branch_id", branch_id)
-    query["migrated_to_journeys"] = {"$exists": False}
+    query["$or"] = [{"migrated_to_journeys": {"$exists": False}}, {"_legacy_incidents_remaining": {"$gt": 0}}]
 
     journeys = await db.journeys.find(query, {"_id": 0}).to_list(1000)
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
@@ -737,7 +737,7 @@ async def report_journeys(
     query = _apply_id_filter(query, "client_id", client_id)
     query = _apply_id_filter(query, "provider_id", provider_id)
     query = _apply_id_filter(query, "branch_id", branch_id)
-    query["migrated_to_journeys"] = {"$exists": False}
+    query["$or"] = [{"migrated_to_journeys": {"$exists": False}}, {"_legacy_incidents_remaining": {"$gt": 0}}]
     if status:
         query["status"] = status
 
@@ -815,7 +815,7 @@ async def report_packages(
     j_query = _apply_id_filter(j_query, "client_id", client_id)
     j_query = _apply_id_filter(j_query, "provider_id", provider_id)
     j_query = _apply_id_filter(j_query, "branch_id", branch_id)
-    j_query["migrated_to_journeys"] = {"$exists": False}
+    j_query["$or"] = [{"migrated_to_journeys": {"$exists": False}}, {"_legacy_incidents_remaining": {"$gt": 0}}]
 
     if journey_id:
         journey_ids = [journey_id]
@@ -889,7 +889,7 @@ async def report_incidents(
     j_query = _apply_id_filter(j_query, "client_id", client_id)
     j_query = _apply_id_filter(j_query, "provider_id", provider_id)
     j_query = _apply_id_filter(j_query, "branch_id", branch_id)
-    j_query["migrated_to_journeys"] = {"$exists": False}
+    j_query["$or"] = [{"migrated_to_journeys": {"$exists": False}}, {"_legacy_incidents_remaining": {"$gt": 0}}]
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     journey_ids = [j["id"] for j in journeys]

@@ -161,6 +161,13 @@ async def restore_orphan_incidents(
             f"[restore-incidents] client={client_id} restored="
             f"{len(bulk_updates)} (tracking={restored_by_tracking} fallback={restored_by_fallback})"
         )
+        # FIX 3 (iter83): Recompute _legacy_incidents_remaining on each affected legacy
+        for legacy_id in legacy_ids:
+            remaining = await db.incidents.count_documents({"journey_id": legacy_id})
+            await db.journeys.update_one(
+                {"id": legacy_id},
+                {"$set": {"_legacy_incidents_remaining": remaining}},
+            )
 
     return {
         "client_id": client_id,
@@ -181,6 +188,7 @@ async def migrate_legacy_journeys(
     days_back: int = Query(30, ge=1, le=180, description="Días hacia atrás a inspeccionar"),
     dry_run: bool = Query(True, description="Si true, no aplica cambios — solo reporta qué se haría"),
     branch_id: Optional[str] = Query(None, description="Si se da, limita la migración a esa sucursal"),
+    force: bool = Query(False, description="Bypass validación pre-flight de incidencias (úsalo solo si entiendes el riesgo)"),
     user: dict = Depends(get_current_user),
 ):
     """Migra journeys Routal legacy (creadas con modelo plan=journey) al modelo route=journey.
@@ -190,10 +198,19 @@ async def migrate_legacy_journeys(
       2. Itera `plan.routes[]` y arma N nuevas journeys (1 por route real).
       3. Reasigna cada package a la journey de su route correspondiente
          (busqueda por package.routal_service_id ∈ stops de esa route).
-      4. Marca journey legacy con migrated_at + migrated_to_journeys[].
-      5. Skip routes con label 'LastmileScanSessions*' y stops sin route_id.
+      4. Reasigna cada incidencia a la journey nueva por matching tracking_number.
+      5. Marca journey legacy con migrated_at + migrated_to_journeys[].
+      6. Skip routes con label 'LastmileScanSessions*' y stops sin route_id.
 
-    Returns dict con counts: scanned, migrated, packages_moved, skipped, errors.
+    **FIX 2 (iter83): Validación pre-flight de incidencias.**
+    Antes de aplicar (`dry_run=false`), valida que cada incidencia en una legacy
+    tenga un tracking_number presente en los packages nuevos. Si encuentra
+    incidencias que se quedarían huérfanas, **bloquea** el apply (HTTP 409) a
+    menos que `force=true`. En `dry_run=true` siempre devuelve la validación
+    como parte del response.
+
+    Returns dict con counts: scanned, migrated, packages_moved, skipped, errors,
+    incidents_pre_check.
     """
     if user.get("role") not in {"developer", "coordinator"}:
         raise HTTPException(status_code=403, detail="Solo developer/coordinator pueden migrar")
@@ -244,6 +261,13 @@ async def migrate_legacy_journeys(
     errors = 0
     packages_moved = 0
     details: list = []
+    # FIX 2 (iter83) — pre-flight incidents validation
+    incidents_pre_check: dict = {
+        "checked": 0,
+        "covered": 0,
+        "would_be_orphan": 0,
+        "samples_orphan": [],
+    }
 
     try:
         for plan_id, journeys_for_plan in by_plan.items():
@@ -339,6 +363,38 @@ async def migrate_legacy_journeys(
                     })
                     continue
 
+                # FIX 2 (iter83): Pre-flight check incidencias
+                # ¿Cada incidencia de la legacy tiene su tracking_number en algún package nuevo?
+                legacy_incidents = [
+                    inc async for inc in db.incidents.find(
+                        {"journey_id": legacy_id},
+                        {"_id": 0, "id": 1, "tracking_number": 1, "incident_type": 1},
+                    )
+                ]
+                this_legacy_orphans = 0
+                if legacy_incidents:
+                    new_pkg_tns = set()
+                    for (_doc, pkgs, _stops, _rid, _rlabel) in new_journeys:
+                        for p in pkgs:
+                            tn = p.get("tracking_number")
+                            if tn:
+                                new_pkg_tns.add(tn)
+                    for inc in legacy_incidents:
+                        incidents_pre_check["checked"] += 1
+                        tn = inc.get("tracking_number")
+                        if tn and tn in new_pkg_tns:
+                            incidents_pre_check["covered"] += 1
+                        else:
+                            incidents_pre_check["would_be_orphan"] += 1
+                            this_legacy_orphans += 1
+                            if len(incidents_pre_check["samples_orphan"]) < 10:
+                                incidents_pre_check["samples_orphan"].append({
+                                    "incident_id": inc["id"][:8],
+                                    "tracking_number": tn,
+                                    "type": inc.get("incident_type"),
+                                    "legacy_journey_id": legacy_id[:8],
+                                })
+
                 if dry_run:
                     details.append({
                         "plan_id": plan_id,
@@ -348,6 +404,20 @@ async def migrate_legacy_journeys(
                             {"route_id": rid, "driver": rlabel, "packages": len(p)}
                             for (_doc, p, _stops, rid, rlabel) in new_journeys
                         ],
+                        "legacy_incidents_count": len(legacy_incidents),
+                        "would_be_orphan": this_legacy_orphans,
+                    })
+                    continue
+
+                # FIX 2: gate del apply — si hay incidencias huérfanas y no es force, skip
+                if this_legacy_orphans > 0 and not force:
+                    skipped_no_routes += 1
+                    details.append({
+                        "plan_id": plan_id,
+                        "legacy_journey_id": legacy_id,
+                        "status": "skipped",
+                        "reason": "would_orphan_incidents",
+                        "would_be_orphan": this_legacy_orphans,
                     })
                     continue
 
@@ -390,6 +460,13 @@ async def migrate_legacy_journeys(
                     "id": {"$nin": migrated_pkg_ids},
                 })
 
+                # FIX 3 (iter83): Count remaining incidents on legacy after the move.
+                # If > 0, the filter in /journeys, /dashboard, /reports keeps it visible
+                # (so users can still access those incidents).
+                remaining_incidents = await db.incidents.count_documents({
+                    "journey_id": legacy_id,
+                })
+
                 # Mark legacy journey
                 await db.journeys.update_one(
                     {"id": legacy_id},
@@ -397,6 +474,7 @@ async def migrate_legacy_journeys(
                         "migrated_at": _now_iso(),
                         "migrated_to_journeys": inserted_ids,
                         "leftover_packages_count": leftover_count,
+                        "_legacy_incidents_remaining": remaining_incidents,
                         "status": legacy_j.get("status", "planificada"),
                         "_legacy_plan_journey": True,
                         "updated_at": _now_iso(),
@@ -434,5 +512,6 @@ async def migrate_legacy_journeys(
         "skipped_no_real_routes": skipped_no_routes,
         "errors": errors,
         "packages_moved": packages_moved,
+        "incidents_pre_check": incidents_pre_check,
         "details": details[:200],  # cap details to avoid huge payloads
     }
