@@ -180,8 +180,10 @@ class ReportRequest(BaseModel):
     date_to: str
     sections: List[str] = []
     group_by: Optional[str] = "provider"
+    # Single value or comma-separated list (e.g. "id1,id2,id3") to support multi-select
     client_id: Optional[str] = None
     provider_id: Optional[str] = None
+    branch_id: Optional[str] = None
 
 
 # ==================== MESSENGER MAPPING MODELS ====================

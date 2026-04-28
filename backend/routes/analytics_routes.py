@@ -24,6 +24,30 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Analytics"])
 
 
+def _csv_to_list(val):
+    """Normalize a CSV-or-single-value query param into a list of non-empty strings."""
+    if not val:
+        return []
+    if isinstance(val, list):
+        out = []
+        for v in val:
+            out.extend([x.strip() for x in str(v).split(",") if x.strip()])
+        return out
+    return [x.strip() for x in str(val).split(",") if x.strip()]
+
+
+def _apply_id_filter(query: dict, field: str, raw_val) -> dict:
+    """Apply client_id/provider_id/branch_id filter that supports both single and multi (CSV) values."""
+    ids = _csv_to_list(raw_val)
+    if not ids:
+        return query
+    if len(ids) == 1:
+        query[field] = ids[0]
+    else:
+        query[field] = {"$in": ids}
+    return query
+
+
 # ==================== HEATMAP ====================
 
 @router.get("/analytics/heatmap")
@@ -169,8 +193,7 @@ async def get_quality_report(
 
     journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
     journey_query = apply_assignment_filter(user, journey_query)
-    if provider_id:
-        journey_query["provider_id"] = provider_id
+    journey_query = _apply_id_filter(journey_query, "provider_id", provider_id)
 
     journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
     journey_ids = [j["id"] for j in journeys]
@@ -286,8 +309,7 @@ async def export_quality_report(
 ):
     journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
     journey_query = apply_assignment_filter(user, journey_query)
-    if provider_id:
-        journey_query["provider_id"] = provider_id
+    journey_query = _apply_id_filter(journey_query, "provider_id", provider_id)
 
     journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
     journey_map = {j["id"]: j for j in journeys}
@@ -337,10 +359,11 @@ async def export_quality_report(
 async def generate_report(data: ReportRequest, user: dict = Depends(get_current_user)):
     j_query = {"date": {"$gte": data.date_from, "$lt": _next_day(data.date_to)}}
     j_query = apply_assignment_filter(user, j_query)
-    if data.client_id:
-        j_query["client_id"] = data.client_id
-    if data.provider_id:
-        j_query["provider_id"] = data.provider_id
+    j_query = _apply_id_filter(j_query, "client_id", data.client_id)
+    j_query = _apply_id_filter(j_query, "provider_id", data.provider_id)
+    j_query = _apply_id_filter(j_query, "branch_id", data.branch_id)
+    # Hide legacy plan-based Routal journeys (iter79 migration)
+    j_query["migrated_to_journeys"] = {"$exists": False}
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     if not journeys:
@@ -462,10 +485,10 @@ async def generate_report(data: ReportRequest, user: dict = Depends(get_current_
 async def generate_report_excel(data: ReportRequest, user: dict = Depends(get_current_user)):
     j_query = {"date": {"$gte": data.date_from, "$lt": _next_day(data.date_to)}}
     j_query = apply_assignment_filter(user, j_query)
-    if data.client_id:
-        j_query["client_id"] = data.client_id
-    if data.provider_id:
-        j_query["provider_id"] = data.provider_id
+    j_query = _apply_id_filter(j_query, "client_id", data.client_id)
+    j_query = _apply_id_filter(j_query, "provider_id", data.provider_id)
+    j_query = _apply_id_filter(j_query, "branch_id", data.branch_id)
+    j_query["migrated_to_journeys"] = {"$exists": False}
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     journey_ids = [j["id"] for j in journeys]
@@ -559,6 +582,7 @@ async def export_journeys(
     date_to: Optional[str] = None,
     client_id: Optional[str] = None,
     provider_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     query = {}
@@ -566,10 +590,10 @@ async def export_journeys(
         query["date"] = {"$gte": date_from}
     if date_to:
         query.setdefault("date", {})["$lt"] = _next_day(date_to)
-    if client_id:
-        query["client_id"] = client_id
-    if provider_id:
-        query["provider_id"] = provider_id
+    query = _apply_id_filter(query, "client_id", client_id)
+    query = _apply_id_filter(query, "provider_id", provider_id)
+    query = _apply_id_filter(query, "branch_id", branch_id)
+    query["migrated_to_journeys"] = {"$exists": False}
 
     journeys = await db.journeys.find(query, {"_id": 0}).to_list(1000)
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
@@ -701,6 +725,7 @@ async def report_journeys(
     date_to: Optional[str] = None,
     client_id: Optional[str] = None,
     provider_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
     status: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
@@ -709,10 +734,10 @@ async def report_journeys(
         query["date"] = {"$gte": date_from}
     if date_to:
         query.setdefault("date", {})["$lt"] = _next_day(date_to)
-    if client_id:
-        query["client_id"] = client_id
-    if provider_id:
-        query["provider_id"] = provider_id
+    query = _apply_id_filter(query, "client_id", client_id)
+    query = _apply_id_filter(query, "provider_id", provider_id)
+    query = _apply_id_filter(query, "branch_id", branch_id)
+    query["migrated_to_journeys"] = {"$exists": False}
     if status:
         query["status"] = status
 
@@ -777,6 +802,9 @@ async def report_packages(
     date_to: Optional[str] = None,
     status: Optional[str] = None,
     journey_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     j_query = {}
@@ -784,6 +812,10 @@ async def report_packages(
         j_query["date"] = {"$gte": date_from}
     if date_to:
         j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+    j_query = _apply_id_filter(j_query, "client_id", client_id)
+    j_query = _apply_id_filter(j_query, "provider_id", provider_id)
+    j_query = _apply_id_filter(j_query, "branch_id", branch_id)
+    j_query["migrated_to_journeys"] = {"$exists": False}
 
     if journey_id:
         journey_ids = [journey_id]
@@ -844,6 +876,9 @@ async def report_incidents(
     severity: Optional[str] = None,
     status: Optional[str] = None,
     incident_type: Optional[str] = None,
+    client_id: Optional[str] = None,
+    provider_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     j_query = {}
@@ -851,6 +886,10 @@ async def report_incidents(
         j_query["date"] = {"$gte": date_from}
     if date_to:
         j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+    j_query = _apply_id_filter(j_query, "client_id", client_id)
+    j_query = _apply_id_filter(j_query, "provider_id", provider_id)
+    j_query = _apply_id_filter(j_query, "branch_id", branch_id)
+    j_query["migrated_to_journeys"] = {"$exists": False}
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     journey_ids = [j["id"] for j in journeys]

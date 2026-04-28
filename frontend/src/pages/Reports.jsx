@@ -6,6 +6,7 @@ import {
     generateReport, generateReportExcel,
     getQualityReport, getClients, getProviders,
     getReportAttempts, getReportSla, updateSlaTargets, generateAiReport,
+    listBranches,
 } from '../lib/api';
 import { downloadFile } from '../lib/utils';
 import {
@@ -22,6 +23,8 @@ import {
 } from 'recharts';
 import { T, PERIODS, getDateRange, getPrevDateRange, formatDateLabel } from '../components/reports/ReportsHelpers';
 import TrendsTab from '../components/reports/TrendsTab';
+import { MultiSelectChip } from '../components/reports/MultiSelectChip';
+import { DateRangePicker } from '../components/reports/DateRangePicker';
 
 /* ─── Health bar color ─── */
 const healthColor = (val) => val >= 90 ? T.green : val >= 75 ? T.amber : T.coral;
@@ -609,13 +612,16 @@ const Reports = () => {
     const [period, setPeriod] = useState('today');
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
-    const [clientId, setClientId] = useState('');
-    const [providerId, setProviderId] = useState('');
+    // Multi-select arrays (iter81)
+    const [clientIds, setClientIds] = useState([]);
+    const [providerIds, setProviderIds] = useState([]);
+    const [branchIds, setBranchIds] = useState([]);
     const sections = useMemo(() => ['providers', 'drivers', 'incidents', 'attempts', 'quality', 'sla'], []);
 
     // Data
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
+    const [branches, setBranches] = useState([]);
     const [reportData, setReportData] = useState(null);
     const [prevReportData, setPrevReportData] = useState(null);
     const [qualityData, setQualityData] = useState(null);
@@ -632,8 +638,6 @@ const Reports = () => {
     const [exporting, setExporting] = useState(false);
     const [exportingPdf, setExportingPdf] = useState(false);
     const [activeTab, setActiveTab] = useState('providers');
-    const [showClientDrop, setShowClientDrop] = useState(false);
-    const [showProviderDrop, setShowProviderDrop] = useState(false);
     const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
     const effectiveDates = useMemo(() => {
@@ -651,8 +655,56 @@ const Reports = () => {
         }).catch((err) => { console.error('Failed to load clients/providers:', err); });
     }, []);
 
-    const selectedClientName = useMemo(() => clients.find(c => c.id === clientId)?.name || 'Todos los clientes', [clients, clientId]);
-    const selectedProviderName = useMemo(() => providers.find(p => p.id === providerId)?.name || 'Todos los proveedores', [providers, providerId]);
+    // Load branches when client(s) selected (or all when no client filter)
+    useEffect(() => {
+        const load = async () => {
+            try {
+                if (clientIds.length === 0) {
+                    // Aggregate branches across all clients (parallel calls)
+                    const all = await Promise.all(
+                        clients.map(c => listBranches(c.id, true).then(r => r.data || []).catch(() => []))
+                    );
+                    const flat = all.flat().map(b => ({ ...b, suffix: clients.find(c => c.id === b.client_id)?.name }));
+                    setBranches(flat);
+                } else {
+                    const all = await Promise.all(
+                        clientIds.map(cid => listBranches(cid, true).then(r => r.data || []).catch(() => []))
+                    );
+                    setBranches(all.flat());
+                }
+            } catch (err) { console.error('Failed to load branches:', err); }
+        };
+        if (clients.length > 0) load();
+    }, [clients, clientIds]);
+
+    // Drop branch selections that are no longer valid when clients change
+    useEffect(() => {
+        if (branchIds.length === 0) return;
+        const validIds = new Set(branches.map(b => b.id));
+        const stillValid = branchIds.filter(id => validIds.has(id));
+        if (stillValid.length !== branchIds.length) setBranchIds(stillValid);
+    }, [branches]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const csvOrUndef = (arr) => (arr && arr.length ? arr.join(',') : undefined);
+    const filterSummary = useMemo(() => {
+        const parts = [];
+        if (clientIds.length === 1) {
+            parts.push(`Cliente: ${clients.find(c => c.id === clientIds[0])?.name || clientIds[0]}`);
+        } else if (clientIds.length > 1) {
+            parts.push(`${clientIds.length} clientes`);
+        }
+        if (branchIds.length === 1) {
+            parts.push(`Sucursal: ${branches.find(b => b.id === branchIds[0])?.name || branchIds[0]}`);
+        } else if (branchIds.length > 1) {
+            parts.push(`${branchIds.length} sucursales`);
+        }
+        if (providerIds.length === 1) {
+            parts.push(`Proveedor: ${providers.find(p => p.id === providerIds[0])?.name || providerIds[0]}`);
+        } else if (providerIds.length > 1) {
+            parts.push(`${providerIds.length} proveedores`);
+        }
+        return parts;
+    }, [clientIds, branchIds, providerIds, clients, branches, providers]);
 
     // Fetch data
     const fetchData = useCallback(async () => {
@@ -660,8 +712,12 @@ const Reports = () => {
         if (aiNarrative) setAiStale(true);
         try {
             const params = { date_from: effectiveDates.from, date_to: effectiveDates.to };
-            if (clientId) params.client_id = clientId;
-            if (providerId) params.provider_id = providerId;
+            const cidCsv = csvOrUndef(clientIds);
+            const pidCsv = csvOrUndef(providerIds);
+            const bidCsv = csvOrUndef(branchIds);
+            if (cidCsv) params.client_id = cidCsv;
+            if (pidCsv) params.provider_id = pidCsv;
+            if (bidCsv) params.branch_id = bidCsv;
 
             const [report, quality, attempts, sla] = await Promise.allSettled([
                 generateReport({ ...params, sections }),
@@ -691,8 +747,9 @@ const Reports = () => {
             if (prevDates) {
                 try {
                     const prevParams = { date_from: prevDates.from, date_to: prevDates.to };
-                    if (clientId) prevParams.client_id = clientId;
-                    if (providerId) prevParams.provider_id = providerId;
+                    if (cidCsv) prevParams.client_id = cidCsv;
+                    if (pidCsv) prevParams.provider_id = pidCsv;
+                    if (bidCsv) prevParams.branch_id = bidCsv;
                     const prevRes = await generateReport({ ...prevParams, sections: ['providers'] });
                     setPrevReportData(prevRes.data);
                 } catch (err) { console.error('Failed to fetch prev period:', err); setPrevReportData(null); }
@@ -703,7 +760,7 @@ const Reports = () => {
         } finally {
             setLoading(false);
         }
-    }, [effectiveDates, clientId, providerId, sections, prevDates, aiNarrative]);
+    }, [effectiveDates, clientIds, providerIds, branchIds, sections, prevDates, aiNarrative]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -713,7 +770,8 @@ const Reports = () => {
         try {
             const res = await generateAiReport({
                 date_from: effectiveDates.from, date_to: effectiveDates.to,
-                client_id: clientId || undefined, provider_id: providerId || undefined,
+                client_id: csvOrUndef(clientIds), provider_id: csvOrUndef(providerIds),
+                branch_id: csvOrUndef(branchIds),
             });
             setAiNarrative(res.data.narrative || '');
             setAiCards(res.data.cards || []);
@@ -730,7 +788,10 @@ const Reports = () => {
         try {
             const res = await generateReportExcel({
                 date_from: effectiveDates.from, date_to: effectiveDates.to,
-                sections, client_id: clientId || undefined, provider_id: providerId || undefined,
+                sections,
+                client_id: csvOrUndef(clientIds),
+                provider_id: csvOrUndef(providerIds),
+                branch_id: csvOrUndef(branchIds),
             });
             downloadFile(res.data, `reporte_${effectiveDates.from}_${effectiveDates.to}.xlsx`);
             toast.success('Reporte Excel exportado');
@@ -742,9 +803,7 @@ const Reports = () => {
         setExportingPdf(true);
         try {
             const { generateMultiPagePDF } = await import('../lib/pdfReportGenerator');
-            const filters = [];
-            if (clientId) filters.push(`Cliente: ${selectedClientName}`);
-            if (providerId) filters.push(`Proveedor: ${selectedProviderName}`);
+            const filters = filterSummary;
 
             await generateMultiPagePDF({
                 reportData,
@@ -835,7 +894,7 @@ const Reports = () => {
 
             {/* ─── FILTER BAR (desktop) ─── */}
             <div className="filter-bar-desktop" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '12px 16px', background: T.surface, border: `1px solid ${T.borderSolid}`, borderRadius: T.radius }} data-testid="filter-bar">
-                {/* Date chip */}
+                {/* Date chip (current effective range) */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 14, background: T.tealLt, color: T.teal, fontSize: 12, fontWeight: 600, marginRight: 4 }}>
                     <Calendar size={13} />
                     {formatDateLabel(effectiveDates.from)}{effectiveDates.from !== effectiveDates.to ? ` — ${formatDateLabel(effectiveDates.to)}` : ''}
@@ -851,44 +910,47 @@ const Reports = () => {
                 ))}
 
                 {period === 'custom' && (
-                    <>
-                        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${T.borderSolid}`, fontSize: 12 }} data-testid="custom-date-from" />
-                        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: `1px solid ${T.borderSolid}`, fontSize: 12 }} data-testid="custom-date-to" />
-                    </>
+                    <DateRangePicker
+                        from={dateFrom}
+                        to={dateTo}
+                        onChange={({ from, to }) => { setDateFrom(from); setDateTo(to); }}
+                        testid="report-date-range"
+                    />
                 )}
 
                 <div style={{ width: 1, height: 24, background: T.borderSolid, margin: '0 4px' }} />
 
-                {/* Client dropdown */}
-                <div className="chip-dropdown">
-                    <button className="chip-btn" onClick={() => { setShowClientDrop(!showClientDrop); setShowProviderDrop(false); }} data-testid="report-client-filter">
-                        <ChevronDown size={12} /> {selectedClientName}
-                    </button>
-                    {showClientDrop && (
-                        <div className="chip-dropdown-menu">
-                            <button className={`chip-dropdown-item ${!clientId ? 'selected' : ''}`} onClick={() => { setClientId(''); setShowClientDrop(false); }}>Todos los clientes</button>
-                            {clients.map(c => (
-                                <button key={c.id} className={`chip-dropdown-item ${clientId === c.id ? 'selected' : ''}`} onClick={() => { setClientId(c.id); setShowClientDrop(false); }}>{c.name}</button>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                {/* Multi-select Cliente */}
+                <MultiSelectChip
+                    label="clientes"
+                    allLabel="Todos los clientes"
+                    options={clients}
+                    selected={clientIds}
+                    onChange={setClientIds}
+                    testid="report-client-filter"
+                />
 
-                {/* Provider dropdown (hidden for provider role) */}
+                {/* Multi-select Sucursal (depends on clientes) */}
+                <MultiSelectChip
+                    label="sucursales"
+                    allLabel="Todas las sucursales"
+                    options={branches}
+                    selected={branchIds}
+                    onChange={setBranchIds}
+                    testid="report-branch-filter"
+                    emptyMessage={clientIds.length > 0 ? 'Sin sucursales' : 'Selecciona un cliente'}
+                />
+
+                {/* Multi-select Proveedor (hidden for provider role) */}
                 {!isProvider && (
-                    <div className="chip-dropdown">
-                        <button className="chip-btn" onClick={() => { setShowProviderDrop(!showProviderDrop); setShowClientDrop(false); }} data-testid="report-provider-filter">
-                            <ChevronDown size={12} /> {selectedProviderName}
-                        </button>
-                        {showProviderDrop && (
-                            <div className="chip-dropdown-menu">
-                                <button className={`chip-dropdown-item ${!providerId ? 'selected' : ''}`} onClick={() => { setProviderId(''); setShowProviderDrop(false); }}>Todos los proveedores</button>
-                                {providers.map(p => (
-                                    <button key={p.id} className={`chip-dropdown-item ${providerId === p.id ? 'selected' : ''}`} onClick={() => { setProviderId(p.id); setShowProviderDrop(false); }}>{p.name}</button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                    <MultiSelectChip
+                        label="proveedores"
+                        allLabel="Todos los proveedores"
+                        options={providers}
+                        selected={providerIds}
+                        onChange={setProviderIds}
+                        testid="report-provider-filter"
+                    />
                 )}
             </div>
 
