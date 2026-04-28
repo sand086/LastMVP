@@ -352,6 +352,15 @@ export const testBranchRoutalConnection = (branchId) =>
     api.post(`/branches/${branchId}/test-routal-connection`, null, { timeout: 30000 });
 export const probeRoutalConnection = (creds) =>
     api.post('/branches/probe-routal-connection', creds, { timeout: 30000 });
+export const migrateRoutalLegacyJourneys = (clientId, daysBack = 30, dryRun = true, branchId = null) => {
+    const params = new URLSearchParams({ days_back: String(daysBack), dry_run: String(dryRun) });
+    if (branchId) params.append('branch_id', branchId);
+    return api.post(
+        `/integrations/routal/migrate-legacy-journeys/${clientId}?${params.toString()}`,
+        null,
+        { timeout: 120000 },
+    );
+};
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
 export const getBranchHistory = (clientId, days = 14) =>

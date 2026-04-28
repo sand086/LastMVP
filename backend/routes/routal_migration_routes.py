@@ -56,12 +56,13 @@ async def migrate_legacy_journeys(
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
 
-    # Find candidate legacy journeys
+    # Find candidate legacy journeys (excluding already migrated)
     query = {
         "client_id": client_id,
         "source": "routal",
         "routal_plan_id": {"$exists": True, "$ne": None},
         "routal_route_id": {"$exists": False},
+        "migrated_to_journeys": {"$exists": False},
         "created_at": {"$gte": cutoff.isoformat()},
     }
     if branch_id:

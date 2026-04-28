@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Trash2, Copy, Plug, RefreshCw } from 'lucide-react';
+import {
+    Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Trash2, Copy, Plug, RefreshCw,
+    GitBranch, ChevronDown, ChevronUp,
+} from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -8,7 +11,7 @@ import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
 import {
     upsertIntegration, updateIntegrationStatus, testIntegration,
-    deleteIntegration, getRoutalWebhookStatus,
+    deleteIntegration, getRoutalWebhookStatus, migrateRoutalLegacyJourneys,
 } from '../../lib/api';
 
 const PLACEHOLDER_MASK = '••••••••••••';
@@ -35,6 +38,62 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
     const [testing, setTesting] = useState(false);
     const [testResult, setTestResult] = useState(null);
     const [whStatus, setWhStatus] = useState(null);
+
+    // iter80 — Migración legacy plan→route
+    const [showMigrate, setShowMigrate] = useState(false);
+    const [migrateDays, setMigrateDays] = useState(30);
+    const [migrateRunning, setMigrateRunning] = useState(false);
+    const [migrateDryResult, setMigrateDryResult] = useState(null);
+    const [migrateAppliedResult, setMigrateAppliedResult] = useState(null);
+
+    const handleMigrateDryRun = async () => {
+        if (!existing.client_id) return;
+        setMigrateRunning(true);
+        setMigrateDryResult(null);
+        setMigrateAppliedResult(null);
+        try {
+            const r = await migrateRoutalLegacyJourneys(existing.client_id, migrateDays, true, null);
+            setMigrateDryResult(r.data);
+            const found = r.data.scanned || 0;
+            if (found === 0) {
+                toast.success(`Sin journeys legacy en últimos ${migrateDays} días`);
+            } else {
+                toast.warning(`${found} journey(s) legacy detectada(s) — revisa antes de aplicar`);
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error en dry-run');
+        } finally {
+            setMigrateRunning(false);
+        }
+    };
+
+    const handleMigrateApply = async () => {
+        if (!migrateDryResult || !migrateDryResult.scanned) {
+            toast.error('Primero corre el dry-run');
+            return;
+        }
+        const ok = window.confirm(
+            `Se migrarán ${migrateDryResult.scanned} journey(s) legacy del modelo plan→journey ` +
+            `al modelo route→journey (1 journey por driver real). ` +
+            `\n\nLas legacy se preservan con audit trail (migrated_to_journeys[]) y se ocultan de listas. ` +
+            `\n\nPackages e incidents se reasignan a las journeys nuevas.\n\n¿Continuar?`
+        );
+        if (!ok) return;
+        setMigrateRunning(true);
+        try {
+            const r = await migrateRoutalLegacyJourneys(existing.client_id, migrateDays, false, null);
+            setMigrateAppliedResult(r.data);
+            toast.success(
+                `✔ ${r.data.migrated} legacy journeys migradas · ${r.data.packages_moved} pkgs movidos` +
+                (r.data.errors ? ` · ${r.data.errors} error(es)` : '')
+            );
+            onChanged?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error aplicando migración');
+        } finally {
+            setMigrateRunning(false);
+        }
+    };
 
     const refreshWebhookStatus = useCallback(async () => {
         if (!existing.client_id || existing.integration_type !== 'routal') return;
@@ -363,6 +422,20 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
                         >
                             {status === 'active' ? 'Desactivar' : 'Activar'}
                         </Button>
+                        {isRoutal && (
+                            <Button
+                                onClick={() => setShowMigrate(v => !v)}
+                                size="sm"
+                                variant="outline"
+                                className={showMigrate ? 'bg-amber-50 border-amber-300 text-amber-800' : 'text-amber-700 border-amber-200'}
+                                title="Migrar journeys legacy del modelo plan→journey al modelo route→journey"
+                                data-testid={`migrate-legacy-toggle-${client.id}`}
+                            >
+                                <GitBranch className="w-3.5 h-3.5 mr-1.5" />
+                                Migrar legacy
+                                {showMigrate ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+                            </Button>
+                        )}
                         <Button
                             onClick={handleDelete}
                             size="sm"
@@ -375,6 +448,128 @@ const ClientIntegrationCard = ({ client, integration, onChanged }) => {
                     </>
                 )}
             </div>
+
+            {/* iter80 — Migración legacy panel */}
+            {isRoutal && showMigrate && (
+                <div
+                    className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md"
+                    data-testid={`migrate-panel-${client.id}`}
+                >
+                    <div className="flex items-start gap-2 mb-3 text-xs text-amber-900">
+                        <GitBranch className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <p className="font-semibold">Migración legacy: Plan → Route</p>
+                            <p className="text-[11px] mt-0.5 leading-relaxed">
+                                Antes (modelo viejo): 1 journey por <strong>plan Routal</strong> con todos los stops fusionados.<br/>
+                                Ahora (modelo correcto): 1 journey por <strong>route real</strong> (driver), stops filtrados.<br/>
+                                Esta herramienta hidrata cada plan vía API Routal y parte las legacy en N journeys correctas.
+                                <strong> Dry-run</strong> primero (sin cambios), luego <strong>Aplicar</strong>.
+                                Idempotente, preserva audit trail.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                        <div className="space-y-1">
+                            <Label className="text-xs text-slate-700">Días hacia atrás</Label>
+                            <Input
+                                type="number"
+                                min="1"
+                                max="180"
+                                value={migrateDays}
+                                onChange={(e) => setMigrateDays(Number(e.target.value) || 30)}
+                                className="font-mono"
+                                data-testid={`migrate-days-${client.id}`}
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <Button
+                                onClick={handleMigrateDryRun}
+                                disabled={migrateRunning}
+                                size="sm"
+                                variant="outline"
+                                className="w-full"
+                                data-testid={`migrate-dryrun-${client.id}`}
+                            >
+                                {migrateRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
+                                Detectar legacy (dry-run)
+                            </Button>
+                        </div>
+                        <div className="flex items-end">
+                            <Button
+                                onClick={handleMigrateApply}
+                                disabled={migrateRunning || !migrateDryResult || !migrateDryResult.scanned}
+                                size="sm"
+                                className="w-full bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50"
+                                data-testid={`migrate-apply-${client.id}`}
+                            >
+                                {migrateRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+                                Aplicar migración
+                            </Button>
+                        </div>
+                    </div>
+
+                    {migrateDryResult && (
+                        <div
+                            className="bg-white rounded p-2 text-xs space-y-2"
+                            data-testid={`migrate-dry-result-${client.id}`}
+                        >
+                            <div className="flex items-center justify-between font-semibold text-slate-800">
+                                <span>
+                                    {migrateDryResult.scanned} journey(s) legacy ·{' '}
+                                    {migrateDryResult.plans_inspected} plans Routal inspeccionados
+                                </span>
+                                <span className="text-slate-500 text-[10px] uppercase">
+                                    {migrateAppliedResult ? `aplicado · ${migrateAppliedResult.migrated} migradas` : 'dry-run'}
+                                </span>
+                            </div>
+                            {migrateDryResult.scanned === 0 && (
+                                <p className="text-emerald-700 text-[11px]">
+                                    ✓ Sin journeys legacy en últimos {migrateDryResult.days_back} días.
+                                </p>
+                            )}
+                            {migrateDryResult.scanned > 0 && Array.isArray(migrateDryResult.details) && (
+                                <div className="max-h-64 overflow-y-auto border-t border-slate-200 pt-1">
+                                    <table className="w-full text-[10px] font-mono">
+                                        <thead className="text-slate-500 sticky top-0 bg-white">
+                                            <tr>
+                                                <th className="text-left py-1">Plan Routal</th>
+                                                <th className="text-left">Legacy ID</th>
+                                                <th className="text-center">Routes nuevas</th>
+                                                <th className="text-left">Drivers (pkgs)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {migrateDryResult.details.map((d, i) => (
+                                                <tr key={d.legacy_journey_id || i} className="border-b border-slate-100">
+                                                    <td className="py-1">{d.plan_id?.slice(0, 12)}…</td>
+                                                    <td className="text-slate-500">{d.legacy_journey_id?.slice(0, 8) || '—'}</td>
+                                                    <td className="text-center">
+                                                        {d.new_journeys?.length || 0}
+                                                    </td>
+                                                    <td className="text-slate-700 truncate max-w-[280px]">
+                                                        {(d.new_journeys || []).map(nj =>
+                                                            `${nj.driver?.slice(0, 18) || '?'}(${nj.packages || 0})`
+                                                        ).join(' · ')}
+                                                        {d.status === 'skipped' && <span className="text-slate-400 italic"> · skip ({d.reason})</span>}
+                                                        {d.status === 'error' && <span className="text-red-600"> · error</span>}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                            {migrateAppliedResult && (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5 text-[11px] text-emerald-900 mt-1">
+                                    ✓ {migrateAppliedResult.migrated} journey(s) migrada(s) ·{' '}
+                                    {migrateAppliedResult.packages_moved} package(s) movido(s)
+                                    {migrateAppliedResult.errors > 0 && <> · <strong>{migrateAppliedResult.errors} error(es)</strong></>}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
