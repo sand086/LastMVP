@@ -69,6 +69,9 @@ class BranchResponse(BaseModel):
     updated_at: str
     journeys_count: Optional[int] = None
     has_routal_credentials: Optional[bool] = None
+    routal_active: Optional[bool] = None
+    routal_last_test_at: Optional[str] = None
+    routal_last_test_status: Optional[str] = None
 
 
 @router.get("/branches", response_model=List[BranchResponse])
@@ -98,12 +101,22 @@ async def list_branches(
             {"_id": 0, "branches": 1},
         )
         has_creds = False
+        last_test = None
+        last_test_status = None
+        routal_active = None
         if integ:
             br_map = integ.get("branches") or {}
             entry = br_map.get(b["id"])
-            if entry and entry.get("active", True) and entry.get("credentials_encrypted"):
-                has_creds = True
+            if entry:
+                if entry.get("active", True) and entry.get("credentials_encrypted"):
+                    has_creds = True
+                last_test = entry.get("last_test_at")
+                last_test_status = entry.get("last_test_status")
+                routal_active = entry.get("active", True)
         b["has_routal_credentials"] = has_creds
+        b["routal_last_test_at"] = last_test
+        b["routal_last_test_status"] = last_test_status
+        b["routal_active"] = routal_active
         out.append(b)
     return out
 
@@ -228,6 +241,92 @@ async def migrate_cubbo_cities(
         "client_name": cubbo["name"],
         "created": created,
         "skipped_existing": skipped,
+    }
+
+
+@router.post("/branches/{branch_id}/test-routal-connection")
+async def test_branch_routal_connection(
+    branch_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Tests the configured Routal credentials of a branch by hitting `GET /v2/plans?limit=1`.
+    Returns ok=true with a couple of plan_ids on success, or a descriptive error otherwise.
+
+    Saves last_test_at + last_test_status into client_integrations.branches[branch_id]
+    so the UI can display "Última prueba: hace 3 min · OK".
+    """
+    _require_role(user, ["developer", "coordinator"])
+    branch = await db.branches.find_one({"id": branch_id}, {"_id": 0})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+
+    from services.integration_service import IntegrationService
+    svc = IntegrationService(db)
+    rc = await svc.get_routal_client(branch["client_id"], branch_id=branch_id)
+    if not rc:
+        raise HTTPException(
+            status_code=400,
+            detail="Esta sucursal no tiene credenciales Routal configuradas o están desactivadas.",
+        )
+
+    test_status = "ok"
+    test_error = None
+    plans_seen = []
+    plan_count = 0
+    try:
+        data = await rc._request("GET", "/v2/plans", params={"limit": 5, "offset": 0})
+        plans = data if isinstance(data, list) else (data.get("docs") or data.get("data") or data.get("plans") or [])
+        plan_count = len(plans)
+        for p in plans[:3]:
+            plans_seen.append({
+                "id": p.get("id"),
+                "label": p.get("label"),
+                "execution_date": p.get("execution_date"),
+            })
+    except Exception as e:
+        test_status = "error"
+        test_error = str(e)[:300]
+    finally:
+        try:
+            await rc.aclose()
+        except Exception:
+            pass
+
+    # Persist test telemetry
+    integ = await db.client_integrations.find_one(
+        {"client_id": branch["client_id"], "integration_type": "routal"},
+        {"_id": 0, "branches": 1},
+    )
+    if integ:
+        branches = integ.get("branches") or {}
+        if branch_id in branches:
+            branches[branch_id]["last_test_at"] = _now()
+            branches[branch_id]["last_test_status"] = test_status
+            if test_error:
+                branches[branch_id]["last_test_error"] = test_error
+            else:
+                branches[branch_id].pop("last_test_error", None)
+            await db.client_integrations.update_one(
+                {"client_id": branch["client_id"], "integration_type": "routal"},
+                {"$set": {"branches": branches, "updated_at": datetime.now(timezone.utc)}},
+            )
+
+    if test_status == "error":
+        return {
+            "ok": False,
+            "branch_id": branch_id,
+            "branch_code": branch["code"],
+            "error": test_error,
+            "tested_at": _now(),
+            "hint": "Verifica API Key + Project ID. La API key debe ser de tipo private_key (no public).",
+        }
+    return {
+        "ok": True,
+        "branch_id": branch_id,
+        "branch_code": branch["code"],
+        "plans_visible": plan_count,
+        "sample_plans": plans_seen,
+        "tested_at": _now(),
     }
 
 

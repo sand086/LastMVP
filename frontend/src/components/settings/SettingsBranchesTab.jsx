@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     Loader2, Building2, Plus, Save, Trash2, ToggleLeft, ToggleRight,
-    Eye, EyeOff, KeyRound, MapPin,
+    Eye, EyeOff, KeyRound, MapPin, Zap, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import {
     listBranches, createBranch, updateBranch, deleteBranch,
     migrateCubboCities, setBranchRoutalCreds, toggleBranchRoutal,
-    getClients,
+    testBranchRoutalConnection, getClients,
 } from '../../lib/api';
 
 const COMMON_CITY_CODES = ['CDMX', 'GDL', 'MOR', 'MTY', 'PUE', 'QRO', 'PACHUCA'];
@@ -20,6 +20,8 @@ const COMMON_CITY_CODES = ['CDMX', 'GDL', 'MOR', 'MTY', 'PUE', 'QRO', 'PACHUCA']
 const BranchRow = ({ branch, onChanged }) => {
     const [showCredsForm, setShowCredsForm] = useState(false);
     const [savingCreds, setSavingCreds] = useState(false);
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState(null);
     const [toggling, setToggling] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
     const [apiKey, setApiKey] = useState('');
@@ -46,6 +48,26 @@ const BranchRow = ({ branch, onChanged }) => {
             toast.error(err.response?.data?.detail || 'Error guardando credenciales');
         } finally {
             setSavingCreds(false);
+        }
+    };
+
+    const handleTestConnection = async () => {
+        setTesting(true);
+        setTestResult(null);
+        try {
+            const r = await testBranchRoutalConnection(branch.id);
+            setTestResult(r.data);
+            if (r.data.ok) {
+                toast.success(
+                    `✔ Conexión OK con Routal · ${r.data.plans_visible} plan(es) visibles`,
+                );
+            }
+        } catch (err) {
+            const detail = err.response?.data?.detail || err.message || 'Error de conexión';
+            setTestResult({ ok: false, error: detail });
+            toast.error(detail);
+        } finally {
+            setTesting(false);
         }
     };
 
@@ -125,6 +147,15 @@ const BranchRow = ({ branch, onChanged }) => {
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">
                             {branch.journeys_count} journey(s) · ID <span className="font-mono">{branch.id.slice(0, 8)}…</span>
+                            {branch.routal_last_test_at && (
+                                <span className="ml-2">
+                                    · Última prueba:{' '}
+                                    <span className={branch.routal_last_test_status === 'ok' ? 'text-emerald-700' : 'text-red-700'}>
+                                        {branch.routal_last_test_status === 'ok' ? '✓ OK' : '✗ Error'}
+                                    </span>{' '}
+                                    <span className="text-slate-400">({new Date(branch.routal_last_test_at).toLocaleString()})</span>
+                                </span>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -217,6 +248,19 @@ const BranchRow = ({ branch, onChanged }) => {
                             <Button size="sm" variant="ghost" onClick={() => setShowCredsForm(false)}>
                                 Cancelar
                             </Button>
+                            {branch.has_routal_credentials && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={handleTestConnection}
+                                    disabled={testing}
+                                    className="border-blue-300 text-blue-700"
+                                    data-testid={`branch-test-conn-${branch.code}`}
+                                >
+                                    {testing ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Zap className="w-3.5 h-3.5 mr-1" />}
+                                    Probar conexión
+                                </Button>
+                            )}
                             <Button
                                 size="sm"
                                 onClick={handleSaveCreds}
@@ -229,6 +273,45 @@ const BranchRow = ({ branch, onChanged }) => {
                             </Button>
                         </div>
                     </div>
+
+                    {testResult && (
+                        <div
+                            className={`mt-3 p-2 rounded border text-xs ${
+                                testResult.ok
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                    : 'bg-red-50 border-red-200 text-red-900'
+                            }`}
+                            data-testid={`branch-test-result-${branch.code}`}
+                        >
+                            {testResult.ok ? (
+                                <div className="flex items-start gap-2">
+                                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                    <div className="flex-1">
+                                        <strong>Conexión OK</strong> · {testResult.plans_visible} plan(es) en Routal
+                                        {testResult.sample_plans?.length > 0 && (
+                                            <ul className="mt-1 space-y-0.5">
+                                                {testResult.sample_plans.map(p => (
+                                                    <li key={p.id} className="font-mono text-[10px]">
+                                                        • <span className="text-slate-700">{p.label || p.id?.slice(0, 12)}</span>
+                                                        {p.execution_date && <span className="text-slate-500"> · {String(p.execution_date).slice(0, 10)}</span>}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex items-start gap-2">
+                                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                    <div className="flex-1">
+                                        <strong>Conexión falló</strong>
+                                        <div className="mt-0.5 break-words">{testResult.error || 'Error desconocido'}</div>
+                                        {testResult.hint && <div className="mt-0.5 text-[10px] italic">💡 {testResult.hint}</div>}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
