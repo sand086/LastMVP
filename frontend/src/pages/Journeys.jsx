@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { getClients, getProviders, deleteJourney } from '../lib/api';
+import { getClients, getProviders, deleteJourney, listClientConfigs, runSelection } from '../lib/api';
 import { useJourneys } from '../hooks/useJourneys';
 import { 
     formatDate, 
@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { 
     Truck, Calendar as CalendarIcon, Eye, Upload, AlertTriangle,
     Filter, X, Search, Trash2, Loader2, ChevronLeft, ChevronRight,
-    ExternalLink,
+    ExternalLink, PlayCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -33,11 +33,14 @@ import api from '../lib/api';
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 const Journeys = () => {
-    const { canEdit, hasRole } = useAuth();
+    const { canEdit, hasRole, isCoordinator } = useAuth();
     const canDelete = hasRole(['coordinator', 'developer']);
+    const canRunSelection = isCoordinator();
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
     const [pulseConfig, setPulseConfig] = useState(null);
+    const [selectionClients, setSelectionClients] = useState([]);
+    const [runningSel, setRunningSel] = useState(false);
 
     // Filters
     const [dateFrom, setDateFrom] = useState(null);
@@ -75,11 +78,16 @@ const Journeys = () => {
                 getClients(),
                 getProviders(),
                 api.get('/admin/config'),
+                listClientConfigs().catch(() => ({ data: { data: [] } })),
             ]);
-            const [clientsRes, providersRes, configRes] = results;
+            const [clientsRes, providersRes, configRes, selRes] = results;
             if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data);
             if (providersRes.status === 'fulfilled') setProviders(providersRes.value.data);
             if (configRes.status === 'fulfilled') setPulseConfig(configRes.value.data?.pulse_config || null);
+            if (selRes.status === 'fulfilled') {
+                const items = selRes.value.data?.data || [];
+                setSelectionClients(items.filter(c => c.selection_enabled && c.active !== false));
+            }
         } catch { /* silent — clients/providers no son críticos */ }
     }, []);
 
@@ -144,6 +152,40 @@ const Journeys = () => {
         setDeleting(false);
     };
 
+    const handleRunSelectionToday = async () => {
+        if (selectionClients.length === 0) {
+            toast.error('No hay clientes con selección habilitada');
+            return;
+        }
+        const ok = window.confirm(
+            `Re-ejecutará la selección SEL01 de hoy para ${selectionClients.length} cliente(s) con Routal habilitado.\n\n` +
+            `Idempotente: drivers ya seleccionados se preservan, journeys NO se duplican.\n\n¿Continuar?`
+        );
+        if (!ok) return;
+        setRunningSel(true);
+        let totalSelected = 0;
+        let totalErrors = 0;
+        try {
+            for (const cfg of selectionClients) {
+                try {
+                    const r = await runSelection(cfg.client_id);
+                    totalSelected += r.data?.selected || 0;
+                } catch (err) {
+                    totalErrors++;
+                    console.error(`SEL01 ${cfg.client_name}:`, err.response?.data?.detail);
+                }
+            }
+            if (totalErrors === 0) {
+                toast.success(`✔ SEL01 ejecutado · ${totalSelected} drivers seleccionados`);
+            } else {
+                toast.warning(`SEL01 con errores: ${totalSelected} drivers seleccionados, ${totalErrors} cliente(s) fallaron`);
+            }
+            fetchData();
+        } finally {
+            setRunningSel(false);
+        }
+    };
+
     const getRouteTypeLabel = (journey) => {
         const rt = journey.route_type || '';
         if (rt === 'CDMX / Zona Metro' || rt === 'CDMX') {
@@ -181,6 +223,20 @@ const Journeys = () => {
                         <Filter className="w-4 h-4 mr-1" />
                         Filtros {hasActiveFilters && <span className="ml-1 w-2 h-2 rounded-full bg-blue-500" />}
                     </Button>
+                    {canRunSelection && selectionClients.length > 0 && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleRunSelectionToday}
+                            disabled={runningSel}
+                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                            title={`Re-ejecuta SEL01 para ${selectionClients.length} cliente(s)`}
+                            data-testid="run-selection-today-btn"
+                        >
+                            {runningSel ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <PlayCircle className="w-4 h-4 mr-1" />}
+                            Re-ejecutar SEL01
+                        </Button>
+                    )}
                     {canEdit() && (
                         <Link to="/layout">
                             <Button size="sm" data-testid="upload-layout-btn">

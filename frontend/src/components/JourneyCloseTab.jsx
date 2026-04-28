@@ -146,7 +146,7 @@ export const JourneyCloseTab = ({
                                 <div className="flex items-center justify-between mb-2">
                                     <div>
                                         <p className="font-medium text-slate-900">Paquetes para devolucion</p>
-                                        <p className="text-sm text-slate-500">Pre-seleccionados de Kosmo. Desmarca los que no aplican.</p>
+                                        <p className="text-sm text-slate-500">Pre-seleccionados desde la fuente (Kosmo / Routal). Desmarca los que no aplican.</p>
                                     </div>
                                     <span className="text-sm text-slate-500">
                                         {returnCandidates.length} candidatos

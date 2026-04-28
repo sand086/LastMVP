@@ -429,7 +429,30 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                                                            className="text-blue-600 hover:underline" onClick={e => e.stopPropagation()}>{guide}</a>
                                                     ) : guide}
                                                 </td>
-                                                <td className="truncate max-w-[120px] text-xs">{pkg.recipient_name}</td>
+                                                <td className="max-w-[200px] text-xs">
+                                                    <div className="truncate font-medium" title={pkg.recipient_name}>
+                                                        {pkg.recipient_name || '—'}
+                                                    </div>
+                                                    {pkg.recipient_phone && (
+                                                        <a
+                                                            href={`tel:${pkg.recipient_phone}`}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className="block text-[10px] text-blue-600 hover:underline truncate font-mono"
+                                                            data-testid={`recipient-phone-${pkg.id}`}
+                                                        >
+                                                            📞 {pkg.recipient_phone}
+                                                        </a>
+                                                    )}
+                                                    {pkg.address && (
+                                                        <div
+                                                            className="text-[10px] text-slate-500 truncate"
+                                                            title={pkg.address}
+                                                            data-testid={`recipient-address-${pkg.id}`}
+                                                        >
+                                                            📍 {pkg.address}
+                                                        </div>
+                                                    )}
+                                                </td>
                                                 <td>
                                                     <StatusPill status={pkg.status} discrepancy={pkg.discrepancy} />
                                                     {pkg.status === 'failed' && pkg.failure_reason && (
