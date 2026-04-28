@@ -291,21 +291,32 @@ async def backfill_from_routal(
             if not routes:
                 skipped_no_driver += 1
                 continue
+            plan_label = detail.get("label") or p.get("label")
+            project_id = detail.get("project_id") or p.get("project_id") or detail.get("organization_id")
             for route in routes:
-                drv_id = route.get("external_id") or route.get("id")
+                drv_id = route.get("id") or route.get("external_id")
                 drv_name = route.get("label") or "Sin asignar"
                 if not drv_id:
                     skipped_no_driver += 1
                     continue
+                # Skip scanner placeholders (route auto-named when no driver assigned yet)
+                if str(drv_name).startswith("LastmileScanSessions"):
+                    skipped_no_driver += 1
+                    continue
+                # Filter stops to only the ones assigned to THIS route
+                route_stops = [s for s in stops if s.get("route_id") == drv_id]
                 payload = {
                     "id": plan_id,
                     "plan_id": plan_id,
+                    "label": plan_label,
+                    "project_id": project_id,
+                    "execution_date": exd,
                     "date": date_str,
                     "driver": {"id": drv_id, "name": drv_name},
                     "driver_id": drv_id,
                     "driver_name": drv_name,
-                    "stops": stops,
-                    "services": stops,
+                    "stops": route_stops,
+                    "services": route_stops,
                     "_backfilled": True,
                     "_backfilled_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -317,6 +328,7 @@ async def backfill_from_routal(
                         "driver_name": drv_name,
                         "date": plan_date,
                         "plan_id_routal": plan_id,
+                        "routal_route_id": drv_id,
                         "route_metadata": payload,
                         "received_at": datetime.now(timezone.utc).isoformat(),
                         "processed": False,

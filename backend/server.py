@@ -368,6 +368,10 @@ api_router.include_router(selection_router)
 from routes.branch_routes import router as branch_router
 api_router.include_router(branch_router)
 
+# iter79: Routal legacy plan→route journey migration (option 1b)
+from routes.routal_migration_routes import router as routal_migration_router
+api_router.include_router(routal_migration_router)
+
 app.include_router(api_router)
 
 
@@ -527,6 +531,10 @@ async def _create_indexes():
     await db.routal_events.create_index([("processed", 1), ("received_at", 1)], background=True)
     await db.journeys.create_index([("client_id", 1), ("source", 1)], background=True)
     await db.journeys.create_index("routal_plan_id", background=True, sparse=True)
+    await db.journeys.create_index(
+        [("client_id", 1), ("routal_route_id", 1)], background=True, sparse=True,
+        name="client_routal_route_idx",
+    )
     await db.packages.create_index([("client_id", 1), ("source", 1)], background=True)
     await db.packages.create_index("routal_service_id", background=True, sparse=True)
 

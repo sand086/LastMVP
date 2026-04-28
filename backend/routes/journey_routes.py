@@ -48,6 +48,8 @@ async def get_journeys(
     user: dict = Depends(get_current_user),
 ):
     query = {}
+    # Hide legacy plan-based Routal journeys that have been split into route-based ones (iter79 migration)
+    query["migrated_to_journeys"] = {"$exists": False}
     if date_from:
         query["date"] = {"$gte": date_from}
     if date_to:

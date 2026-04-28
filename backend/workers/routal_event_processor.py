@@ -99,86 +99,204 @@ def map_routal_stop_to_pkg_fields(stop: dict) -> dict:
     }
 
 
+def _is_scanner_placeholder(label) -> bool:
+    """Routal autogenera planes/routes con prefijo 'LastmileScanSessions - XXXXXX'
+    cuando un escáner móvil crea el plan y aún no se asigna driver real.
+    Estos NO deben crear journey ni stagearse para SEL01 hasta que se asigne driver.
+    """
+    if not label:
+        return False
+    return str(label).startswith("LastmileScanSessions")
+
+
+def _normalize_routes_from_payload(payload: dict) -> list:
+    """Normaliza un plan-payload a una lista de tuplas (route_id, route_label, route_stops, raw_route).
+
+    Acepta dos shapes:
+      - Multi-route (backfill / GET /v2/plan/{id}): payload['routes'] poblado.
+      - Single-driver (webhook / SEL01 staging): payload['driver'] + payload['stops|services'].
+
+    Para multi-route, cada stop se filtra por stop.route_id == route.id.
+    Para single-driver, si los stops traen route_id se filtra por driver.id; si no, se aceptan todos
+    (compat con webhooks viejos que mandan solo el subset asignado al driver).
+    """
+    all_stops = payload.get("stops") or payload.get("services") or []
+    if payload.get("routes"):
+        out = []
+        for r in payload["routes"]:
+            rid = r.get("id") or r.get("external_id")
+            rlabel = r.get("label") or r.get("name") or "Sin asignar"
+            rstops = [s for s in all_stops if s.get("route_id") == r.get("id")]
+            out.append((rid, rlabel, rstops, r))
+        return out
+    drv = payload.get("driver") or {}
+    drv_id = drv.get("id") or payload.get("driver_id")
+    drv_name = drv.get("name") or payload.get("driver_name") or "Sin asignar"
+    if drv_id is None:
+        return []
+    has_route_ids = any(s.get("route_id") for s in all_stops)
+    if has_route_ids:
+        rstops = [s for s in all_stops if s.get("route_id") == drv_id]
+    else:
+        rstops = all_stops
+    return [(drv_id, drv_name, rstops, drv)]
+
+
 async def _handle_plan_created_direct(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
-    """Original behavior: insert Journey + Packages directly.
-    Reused by selection worker after deciding a driver should be audited.
-    Returns journey_id (str) on success, or status string when skipped.
+    """Crea N journeys (1 por route real) desde un plan-payload de Routal.
+
+    Modelo Routal validado contra API:
+      Plan ┐
+           ├─ Route 1 (driver A) ─┬─ Stop a1, a2, ...
+           ├─ Route 2 (driver B) ─┴─ Stop b1, b2, ...
+           └─ stops sin route_id → DESCARTADOS
+
+    Comportamiento:
+      - 1 route real = 1 journey en LastMile (NO 1 plan = 1 journey como antes).
+      - routal_route_id es la nueva clave única (con client_id) por journey.
+      - Routes con label 'LastmileScanSessions*' se omiten (placeholder pre-asignación).
+      - Stops sin route_id se descartan.
+      - Idempotente: si ya existe journey con (routal_route_id, client_id) → reutiliza.
+      - Si una journey legacy existe con mismo plan_id pero sin route_id y solo hay 1 route real,
+        se hidrata in-place (back-compat sin crear duplicado).
+
+    Returns:
+      - First journey_id creado/encontrado (back-compat con callers que esperaban string).
+      - 'skipped: <razón>' si nada se creó.
     """
     plan_id = payload.get("plan_id") or payload.get("id")
     if not plan_id:
         return "skipped: no plan_id"
 
-    existing = await db.journeys.find_one(
-        {"routal_plan_id": plan_id, "client_id": client_id},
-        {"_id": 0, "id": 1},
-    )
-    if existing:
-        return existing["id"]
-
-    driver_name = (payload.get("driver") or {}).get("name") or payload.get("driver_name") or "Sin asignar"
-    services = payload.get("services") or payload.get("stops") or []
-    plan_date_str = _extract_plan_date(payload)
     plan_label = payload.get("label") or payload.get("plan_label")
+    project_id = payload.get("project_id") or payload.get("organization_id")
+    plan_date_str = _extract_plan_date(payload)
 
-    journey_id = str(uuid.uuid4())
-    journey = {
-        "id": journey_id,
-        "routal_plan_id": plan_id,
-        "routal_plan_label": plan_label,
-        "routal_project_id": payload.get("project_id") or payload.get("organization_id"),
-        "branch_id": branch_id,
-        "source": "routal",
-        "client_id": client_id,
-        "driver_name": driver_name,
-        "routal_driver_id": (payload.get("driver") or {}).get("id"),
-        "date": plan_date_str,
-        "status": "planificada",
-        "packages_total": len(services),
-        "packages_delivered": 0,
-        "packages_failed": 0,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
-    }
-    await db.journeys.insert_one(journey)
+    # Skip plan-level placeholder (still possible to have real routes inside, so we don't bail here)
+    routes_iter = _normalize_routes_from_payload(payload)
+    if not routes_iter:
+        return "skipped: no routes/driver in payload"
 
-    pkg_docs = []
-    for svc in services:
-        svc_id = svc.get("id") or svc.get("service_id")
-        if not svc_id:
+    created_ids: list = []
+    skipped_placeholder = 0
+    skipped_no_id = 0
+
+    for route_id, route_label, route_stops, _route_raw in routes_iter:
+        if not route_id:
+            skipped_no_id += 1
             continue
-        mapped = map_routal_stop_to_pkg_fields(svc)
-        pkg_docs.append({
-            "id": str(uuid.uuid4()),
-            "journey_id": journey_id,
-            "client_id": client_id,
-            "source": "routal",
-            "routal_service_id": svc_id,
-            "tracking_number": mapped["tracking_number"] or svc_id,
-            "tracking_url": svc.get("tracking_url"),
-            "order_reference_id": mapped["order_reference_id"],
-            "recipient_name": mapped["recipient_name"],
-            "recipient_phone": mapped["recipient_phone"],
-            "address": mapped["address"],
-            "status": "pending",
-            "created_at": _now_iso(),
-        })
-    # PII at-rest: encrypt before insert
-    if pkg_docs:
-        from utils.pii import encrypt_pkg_pii
-        for d in pkg_docs:
-            if branch_id:
-                d["branch_id"] = branch_id
-            encrypt_pkg_pii(d)
-        await db.packages.insert_many(pkg_docs)
+        if _is_scanner_placeholder(route_label):
+            skipped_placeholder += 1
+            continue
+        if not route_stops and len(routes_iter) > 1:
+            # Multi-route plan: routes with zero stops are administrative shells (no actual deliveries).
+            # Creating an empty journey for them pollutes /rutas. Skip.
+            continue
 
-    logger.info(f"[routal] plan_created plan={plan_id} client={client_id} pkgs={len(pkg_docs)}")
-    return journey_id
+        # Idempotency: existing journey by routal_route_id
+        existing = await db.journeys.find_one(
+            {"routal_route_id": route_id, "client_id": client_id},
+            {"_id": 0, "id": 1},
+        )
+        if existing:
+            created_ids.append(existing["id"])
+            continue
+
+        # Back-compat: legacy single-route plan journey created BEFORE the route-level model.
+        # Only auto-attach if THIS plan has only one real route (not a multi-route plan).
+        if len(routes_iter) == 1:
+            legacy = await db.journeys.find_one(
+                {
+                    "routal_plan_id": plan_id,
+                    "client_id": client_id,
+                    "routal_route_id": {"$exists": False},
+                },
+                {"_id": 0, "id": 1},
+            )
+            if legacy:
+                await db.journeys.update_one(
+                    {"id": legacy["id"]},
+                    {"$set": {
+                        "routal_route_id": route_id,
+                        "driver_name": route_label,
+                        "routal_driver_id": route_id,
+                        "updated_at": _now_iso(),
+                    }},
+                )
+                created_ids.append(legacy["id"])
+                continue
+
+        journey_id = str(uuid.uuid4())
+        journey = {
+            "id": journey_id,
+            "routal_plan_id": plan_id,
+            "routal_plan_label": plan_label,
+            "routal_route_id": route_id,
+            "routal_project_id": project_id,
+            "branch_id": branch_id,
+            "source": "routal",
+            "client_id": client_id,
+            "driver_name": route_label,
+            "routal_driver_id": route_id,  # Routal: route.id == stop.driver_id
+            "date": plan_date_str,
+            "status": "planificada",
+            "packages_total": len(route_stops),
+            "packages_delivered": 0,
+            "packages_failed": 0,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        await db.journeys.insert_one(journey)
+
+        pkg_docs = []
+        for svc in route_stops:
+            svc_id = svc.get("id") or svc.get("service_id")
+            if not svc_id:
+                continue
+            mapped = map_routal_stop_to_pkg_fields(svc)
+            pkg_docs.append({
+                "id": str(uuid.uuid4()),
+                "journey_id": journey_id,
+                "client_id": client_id,
+                "branch_id": branch_id,
+                "source": "routal",
+                "routal_service_id": svc_id,
+                "routal_route_id": route_id,
+                "tracking_number": mapped["tracking_number"] or svc_id,
+                "tracking_url": svc.get("tracking_url"),
+                "order_reference_id": mapped["order_reference_id"],
+                "recipient_name": mapped["recipient_name"],
+                "recipient_phone": mapped["recipient_phone"],
+                "address": mapped["address"],
+                "status": "pending",
+                "created_at": _now_iso(),
+            })
+        if pkg_docs:
+            from utils.pii import encrypt_pkg_pii
+            for d in pkg_docs:
+                encrypt_pkg_pii(d)
+            await db.packages.insert_many(pkg_docs)
+
+        created_ids.append(journey_id)
+        logger.info(
+            f"[routal] route_journey created plan={plan_id} route={route_id} "
+            f"driver={route_label!r} pkgs={len(pkg_docs)}"
+        )
+
+    if not created_ids:
+        return f"skipped: no real routes (placeholder={skipped_placeholder} no_id={skipped_no_id})"
+    if skipped_placeholder:
+        logger.info(f"[routal] plan={plan_id} skipped {skipped_placeholder} placeholder route(s)")
+    return created_ids[0]
 
 
 async def _handle_plan_created(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     """SEL01: when client has selection_enabled=True, stage the plan instead of
     creating the Journey immediately. The selection worker will later create
     Journeys only for selected drivers. Falls back to direct creation otherwise.
+
+    Multi-route plans → 1 staging entry por route real (skip placeholders).
+    Single-driver payloads (webhooks tradicionales) → 1 staging entry como antes.
     """
     cfg = await db.client_config.find_one(
         {"client_id": client_id},
@@ -192,38 +310,69 @@ async def _handle_plan_created(db, payload: dict, client_id: str, branch_id: Opt
             return f"created journey {result}"
         return result
 
-    # Selection-enabled path: stage in routal_daily_plans
+    # Selection-enabled path: stage in routal_daily_plans (one row per real route/driver)
     plan_id = payload.get("plan_id") or payload.get("id")
     if not plan_id:
         return "skipped: no plan_id"
-    drv = (payload.get("driver") or {}).get("id") or payload.get("driver_id")
-    if not drv:
-        return "skipped: no driver_id (selection requires driver)"
-    drv_name = (payload.get("driver") or {}).get("name") or payload.get("driver_name") or "Sin asignar"
+
+    routes_iter = _normalize_routes_from_payload(payload)
+    if not routes_iter:
+        return "skipped: no routes/driver in payload"
+
     plan_date_str = _extract_plan_date(payload)
     try:
         plan_date = datetime.strptime(plan_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
         plan_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # Idempotent staging by (client_id, driver_id, date)
-    await db.routal_daily_plans.update_one(
-        {"client_id": client_id, "driver_id": drv, "date": plan_date},
-        {"$set": {
-            "client_id": client_id,
-            "branch_id": branch_id,
-            "driver_id": drv,
-            "driver_name": drv_name,
-            "date": plan_date,
-            "plan_id_routal": plan_id,
-            "route_metadata": payload,
-            "received_at": _now_iso(),
-            "processed": False,
-        }},
-        upsert=True,
+    plan_label = payload.get("label") or payload.get("plan_label")
+    project_id = payload.get("project_id") or payload.get("organization_id")
+    staged = 0
+    skipped_placeholder = 0
+    for route_id, route_label, route_stops, _route_raw in routes_iter:
+        if not route_id:
+            continue
+        if _is_scanner_placeholder(route_label):
+            skipped_placeholder += 1
+            continue
+        # Build per-route payload that _handle_plan_created_direct will use later
+        route_payload = {
+            "id": plan_id,
+            "plan_id": plan_id,
+            "label": plan_label,
+            "execution_date": payload.get("execution_date"),
+            "date": plan_date_str,
+            "project_id": project_id,
+            "driver": {"id": route_id, "name": route_label},
+            "driver_id": route_id,
+            "driver_name": route_label,
+            "stops": route_stops,
+            "services": route_stops,
+        }
+        await db.routal_daily_plans.update_one(
+            {"client_id": client_id, "driver_id": route_id, "date": plan_date},
+            {"$set": {
+                "client_id": client_id,
+                "branch_id": branch_id,
+                "driver_id": route_id,
+                "driver_name": route_label,
+                "date": plan_date,
+                "plan_id_routal": plan_id,
+                "routal_route_id": route_id,
+                "route_metadata": route_payload,
+                "received_at": _now_iso(),
+                "processed": False,
+            }},
+            upsert=True,
+        )
+        staged += 1
+    logger.info(
+        f"[selection] plan staged plan={plan_id} client={client_id} "
+        f"routes_staged={staged} placeholder={skipped_placeholder}"
     )
-    logger.info(f"[selection] plan staged plan={plan_id} client={client_id} driver={drv}")
-    return f"staged plan {plan_id} for selection (driver={drv})"
+    if staged == 0:
+        return f"skipped: no real routes (placeholder={skipped_placeholder})"
+    return f"staged plan {plan_id} for selection (routes={staged})"
 
 
 async def _handle_plan_started(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
