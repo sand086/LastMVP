@@ -40,6 +40,7 @@ import { SettingsProvidersTab } from '../components/settings/SettingsProvidersTa
 import { SettingsSystemTab } from '../components/settings/SettingsSystemTab';
 import SettingsIntegrationsTab from '../components/settings/SettingsIntegrationsTab';
 import SettingsAuditTab from '../components/settings/SettingsAuditTab';
+import SettingsBranchesTab from '../components/settings/SettingsBranchesTab';
 import { SettingsDriversTab } from '../components/settings/SettingsDriversTab';
 
 const getRoleLabel = (role) => ({ agent: 'Agente', coordinator: 'Coordinador', executive: 'Ejecutivo', developer: 'Developer', proveedor: 'Proveedor' }[role] || role);
@@ -336,10 +337,11 @@ const Settings = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className={isDeveloper ? "grid w-full grid-cols-8" : "grid w-full grid-cols-6"}>
+                <TabsList className={isDeveloper ? "grid w-full grid-cols-9" : "grid w-full grid-cols-7"}>
                     <TabsTrigger value="users" data-testid="tab-users"><Users className="w-4 h-4 mr-2" />Usuarios</TabsTrigger>
                     <TabsTrigger value="drivers" data-testid="tab-drivers"><Truck className="w-4 h-4 mr-2" />Drivers</TabsTrigger>
                     <TabsTrigger value="clients" data-testid="tab-clients"><Building2 className="w-4 h-4 mr-2" />Clientes</TabsTrigger>
+                    <TabsTrigger value="branches" data-testid="tab-branches"><Building2 className="w-4 h-4 mr-2" />Sucursales</TabsTrigger>
                     <TabsTrigger value="providers" data-testid="tab-providers"><Truck className="w-4 h-4 mr-2" />Proveedores</TabsTrigger>
                     <TabsTrigger value="system" data-testid="tab-system"><Settings2 className="w-4 h-4 mr-2" />Sistema</TabsTrigger>
                     <TabsTrigger value="webhooks" data-testid="tab-webhooks"><Globe className="w-4 h-4 mr-2" />Webhooks</TabsTrigger>
@@ -359,6 +361,9 @@ const Settings = () => {
                 </TabsContent>
                 <TabsContent value="clients">
                     <SettingsClientsTab loading={loading} searchClients={searchClients} setSearchClients={setSearchClients} sortedClients={sortedClients} filteredClients={filteredClients} ClientSortHeader={ClientSortHeader} handleOpenEntityModal={handleOpenEntityModal} handleDeleteEntity={handleDeleteEntity} />
+                </TabsContent>
+                <TabsContent value="branches">
+                    <SettingsBranchesTab />
                 </TabsContent>
                 <TabsContent value="providers">
                     <SettingsProvidersTab loading={loading} searchProviders={searchProviders} setSearchProviders={setSearchProviders} sortedProviders={sortedProviders} filteredProviders={filteredProviders} ProvSortHeader={ProvSortHeader} handleOpenEntityModal={handleOpenEntityModal} handleDeleteEntity={handleDeleteEntity} />

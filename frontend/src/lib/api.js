@@ -329,6 +329,25 @@ export const reconcileJourneyDates = (clientId, daysBack = 30, dryRun = true) =>
     );
 export const syncJourneyFromRoutal = (journeyId) =>
     api.post(`/integrations/routal/sync-journey/${journeyId}`, null, { timeout: 60000 });
+
+// Branches (RT-13 / iter71)
+export const listBranches = (clientId, activeOnly = false) => {
+    const params = new URLSearchParams();
+    if (clientId) params.set('client_id', clientId);
+    if (activeOnly) params.set('active_only', 'true');
+    return api.get(`/branches${params.toString() ? '?' + params.toString() : ''}`);
+};
+export const createBranch = (payload) => api.post('/branches', payload);
+export const updateBranch = (branchId, payload) => api.patch(`/branches/${branchId}`, payload);
+export const deleteBranch = (branchId) => api.delete(`/branches/${branchId}`);
+export const migrateCubboCities = (dryRun = true) =>
+    api.post(`/branches/migrate-cubbo-cities?dry_run=${dryRun}`);
+export const setBranchRoutalCreds = (branchId, payload) =>
+    api.put(`/branches/${branchId}/routal-credentials`, payload);
+export const getBranchRoutalCreds = (branchId) =>
+    api.get(`/branches/${branchId}/routal-credentials`);
+export const toggleBranchRoutal = (branchId, active) =>
+    api.patch(`/branches/${branchId}/routal-toggle?active=${active}`);
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
 export const getDriverAuditHistory = (driverId, clientId, days = 30) =>
