@@ -354,6 +354,8 @@ export const probeRoutalConnection = (creds) =>
     api.post('/branches/probe-routal-connection', creds, { timeout: 30000 });
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
+export const getBranchHistory = (clientId, days = 14) =>
+    api.get(`/selection/branch-history/${clientId}?days=${days}`);
 export const getDriverAuditHistory = (driverId, clientId, days = 30) =>
     api.get(`/drivers/audit-history/${driverId}?client_id=${clientId}&days=${days}`);
 

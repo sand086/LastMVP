@@ -560,6 +560,86 @@ async def get_selection_summary(
     }
 
 
+@router.get("/selection/branch-history/{client_id}")
+async def get_branch_history(
+    client_id: str,
+    days: int = Query(14, ge=1, le=90),
+    user: dict = Depends(get_current_user),
+):
+    """Sparkline data: per-branch totals/selected for the last N days."""
+    _require_role(user, ["developer", "coordinator", "executive"])
+    today = datetime.now(CDMX_TZ).date()
+    start = today - timedelta(days=days - 1)
+    start_dt = _date_to_dt(start)
+
+    pipeline = [
+        {"$match": {"client_id": client_id, "date": {"$gte": start_dt}}},
+        {
+            "$group": {
+                "_id": {"date": "$date", "branch_id": "$branch_id"},
+                "total": {"$sum": 1},
+                "selected": {
+                    "$sum": {"$cond": [{"$eq": ["$selection_status", "selected"]}, 1, 0]},
+                },
+            }
+        },
+    ]
+    rows = await db.driver_audit_log.aggregate(pipeline).to_list(length=2000)
+
+    # Resolve branch ids → codes
+    branch_ids = {r["_id"].get("branch_id") for r in rows if r["_id"].get("branch_id")}
+    branch_meta: dict = {}
+    if branch_ids:
+        async for b in db.branches.find(
+            {"id": {"$in": list(branch_ids)}},
+            {"_id": 0, "id": 1, "code": 1, "name": 1},
+        ):
+            branch_meta[b["id"]] = {"code": b.get("code"), "name": b.get("name")}
+
+    # Build series indexed by branch code
+    series: dict = {}
+    for r in rows:
+        bid = r["_id"].get("branch_id")
+        if not bid:
+            continue
+        meta = branch_meta.get(bid, {})
+        code = meta.get("code") or bid[:8]
+        d = r["_id"]["date"]
+        d_str = d.strftime("%Y-%m-%d") if isinstance(d, datetime) else str(d)
+        s = series.setdefault(code, {
+            "branch_id": bid,
+            "code": code,
+            "name": meta.get("name"),
+            "by_date": {},
+        })
+        s["by_date"][d_str] = {"total": r["total"], "selected": r["selected"]}
+
+    # Materialize one entry per day in the range, even zeros
+    all_dates = [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
+    branches_out = []
+    for code, s in sorted(series.items()):
+        points = [
+            {"date": d, **(s["by_date"].get(d) or {"total": 0, "selected": 0})}
+            for d in all_dates
+        ]
+        branches_out.append({
+            "code": code,
+            "branch_id": s["branch_id"],
+            "name": s["name"],
+            "points": points,
+            "total_sum": sum(p["total"] for p in points),
+            "selected_sum": sum(p["selected"] for p in points),
+        })
+
+    return {
+        "client_id": client_id,
+        "days": days,
+        "from": start.strftime("%Y-%m-%d"),
+        "to": today.strftime("%Y-%m-%d"),
+        "branches": branches_out,
+    }
+
+
 @router.get("/drivers/audit-history/{driver_id}")
 async def get_driver_audit_history(
     driver_id: str,

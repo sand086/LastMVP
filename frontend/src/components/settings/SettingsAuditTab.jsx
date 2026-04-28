@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import {
     listClientConfigs, getClients, patchClientConfig,
     runSelection, runSelectionRange, backfillSelectionFromRoutal,
-    reconcileJourneyDates, getSelectionSummary,
+    reconcileJourneyDates, getSelectionSummary, getBranchHistory,
 } from '../../lib/api';
 
 const formatDate = (d) => {
@@ -22,6 +22,45 @@ const formatDate = (d) => {
             day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
         });
     } catch { return String(d); }
+};
+
+// Tiny inline SVG sparkline of selected/total ratio over time.
+// One bar per day; height = ratio (0-100%); tone = activity volume.
+const BranchSparkline = ({ points, code, name }) => {
+    const W = 88, H = 22, gap = 1;
+    const n = points.length || 1;
+    const bw = Math.max(1, (W - gap * (n - 1)) / n);
+    const totalSum = points.reduce((s, p) => s + p.total, 0);
+    const selSum = points.reduce((s, p) => s + p.selected, 0);
+    const overall = totalSum > 0 ? Math.round((selSum / totalSum) * 100) : 0;
+    return (
+        <div
+            className="flex items-center gap-2 px-2 py-1.5 bg-white border border-slate-200 rounded"
+            title={`${name || code} — últimos ${n} días: ${selSum}/${totalSum} (${overall}%)`}
+            data-testid={`branch-spark-${code}`}
+        >
+            <span className="text-[10px] font-mono font-semibold uppercase text-slate-700 w-8">
+                {code}
+            </span>
+            <svg width={W} height={H} className="overflow-visible">
+                {points.map((p, i) => {
+                    const x = i * (bw + gap);
+                    const ratio = p.total > 0 ? p.selected / p.total : 0;
+                    const h = p.total > 0 ? Math.max(2, ratio * (H - 2)) : 1;
+                    const y = H - h;
+                    const fill = p.total === 0
+                        ? '#e2e8f0'                      // slate-200 (no data)
+                        : ratio >= 0.5 ? '#10b981'       // emerald-500
+                        : ratio > 0    ? '#3b82f6'       // blue-500
+                                       : '#cbd5e1';      // slate-300 (zero selected)
+                    return <rect key={p.date} x={x} y={y} width={bw} height={h} rx="0.5" fill={fill} />;
+                })}
+            </svg>
+            <span className="text-[10px] font-mono text-slate-500 tabular-nums w-12 text-right">
+                {selSum}/{totalSum}
+            </span>
+        </div>
+    );
 };
 
 const SettingsAuditTab = ({ isDeveloper }) => {
@@ -150,6 +189,18 @@ const ClientAuditCard = ({ client, config, summary: initialSummary, onChanged })
         setSummaryDate(d);
         refreshSummary(d);
     };
+
+    // Branch history sparkline (last 14 days) — only for clients with branches
+    const [branchHistory, setBranchHistory] = useState(null);
+    useEffect(() => {
+        if (!client?.id || !cfg.selection_enabled) return;
+        let cancelled = false;
+        getBranchHistory(client.id, 14)
+            .then(r => { if (!cancelled) setBranchHistory(r.data); })
+            .catch(() => { /* silent — sparkline is optional */ });
+        return () => { cancelled = true; };
+    }, [client?.id, cfg.selection_enabled]);
+
     const [enabled, setEnabled] = useState(cfg.selection_enabled ?? false);
     const [maxDaily, setMaxDaily] = useState(cfg.max_daily_audits ?? 30);
     const initialTimes = (cfg.scheduler_times && cfg.scheduler_times.length ? cfg.scheduler_times : [cfg.scheduler_time || '06:00']);
@@ -552,6 +603,31 @@ const ClientAuditCard = ({ client, config, summary: initialSummary, onChanged })
                                         </span>
                                     );
                                 })}
+                            </div>
+                        </div>
+                    )}
+                    {branchHistory && branchHistory.branches && branchHistory.branches.length > 0 && (
+                        <div
+                            className="mt-3 pt-2 border-t border-slate-200"
+                            data-testid={`branch-history-${client.id}`}
+                        >
+                            <div className="flex items-center justify-between mb-1.5">
+                                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                                    Tendencia · últimos {branchHistory.days} días
+                                </p>
+                                <span className="text-[9px] text-slate-400 font-mono">
+                                    {branchHistory.from} → {branchHistory.to}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                                {branchHistory.branches.map(b => (
+                                    <BranchSparkline
+                                        key={b.code}
+                                        code={b.code}
+                                        name={b.name}
+                                        points={b.points}
+                                    />
+                                ))}
                             </div>
                         </div>
                     )}
