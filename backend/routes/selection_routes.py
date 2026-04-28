@@ -12,7 +12,7 @@ All endpoints require client_id scoping.
 """
 import logging
 from datetime import datetime, date, timedelta, timezone
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from zoneinfo import ZoneInfo
@@ -523,8 +523,10 @@ async def get_selection_summary(
         "phase_applied": phase_applied,
         "max_daily_audits": cfg.get("max_daily_audits"),
         "scheduler_time": cfg.get("scheduler_time"),
+        "scheduler_times": cfg.get("scheduler_times") or [cfg.get("scheduler_time", "06:00")],
         "selection_enabled": cfg.get("selection_enabled"),
         "last_scheduled_run_date": cfg.get("last_scheduled_run_date"),
+        "last_scheduled_run_dates": cfg.get("last_scheduled_run_dates") or {},
         "drivers_selected": drivers_selected,
     }
 
@@ -573,7 +575,8 @@ async def get_driver_audit_history(
 class ClientConfigPatch(BaseModel):
     max_daily_audits: Optional[int] = Field(None, gt=0, le=500)
     selection_enabled: Optional[bool] = None
-    scheduler_time: Optional[str] = Field(None, description="HH:MM (24h, tz CDMX)")
+    scheduler_time: Optional[str] = Field(None, description="HH:MM (24h, tz CDMX) — legacy single-time")
+    scheduler_times: Optional[List[str]] = Field(None, description="HH:MM array (RT-11 multi-cutoff)")
     active: Optional[bool] = None
 
 
@@ -621,6 +624,7 @@ async def patch_client_config(
             max_daily_audits=payload.max_daily_audits,
             selection_enabled=payload.selection_enabled,
             scheduler_time=payload.scheduler_time,
+            scheduler_times=payload.scheduler_times,
             active=payload.active,
         )
     except ValueError as e:

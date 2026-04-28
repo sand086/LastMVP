@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 DEFAULTS = {
     "max_daily_audits": 30,
     "selection_enabled": False,  # OFF by default → non-breaking
-    "scheduler_time": "06:00",
+    "scheduler_time": "06:00",  # Legacy single time
+    "scheduler_times": ["06:00"],  # RT-11 multiple cutoffs
     "active": True,
 }
 
@@ -41,6 +42,18 @@ def _validate_time(value: str) -> str:
     except (ValueError, TypeError) as e:
         raise ValueError(f"scheduler_time must be HH:MM (24h), got '{value}'") from e
     return value
+
+
+def _validate_times(values: list) -> list:
+    """Validate and dedupe a list of HH:MM strings."""
+    if not isinstance(values, list):
+        raise ValueError("scheduler_times must be a list of HH:MM strings")
+    if len(values) == 0:
+        raise ValueError("scheduler_times must have at least one entry")
+    if len(values) > 10:
+        raise ValueError("scheduler_times max 10 entries")
+    cleaned = sorted({_validate_time(v) for v in values})
+    return cleaned
 
 
 class ClientConfigService:
@@ -72,6 +85,7 @@ class ClientConfigService:
         max_daily_audits: Optional[int] = None,
         selection_enabled: Optional[bool] = None,
         scheduler_time: Optional[str] = None,
+        scheduler_times: Optional[list] = None,
         active: Optional[bool] = None,
     ) -> dict:
         """Create or update. Validates fields and returns the updated doc."""
@@ -91,10 +105,18 @@ class ClientConfigService:
         elif "selection_enabled" not in existing:
             update["selection_enabled"] = DEFAULTS["selection_enabled"]
 
-        if scheduler_time is not None:
+        # RT-11: scheduler_times (array) takes precedence over scheduler_time (legacy single)
+        if scheduler_times is not None:
+            update["scheduler_times"] = _validate_times(scheduler_times)
+            update["scheduler_time"] = update["scheduler_times"][0]  # back-compat single
+        elif scheduler_time is not None:
             update["scheduler_time"] = _validate_time(scheduler_time)
-        elif "scheduler_time" not in existing:
-            update["scheduler_time"] = DEFAULTS["scheduler_time"]
+            update["scheduler_times"] = [update["scheduler_time"]]
+        else:
+            if "scheduler_time" not in existing:
+                update["scheduler_time"] = DEFAULTS["scheduler_time"]
+            if "scheduler_times" not in existing:
+                update["scheduler_times"] = DEFAULTS["scheduler_times"]
 
         if active is not None:
             update["active"] = bool(active)

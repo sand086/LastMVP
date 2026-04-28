@@ -74,6 +74,13 @@ class BranchResponse(BaseModel):
     routal_last_test_status: Optional[str] = None
 
 
+class BranchRoutalCredsPayload(BaseModel):
+    routal_api_key: Optional[str] = None
+    routal_project_id: Optional[str] = None
+    routal_webhook_secret: Optional[str] = None
+    active: Optional[bool] = None
+
+
 @router.get("/branches", response_model=List[BranchResponse])
 async def list_branches(
     client_id: Optional[str] = None,
@@ -244,6 +251,56 @@ async def migrate_cubbo_cities(
     }
 
 
+@router.post("/branches/probe-routal-connection")
+async def probe_routal_connection(
+    payload: BranchRoutalCredsPayload,
+    user: dict = Depends(get_current_user),
+):
+    """Validates ad-hoc Routal credentials WITHOUT persisting them. Used by the
+    "Probar conexión" button in the credentials form before clicking Save.
+    Returns same shape as test-routal-connection.
+    """
+    _require_role(user, ["developer", "coordinator"])
+    api_key = (payload.routal_api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key requerida para probar")
+    from services.routal_client import RoutalClient
+    rc = RoutalClient(api_key=api_key, project_id=(payload.routal_project_id or None))
+    plans_seen = []
+    plan_count = 0
+    try:
+        data = await rc._request("GET", "/v2/plans", params={"limit": 5, "offset": 0})
+        plans = data if isinstance(data, list) else (data.get("docs") or data.get("data") or data.get("plans") or [])
+        plan_count = len(plans)
+        for p in plans[:3]:
+            plans_seen.append({
+                "id": p.get("id"),
+                "label": p.get("label"),
+                "execution_date": p.get("execution_date"),
+            })
+    except Exception as e:
+        try:
+            await rc.aclose()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "probe": True,
+            "error": str(e)[:300],
+            "hint": "Verifica API Key + Project ID. La API key debe ser de tipo private_key (no public).",
+        }
+    try:
+        await rc.aclose()
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "probe": True,
+        "plans_visible": plan_count,
+        "sample_plans": plans_seen,
+    }
+
+
 @router.post("/branches/{branch_id}/test-routal-connection")
 async def test_branch_routal_connection(
     branch_id: str,
@@ -331,12 +388,6 @@ async def test_branch_routal_connection(
 
 
 # ─────────────── Branch-level Routal credentials (RT-01) ───────────────
-
-class BranchRoutalCredsPayload(BaseModel):
-    routal_api_key: Optional[str] = None
-    routal_project_id: Optional[str] = None
-    routal_webhook_secret: Optional[str] = None
-    active: Optional[bool] = None
 
 
 @router.put("/branches/{branch_id}/routal-credentials")

@@ -186,6 +186,7 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
         drv = plan.get("driver_id")
         if not drv:
             continue
+        plan_branch_id = plan.get("branch_id")
         if drv in selected_set:
             phase = phase_map.get(drv, "phase_1")
             counts[phase] = counts.get(phase, 0) + 1
@@ -193,7 +194,9 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
             journey_id = None
             if drv in new_selected:
                 try:
-                    journey_id = await _handle_plan_created_direct(db, plan["route_metadata"], client_id)
+                    journey_id = await _handle_plan_created_direct(
+                        db, plan["route_metadata"], client_id, branch_id=plan_branch_id,
+                    )
                     counts["selected_new"] += 1
                 except Exception as e:
                     logger.error(f"[selection] journey create failed for {drv}: {e}")
@@ -203,6 +206,7 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
                 {"client_id": client_id, "driver_id": drv, "date": target_dt},
                 {"$set": {
                     "client_id": client_id,
+                    "branch_id": plan_branch_id,
                     "driver_id": drv,
                     "driver_name": plan.get("driver_name"),
                     "date": target_dt,
@@ -221,6 +225,7 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
                 {"client_id": client_id, "driver_id": drv, "date": target_dt},
                 {"$set": {
                     "client_id": client_id,
+                    "branch_id": plan_branch_id,
                     "driver_id": drv,
                     "driver_name": plan.get("driver_name"),
                     "date": target_dt,
@@ -247,6 +252,30 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
             f"[selection] fleet={len(drivers_today)} >3x max_daily={max_daily} for {client_id}; rotation slow"
         )
 
+    # RT-09: per-branch breakdown for multi-project clients (Cubbo CDMX/GDL/...)
+    branch_breakdown = {}
+    for plan in plans:
+        bid = plan.get("branch_id")
+        if not bid:
+            continue
+        bb = branch_breakdown.setdefault(bid, {"total": 0, "selected": 0})
+        bb["total"] += 1
+        if plan.get("driver_id") in selected_set:
+            bb["selected"] += 1
+    # Resolve branch_id → code for human-readable summary
+    if branch_breakdown:
+        branch_codes = {}
+        async for b in db.branches.find(
+            {"id": {"$in": list(branch_breakdown.keys())}},
+            {"_id": 0, "id": 1, "code": 1},
+        ):
+            branch_codes[b["id"]] = b["code"]
+        branch_breakdown_named = {
+            branch_codes.get(bid, bid[:8]): vals for bid, vals in branch_breakdown.items()
+        }
+    else:
+        branch_breakdown_named = {}
+
     summary = {
         "ok": True,
         "client_id": client_id,
@@ -257,6 +286,7 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
         "phase_1": counts["phase_1"],
         "phase_2": counts["phase_2"],
         "max_daily_audits": max_daily,
+        "branch_breakdown": branch_breakdown_named,
     }
     logger.info(
         f"[selection] client={client_id} date={target_date} "
@@ -273,9 +303,14 @@ _scheduler_stop = asyncio.Event() if False else None  # initialised in start
 
 async def _scheduler_loop(db):
     """Polls every 60s. Triggers run_daily_selection per client when:
-       - now (CDMX) >= scheduler_time (HH:MM CDMX),
-       - last_scheduled_run_date != today's CDMX date.
-    Errors per client are logged but do not stop the loop.
+       - now (CDMX) >= any of the configured cutoff times (scheduler_times[]),
+       - that specific cutoff hasn't fired today (last_scheduled_run_dates[time] != today).
+
+    RT-11: supports multiple cutoff times per day (e.g. ["06:00", "12:00", "18:00"])
+    so that selection re-runs throughout the day to capture late-arriving Routal plans.
+    Each cutoff is tracked independently in `last_scheduled_run_dates` (dict).
+
+    Legacy single `scheduler_time` field is honored for back-compat.
     """
     logger.info("[selection.scheduler] started")
     try:
@@ -289,28 +324,44 @@ async def _scheduler_loop(db):
                 )
                 clients = [c async for c in cursor]
                 for cfg in clients:
-                    sched = cfg.get("scheduler_time", "06:00")
-                    last_run = cfg.get("last_scheduled_run_date")
-                    if last_run == today_str:
-                        continue  # already ran today
-                    try:
-                        hh, mm = sched.split(":")
-                        target = now_cdmx.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-                    except Exception:
-                        logger.warning(f"[selection.scheduler] invalid scheduler_time '{sched}' for {cfg.get('client_id')}")
-                        continue
-                    if now_cdmx < target:
-                        continue
+                    times = cfg.get("scheduler_times")
+                    if not times or not isinstance(times, list):
+                        # Fallback to legacy single-time
+                        single = cfg.get("scheduler_time", "06:00")
+                        times = [single]
+                    last_runs = cfg.get("last_scheduled_run_dates") or {}
+                    # Legacy compatibility: if old `last_scheduled_run_date` exists, treat
+                    # it as "first cutoff already ran today"
+                    legacy_last = cfg.get("last_scheduled_run_date")
+                    if legacy_last == today_str and times and times[0] not in last_runs:
+                        last_runs[times[0]] = today_str
+
                     cid = cfg["client_id"]
-                    try:
-                        await run_daily_selection(db, cid)
-                        await db.client_config.update_one(
-                            {"client_id": cid},
-                            {"$set": {"last_scheduled_run_date": today_str, "last_scheduled_run_at": _now_iso()}},
-                        )
-                        logger.info(f"[selection.scheduler] ran for {cid} on {today_str}")
-                    except Exception as e:
-                        logger.error(f"[selection.scheduler] error for {cid}: {e}")
+                    for sched in times:
+                        if last_runs.get(sched) == today_str:
+                            continue  # this cutoff already fired today
+                        try:
+                            hh, mm = sched.split(":")
+                            target = now_cdmx.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+                        except Exception:
+                            logger.warning(f"[selection.scheduler] invalid scheduler_time '{sched}' for {cid}")
+                            continue
+                        if now_cdmx < target:
+                            continue
+                        try:
+                            await run_daily_selection(db, cid)
+                            last_runs[sched] = today_str
+                            await db.client_config.update_one(
+                                {"client_id": cid},
+                                {"$set": {
+                                    "last_scheduled_run_dates": last_runs,
+                                    "last_scheduled_run_date": today_str,  # legacy field
+                                    "last_scheduled_run_at": _now_iso(),
+                                }},
+                            )
+                            logger.info(f"[selection.scheduler] ran for {cid} cutoff={sched} on {today_str}")
+                        except Exception as e:
+                            logger.error(f"[selection.scheduler] error for {cid} cutoff={sched}: {e}")
             except Exception as e:
                 logger.error(f"[selection.scheduler] tick error: {e}")
             await asyncio.sleep(60)

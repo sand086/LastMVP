@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import {
     listBranches, createBranch, updateBranch, deleteBranch,
     migrateCubboCities, setBranchRoutalCreds, toggleBranchRoutal,
-    testBranchRoutalConnection, getClients,
+    testBranchRoutalConnection, probeRoutalConnection, getClients,
 } from '../../lib/api';
 
 const COMMON_CITY_CODES = ['CDMX', 'GDL', 'MOR', 'MTY', 'PUE', 'QRO', 'PACHUCA'];
@@ -55,12 +55,25 @@ const BranchRow = ({ branch, onChanged }) => {
         setTesting(true);
         setTestResult(null);
         try {
-            const r = await testBranchRoutalConnection(branch.id);
+            // If user has typed values in the form, probe those (no persistence).
+            // Otherwise test the saved credentials.
+            const hasFormValues = apiKey || projectId;
+            let r;
+            if (hasFormValues) {
+                r = await probeRoutalConnection({
+                    routal_api_key: apiKey || undefined,
+                    routal_project_id: projectId || undefined,
+                });
+            } else {
+                r = await testBranchRoutalConnection(branch.id);
+            }
             setTestResult(r.data);
             if (r.data.ok) {
                 toast.success(
-                    `✔ Conexión OK con Routal · ${r.data.plans_visible} plan(es) visibles`,
+                    `✔ Conexión OK con Routal · ${r.data.plans_visible} plan(es) visibles${r.data.probe ? ' (sin guardar)' : ''}`,
                 );
+            } else {
+                toast.error(r.data.error || 'Error de conexión');
             }
         } catch (err) {
             const detail = err.response?.data?.detail || err.message || 'Error de conexión';
@@ -248,7 +261,7 @@ const BranchRow = ({ branch, onChanged }) => {
                             <Button size="sm" variant="ghost" onClick={() => setShowCredsForm(false)}>
                                 Cancelar
                             </Button>
-                            {branch.has_routal_credentials && (
+                            {(branch.has_routal_credentials || apiKey || projectId) && (
                                 <Button
                                     size="sm"
                                     variant="outline"
@@ -256,9 +269,10 @@ const BranchRow = ({ branch, onChanged }) => {
                                     disabled={testing}
                                     className="border-blue-300 text-blue-700"
                                     data-testid={`branch-test-conn-${branch.code}`}
+                                    title={apiKey || projectId ? 'Probar las credenciales del form (sin guardar)' : 'Probar las credenciales guardadas'}
                                 >
                                     {testing ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Zap className="w-3.5 h-3.5 mr-1" />}
-                                    Probar conexión
+                                    Probar {(apiKey || projectId) ? '(sin guardar)' : 'conexión'}
                                 </Button>
                             )}
                             <Button

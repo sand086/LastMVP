@@ -350,6 +350,8 @@ export const toggleBranchRoutal = (branchId, active) =>
     api.patch(`/branches/${branchId}/routal-toggle?active=${active}`);
 export const testBranchRoutalConnection = (branchId) =>
     api.post(`/branches/${branchId}/test-routal-connection`, null, { timeout: 30000 });
+export const probeRoutalConnection = (creds) =>
+    api.post('/branches/probe-routal-connection', creds, { timeout: 30000 });
 export const getSelectionSummary = (clientId, date) =>
     api.get(`/selection/summary/${clientId}` + (date ? `?date=${date}` : ''));
 export const getDriverAuditHistory = (driverId, clientId, days = 30) =>

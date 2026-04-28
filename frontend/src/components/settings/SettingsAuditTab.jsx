@@ -130,7 +130,10 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
     const cfg = config || {};
     const [enabled, setEnabled] = useState(cfg.selection_enabled ?? false);
     const [maxDaily, setMaxDaily] = useState(cfg.max_daily_audits ?? 30);
-    const [schedTime, setSchedTime] = useState(cfg.scheduler_time ?? '06:00');
+    const initialTimes = (cfg.scheduler_times && cfg.scheduler_times.length ? cfg.scheduler_times : [cfg.scheduler_time || '06:00']);
+    const [schedTime, setSchedTime] = useState(initialTimes[0]);
+    const [schedTimes, setSchedTimes] = useState(initialTimes);
+    const [newSchedTime, setNewSchedTime] = useState('');
     const [active, setActive] = useState(cfg.active ?? true);
     const [saving, setSaving] = useState(false);
     const [running, setRunning] = useState(false);
@@ -147,12 +150,39 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
     const [rangeTo, setRangeTo] = useState(today);
     const [rangeResult, setRangeResult] = useState(null);
 
+    const sortedSchedTimes = JSON.stringify([...schedTimes].sort());
+    const sortedInitial = JSON.stringify([...initialTimes].sort());
     const dirty = (
         enabled !== (cfg.selection_enabled ?? false) ||
         Number(maxDaily) !== (cfg.max_daily_audits ?? 30) ||
-        schedTime !== (cfg.scheduler_time ?? '06:00') ||
+        sortedSchedTimes !== sortedInitial ||
         active !== (cfg.active ?? true)
     );
+
+    const handleAddTime = () => {
+        if (!/^\d{2}:\d{2}$/.test(newSchedTime)) {
+            toast.error('Formato HH:MM');
+            return;
+        }
+        if (schedTimes.includes(newSchedTime)) {
+            toast.error('Esa hora ya existe');
+            return;
+        }
+        if (schedTimes.length >= 10) {
+            toast.error('Máximo 10 cortes diarios');
+            return;
+        }
+        setSchedTimes([...schedTimes, newSchedTime].sort());
+        setNewSchedTime('');
+    };
+
+    const handleRemoveTime = (t) => {
+        if (schedTimes.length <= 1) {
+            toast.error('Debe haber al menos una hora');
+            return;
+        }
+        setSchedTimes(schedTimes.filter(x => x !== t));
+    };
 
     const handleSave = async () => {
         setSaving(true);
@@ -162,14 +192,16 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                 toast.error('max_daily_audits debe estar entre 1 y 500');
                 return;
             }
-            if (!/^\d{2}:\d{2}$/.test(schedTime)) {
-                toast.error('Hora debe tener formato HH:MM (ej. 06:00)');
-                return;
+            for (const t of schedTimes) {
+                if (!/^\d{2}:\d{2}$/.test(t)) {
+                    toast.error(`Hora inválida: ${t}`);
+                    return;
+                }
             }
             await patchClientConfig(client.id, {
                 selection_enabled: enabled,
                 max_daily_audits: md,
-                scheduler_time: schedTime,
+                scheduler_times: schedTimes,
                 active,
             });
             toast.success(`Configuración guardada para ${client.name}`);
@@ -369,16 +401,51 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                 <div className="space-y-1">
                     <Label className="text-xs text-slate-600 flex items-center gap-1.5">
                         <Clock className="w-3 h-3" />
-                        Hora del scheduler (CDMX)
+                        Cortes horarios (CDMX)
                     </Label>
-                    <Input
-                        type="time"
-                        value={schedTime}
-                        onChange={(e) => setSchedTime(e.target.value)}
-                        disabled={!enabled}
-                        className="font-mono"
-                        data-testid={`scheduler-time-${client.id}`}
-                    />
+                    <div className="flex flex-wrap gap-1.5 items-center bg-white px-2 py-1.5 rounded-md border border-slate-200 min-h-[36px]">
+                        {schedTimes.map(t => (
+                            <span
+                                key={t}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-mono text-xs"
+                                data-testid={`sched-time-chip-${client.id}-${t}`}
+                            >
+                                {t}
+                                {schedTimes.length > 1 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleRemoveTime(t)}
+                                        disabled={!enabled}
+                                        className="text-emerald-500 hover:text-red-600 disabled:opacity-30"
+                                        title={`Quitar ${t}`}
+                                    >×</button>
+                                )}
+                            </span>
+                        ))}
+                        <input
+                            type="time"
+                            value={newSchedTime}
+                            onChange={(e) => setNewSchedTime(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleAddTime();
+                                }
+                            }}
+                            disabled={!enabled || schedTimes.length >= 10}
+                            className="text-xs font-mono border-0 outline-none bg-transparent w-[80px]"
+                            data-testid={`new-sched-time-${client.id}`}
+                        />
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleAddTime}
+                            disabled={!enabled || !newSchedTime || schedTimes.length >= 10}
+                            className="h-6 px-1.5 text-xs"
+                            data-testid={`add-sched-time-${client.id}`}
+                        >+</Button>
+                    </div>
                 </div>
                 <div className="space-y-1">
                     <Label className="text-xs text-slate-600">Selección habilitada</Label>
