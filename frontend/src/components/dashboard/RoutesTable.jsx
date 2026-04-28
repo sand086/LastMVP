@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useSortableTable } from '../../lib/useSortableTable';
 import { formatDate } from '../../lib/utils';
 import { Progress } from '../ui/progress';
-import { Eye, AlertTriangle } from 'lucide-react';
+import { Eye, AlertTriangle, ExternalLink } from 'lucide-react';
 
 const T = {
     textPri: '#1A1916', textTer: '#9C9A92', amber: '#D97706',
@@ -21,7 +21,7 @@ export const RoutesTable = ({ journeys }) => {
             <table className="lm-table" style={{ width: '100%' }}>
                 <thead>
                     <tr>
-                        <SortHeader field="order_id">Order ID</SortHeader>
+                        <SortHeader field="order_id">Origen / ID</SortHeader>
                         <SortHeader field="date">Fecha</SortHeader>
                         <SortHeader field="client_name">Cliente</SortHeader>
                         <SortHeader field="provider_name">Proveedor</SortHeader>
@@ -39,8 +39,37 @@ export const RoutesTable = ({ journeys }) => {
                         const pc = getProgressColor(rate);
                         return (
                             <tr key={j.id} data-testid={`journey-row-${j.id}`}>
-                                <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: '#1D4ED8', maxWidth: 110 }} className="truncate" title={j.order_id}>
-                                    {j.order_id || <span style={{ color: T.textTer }}>-</span>}
+                                <td style={{ maxWidth: 180 }} data-testid={`row-source-${j.id}`}>
+                                    {j.source === 'routal' && j.routal_plan_id ? (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={{ padding: '2px 6px', backgroundColor: '#ECFDF5', color: '#047857', borderRadius: 4, border: '1px solid #A7F3D0', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', flexShrink: 0 }}>Routal</span>
+                                            <span
+                                                style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                                title={j.routal_plan_id}
+                                            >
+                                                {j.routal_plan_label || (j.routal_plan_id.slice(0, 10) + '…')}
+                                            </span>
+                                            {j.routal_project_id && (
+                                                <a
+                                                    href={`https://planner.routal.com/h/${j.routal_project_id}/planner/plan/${j.routal_plan_id}/stops`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    title="Abrir en Routal Planner"
+                                                    style={{ color: '#10B981', flexShrink: 0, display: 'inline-flex' }}
+                                                    data-testid={`row-routal-link-${j.id}`}
+                                                >
+                                                    <ExternalLink style={{ width: 13, height: 13 }} />
+                                                </a>
+                                            )}
+                                        </div>
+                                    ) : j.order_id ? (
+                                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: '#1D4ED8', display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={j.order_id}>
+                                            {j.order_id}
+                                        </span>
+                                    ) : (
+                                        <span style={{ color: T.textTer }}>-</span>
+                                    )}
                                 </td>
                                 <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 13 }}>{formatDate(j.date)}</td>
                                 <td>{j.client_name}</td>
