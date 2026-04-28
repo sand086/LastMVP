@@ -508,9 +508,37 @@ async def get_selection_summary(
             "phase": r.get("selection_phase"),
             "audit_count_30d": r.get("audit_count_30d_at_selection", 0),
             "journey_id": r.get("journey_id"),
+            "branch_id": r.get("branch_id"),
         }
         for r in selected_rows
     ]
+
+    # RT-09: per-branch breakdown (multi-project clients) for the day's audit log
+    branch_breakdown_raw: dict = {}
+    for r in rows:
+        bid = r.get("branch_id")
+        if not bid:
+            continue
+        bb = branch_breakdown_raw.setdefault(bid, {"total": 0, "selected": 0})
+        bb["total"] += 1
+        if r.get("selection_status") == "selected":
+            bb["selected"] += 1
+    branch_breakdown: dict = {}
+    if branch_breakdown_raw:
+        branch_codes = {}
+        async for b in db.branches.find(
+            {"id": {"$in": list(branch_breakdown_raw.keys())}},
+            {"_id": 0, "id": 1, "code": 1, "name": 1},
+        ):
+            branch_codes[b["id"]] = {"code": b.get("code"), "name": b.get("name")}
+        for bid, vals in branch_breakdown_raw.items():
+            meta = branch_codes.get(bid, {})
+            label = meta.get("code") or (bid[:8] if bid else "—")
+            branch_breakdown[label] = {
+                **vals,
+                "branch_id": bid,
+                "name": meta.get("name"),
+            }
 
     return {
         "client_id": client_id,
@@ -528,6 +556,7 @@ async def get_selection_summary(
         "last_scheduled_run_date": cfg.get("last_scheduled_run_date"),
         "last_scheduled_run_dates": cfg.get("last_scheduled_run_dates") or {},
         "drivers_selected": drivers_selected,
+        "branch_breakdown": branch_breakdown,
     }
 
 

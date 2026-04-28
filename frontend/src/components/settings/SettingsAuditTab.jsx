@@ -126,8 +126,30 @@ const SettingsAuditTab = ({ isDeveloper }) => {
 };
 
 
-const ClientAuditCard = ({ client, config, summary, onChanged }) => {
+const ClientAuditCard = ({ client, config, summary: initialSummary, onChanged }) => {
     const cfg = config || {};
+    const today = new Date().toISOString().slice(0, 10);
+    const [summaryDate, setSummaryDate] = useState(today);
+    const [summary, setSummary] = useState(initialSummary);
+    const [summaryLoading, setSummaryLoading] = useState(false);
+    useEffect(() => { setSummary(initialSummary); }, [initialSummary]);
+    const refreshSummary = useCallback(async (d) => {
+        if (!client?.id) return;
+        setSummaryLoading(true);
+        try {
+            const r = await getSelectionSummary(client.id, d === today ? undefined : d);
+            setSummary(r.data);
+        } catch (err) {
+            toast.error(err.response?.data?.detail || 'Error cargando resumen');
+        } finally {
+            setSummaryLoading(false);
+        }
+    }, [client?.id, today]);
+    const handleSummaryDateChange = (e) => {
+        const d = e.target.value;
+        setSummaryDate(d);
+        refreshSummary(d);
+    };
     const [enabled, setEnabled] = useState(cfg.selection_enabled ?? false);
     const [maxDaily, setMaxDaily] = useState(cfg.max_daily_audits ?? 30);
     const initialTimes = (cfg.scheduler_times && cfg.scheduler_times.length ? cfg.scheduler_times : [cfg.scheduler_time || '06:00']);
@@ -144,7 +166,6 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
     const [reconcileDays, setReconcileDays] = useState(30);
     const [showReconcile, setShowReconcile] = useState(false);
     const [showRange, setShowRange] = useState(false);
-    const today = new Date().toISOString().slice(0, 10);
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     const [rangeFrom, setRangeFrom] = useState(sevenDaysAgo);
     const [rangeTo, setRangeTo] = useState(today);
@@ -465,13 +486,25 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
             {/* Today summary */}
             {enabled && summary && (
                 <div className="bg-slate-50 border border-slate-200 rounded-md p-3 mb-4" data-testid={`audit-summary-${client.id}`}>
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                         <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide">
-                            Resumen de hoy ({summary.date})
+                            {summaryDate === today ? 'Resumen de hoy' : 'Resumen'} ({summary.date})
                         </p>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${phaseColor(summary.phase_applied)}`}>
-                            {summary.phase_applied}
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="date"
+                                value={summaryDate}
+                                max={today}
+                                onChange={handleSummaryDateChange}
+                                className="text-[11px] font-mono bg-white border border-slate-200 rounded px-1.5 py-0.5 text-slate-600 focus:outline-none focus:border-emerald-400"
+                                data-testid={`summary-date-${client.id}`}
+                                title="Cambia la fecha para ver resúmenes históricos"
+                            />
+                            {summaryLoading && <Loader2 className="w-3 h-3 animate-spin text-slate-400" />}
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${phaseColor(summary.phase_applied)}`}>
+                                {summary.phase_applied}
+                            </span>
+                        </div>
                     </div>
                     <div className="grid grid-cols-4 gap-2 text-sm">
                         <div className="text-center">
@@ -491,6 +524,37 @@ const ClientAuditCard = ({ client, config, summary, onChanged }) => {
                             <p className="font-mono text-xs text-slate-700">P2: <strong>{summary.phase_2}</strong></p>
                         </div>
                     </div>
+                    {summary.branch_breakdown && Object.keys(summary.branch_breakdown).length > 0 && (
+                        <div
+                            className="mt-3 pt-2 border-t border-slate-200"
+                            data-testid={`branch-breakdown-${client.id}`}
+                        >
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                                Desglose por sucursal
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(summary.branch_breakdown).map(([code, stats]) => {
+                                    const ratio = stats.total > 0 ? stats.selected / stats.total : 0;
+                                    const tone =
+                                        ratio >= 0.5 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : ratio > 0  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                                     : 'bg-slate-50 text-slate-500 border-slate-200';
+                                    return (
+                                        <span
+                                            key={code}
+                                            title={stats.name || code}
+                                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] font-mono ${tone}`}
+                                            data-testid={`branch-chip-${client.id}-${code}`}
+                                        >
+                                            <span className="font-semibold uppercase">{code}</span>
+                                            <span>·</span>
+                                            <span>{stats.selected}/{stats.total}</span>
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                     {summary.last_scheduled_run_date && (
                         <p className="text-[10px] text-slate-400 mt-2 text-right">
                             Última ejecución scheduler: {summary.last_scheduled_run_date} · {formatDate(cfg.last_scheduled_run_at)}
