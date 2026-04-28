@@ -37,10 +37,9 @@ def _verify_hmac(secret: str, body: bytes, signature: str) -> bool:
 async def receive_routal_event(client_id: str, request: Request):
     integ = await db.client_integrations.find_one(
         {"client_id": client_id, "integration_type": "routal", "status": "active"},
-        {"_id": 0, "credentials_encrypted": 1, "client_id": 1},
+        {"_id": 0, "credentials_encrypted": 1, "client_id": 1, "branches": 1},
     )
     if not integ:
-        # More descriptive 404 — helps the integrator diagnose what's missing
         raise HTTPException(
             status_code=404,
             detail=(
@@ -51,8 +50,46 @@ async def receive_routal_event(client_id: str, request: Request):
         )
 
     body = await request.body()
-    creds = decrypt_credentials(integ.get("credentials_encrypted") or "")
-    secret = creds.get("routal_webhook_secret")
+
+    # Try to peek at payload's project_id for multi-branch routing (RT-01).
+    # If found, use the branch's own webhook_secret + tag the event with branch_id.
+    payload_peek = None
+    if body:
+        try:
+            payload_peek = await request.json()
+        except Exception:
+            payload_peek = None
+
+    branch_id = None
+    branch_secret = None
+    project_id_in_payload = None
+    if payload_peek and isinstance(payload_peek, dict):
+        project_id_in_payload = (
+            payload_peek.get("project_id")
+            or payload_peek.get("organization_id")
+            or (payload_peek.get("plan") or {}).get("project_id")
+            or (payload_peek.get("data") or {}).get("project_id")
+        )
+    if project_id_in_payload:
+        branches = integ.get("branches") or {}
+        for bid, entry in branches.items():
+            if not entry.get("active", True):
+                continue
+            enc = entry.get("credentials_encrypted") or ""
+            if not enc:
+                continue
+            b_creds = decrypt_credentials(enc)
+            if b_creds.get("routal_project_id") == project_id_in_payload:
+                branch_id = bid
+                branch_secret = b_creds.get("routal_webhook_secret")
+                break
+
+    # HMAC: prefer branch secret if we matched a branch; else fall back to top-level
+    if branch_secret is not None:
+        secret = branch_secret
+    else:
+        creds = decrypt_credentials(integ.get("credentials_encrypted") or "")
+        secret = creds.get("routal_webhook_secret")
 
     if secret:
         sig = (
@@ -62,7 +99,7 @@ async def receive_routal_event(client_id: str, request: Request):
             or ""
         )
         if not _verify_hmac(secret, body, sig):
-            logger.warning(f"[routal-webhook] invalid signature for client {client_id}")
+            logger.warning(f"[routal-webhook] invalid signature for client {client_id} branch={branch_id}")
             raise HTTPException(status_code=401, detail="Firma inválida")
 
     # Empty body is acceptable for "test webhook" pings — return 200 so the
@@ -70,10 +107,9 @@ async def receive_routal_event(client_id: str, request: Request):
     if not body:
         return {"ok": True, "test": True, "note": "empty body accepted as healthcheck"}
 
-    try:
-        payload = await request.json()
-    except Exception:
+    if payload_peek is None:
         raise HTTPException(status_code=400, detail="Body no es JSON válido")
+    payload = payload_peek
 
     event_id = (
         request.headers.get("X-Routal-Event-Id")
@@ -82,14 +118,12 @@ async def receive_routal_event(client_id: str, request: Request):
     )
     event_type = payload.get("event") or payload.get("type") or payload.get("event_type") or "unknown"
 
-    # Routal "test webhook" payloads sometimes lack event_id — accept them as ping
     if not event_id:
         if event_type in ("test", "ping", "unknown") or payload.get("test") is True:
-            logger.info(f"[routal-webhook] test ping received for client {client_id}")
+            logger.info(f"[routal-webhook] test ping received for client {client_id} branch={branch_id}")
             return {"ok": True, "test": True, "note": "no event_id; treated as test ping"}
         raise HTTPException(status_code=400, detail="event_id requerido")
 
-    # Idempotencia
     existing = await db.routal_events.find_one(
         {"event_id": event_id, "client_id": client_id},
         {"_id": 0, "processed": 1},
@@ -97,10 +131,10 @@ async def receive_routal_event(client_id: str, request: Request):
     if existing:
         return {"ok": True, "duplicate": True, "processed": existing.get("processed", False)}
 
-    # Save
     await db.routal_events.insert_one({
         "event_id": event_id,
         "client_id": client_id,
+        "branch_id": branch_id,
         "event_type": event_type,
         "payload": payload,
         "received_at": datetime.now(timezone.utc).isoformat(),
@@ -108,10 +142,9 @@ async def receive_routal_event(client_id: str, request: Request):
         "attempts": 0,
     })
 
-    # Fire-and-forget processing (200 OK in <500ms)
     asyncio.create_task(process_routal_event(db, event_id, client_id))
 
-    return {"ok": True, "event_id": event_id}
+    return {"ok": True, "event_id": event_id, "branch_id": branch_id}
 
 
 @router.get("/routal/{client_id}")

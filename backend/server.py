@@ -364,6 +364,10 @@ api_router.include_router(routal_webhook_router)
 from routes.selection_routes import router as selection_router
 api_router.include_router(selection_router)
 
+# RT-13 / iter71: Multi-branch (sucursales)
+from routes.branch_routes import router as branch_router
+api_router.include_router(branch_router)
+
 app.include_router(api_router)
 
 
@@ -463,6 +467,11 @@ async def _create_indexes():
     await db.journeys.create_index("client_id", background=True)
     await db.journeys.create_index("provider_id", background=True)
     await db.journeys.create_index([("date", -1), ("status", 1)], background=True)
+    await db.journeys.create_index("branch_id", background=True)
+
+    # Branch indexes (RT-13 / iter71)
+    await db.branches.create_index([("client_id", 1), ("code", 1)], unique=True, background=True)
+    await db.branches.create_index("active", background=True)
 
     # Incident indexes
     await db.incidents.create_index("journey_id", background=True)

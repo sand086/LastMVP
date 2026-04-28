@@ -99,7 +99,7 @@ def map_routal_stop_to_pkg_fields(stop: dict) -> dict:
     }
 
 
-async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
+async def _handle_plan_created_direct(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     """Original behavior: insert Journey + Packages directly.
     Reused by selection worker after deciding a driver should be audited.
     Returns journey_id (str) on success, or status string when skipped.
@@ -126,6 +126,7 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
         "routal_plan_id": plan_id,
         "routal_plan_label": plan_label,
         "routal_project_id": payload.get("project_id") or payload.get("organization_id"),
+        "branch_id": branch_id,
         "source": "routal",
         "client_id": client_id,
         "driver_name": driver_name,
@@ -165,6 +166,8 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
     if pkg_docs:
         from utils.pii import encrypt_pkg_pii
         for d in pkg_docs:
+            if branch_id:
+                d["branch_id"] = branch_id
             encrypt_pkg_pii(d)
         await db.packages.insert_many(pkg_docs)
 
@@ -172,7 +175,7 @@ async def _handle_plan_created_direct(db, payload: dict, client_id: str) -> str:
     return journey_id
 
 
-async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
+async def _handle_plan_created(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     """SEL01: when client has selection_enabled=True, stage the plan instead of
     creating the Journey immediately. The selection worker will later create
     Journeys only for selected drivers. Falls back to direct creation otherwise.
@@ -183,7 +186,7 @@ async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
     )
     if not cfg or not cfg.get("selection_enabled") or not cfg.get("active", True):
         # Non-breaking path
-        result = await _handle_plan_created_direct(db, payload, client_id)
+        result = await _handle_plan_created_direct(db, payload, client_id, branch_id=branch_id)
         # _handle_plan_created_direct returns either journey_id (uuid) or "skipped: ..." string
         if result and not str(result).startswith("skipped"):
             return f"created journey {result}"
@@ -208,6 +211,7 @@ async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
         {"client_id": client_id, "driver_id": drv, "date": plan_date},
         {"$set": {
             "client_id": client_id,
+            "branch_id": branch_id,
             "driver_id": drv,
             "driver_name": drv_name,
             "date": plan_date,
@@ -222,7 +226,7 @@ async def _handle_plan_created(db, payload: dict, client_id: str) -> str:
     return f"staged plan {plan_id} for selection (driver={drv})"
 
 
-async def _handle_plan_started(db, payload: dict, client_id: str) -> str:
+async def _handle_plan_started(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     plan_id = payload.get("plan_id") or payload.get("id")
     if not plan_id:
         return "skipped: no plan_id"
@@ -233,7 +237,7 @@ async def _handle_plan_started(db, payload: dict, client_id: str) -> str:
     return f"plan_started: matched={result.matched_count}"
 
 
-async def _handle_stop_completed(db, payload: dict, client_id: str) -> str:
+async def _handle_stop_completed(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     svc_id = payload.get("service_id") or (payload.get("service") or {}).get("id") or payload.get("stop_id")
     if not svc_id:
         return "skipped: no service_id"
@@ -260,7 +264,7 @@ async def _handle_stop_completed(db, payload: dict, client_id: str) -> str:
     return f"delivered: svc={svc_id}"
 
 
-async def _handle_stop_failed(db, payload: dict, client_id: str) -> str:
+async def _handle_stop_failed(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     svc_id = payload.get("service_id") or (payload.get("service") or {}).get("id") or payload.get("stop_id")
     if not svc_id:
         return "skipped: no service_id"
@@ -299,7 +303,7 @@ async def _handle_stop_failed(db, payload: dict, client_id: str) -> str:
     return f"failed: svc={svc_id}"
 
 
-async def _handle_plan_completed(db, payload: dict, client_id: str) -> str:
+async def _handle_plan_completed(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     plan_id = payload.get("plan_id") or payload.get("id")
     if not plan_id:
         return "skipped: no plan_id"
@@ -310,7 +314,7 @@ async def _handle_plan_completed(db, payload: dict, client_id: str) -> str:
     return f"plan_completed: matched={result.matched_count}"
 
 
-async def _handle_plan_cancelled(db, payload: dict, client_id: str) -> str:
+async def _handle_plan_cancelled(db, payload: dict, client_id: str, branch_id: Optional[str] = None) -> str:
     plan_id = payload.get("plan_id") or payload.get("id")
     if not plan_id:
         return "skipped: no plan_id"
@@ -356,7 +360,8 @@ async def process_routal_event(db, event_id: str, client_id: str) -> Optional[st
         return f"no handler for {event_type}"
 
     try:
-        result = await handler(db, evt.get("payload") or {}, client_id)
+        branch_id = evt.get("branch_id")
+        result = await handler(db, evt.get("payload") or {}, client_id, branch_id=branch_id)
         await db.routal_events.update_one(
             {"event_id": event_id, "client_id": client_id},
             {"$set": {"processed": True, "processed_at": _now_iso(), "result": str(result)[:200]}},
