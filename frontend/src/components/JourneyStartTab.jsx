@@ -21,7 +21,7 @@ export const JourneyStartTab = ({
     uploadingImages,
     handleStartJourney,
 }) => {
-    if (journey.status === 'scheduled' && canEdit()) {
+    if ((journey.status === 'scheduled' || journey.status === 'planificada') && canEdit()) {
         return (
             <Card>
                 <CardHeader>

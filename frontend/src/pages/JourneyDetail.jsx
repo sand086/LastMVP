@@ -376,7 +376,7 @@ const JourneyDetail = () => {
             // Set active tab based on status (only on initial load)
             if (!initialTabSet.current) {
                 initialTabSet.current = true;
-                if (res.data.status === 'scheduled' && !res.data.start_data) {
+                if ((res.data.status === 'scheduled' || res.data.status === 'planificada') && !res.data.start_data) {
                     setActiveTab('inicio');
                 } else if (res.data.status === 'in_progress') {
                     setActiveTab('incidencias');

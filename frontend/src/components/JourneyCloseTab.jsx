@@ -418,7 +418,7 @@ export const JourneyCloseTab = ({
             <CardContent className="py-12 text-center">
                 <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                 <p className="text-slate-500">
-                    {journey.status === 'scheduled'
+                    {(journey.status === 'scheduled' || journey.status === 'planificada')
                         ? 'Primero debes iniciar la ruta'
                         : 'La ruta aun no ha sido cerrada'}
                 </p>
