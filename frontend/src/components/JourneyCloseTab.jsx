@@ -386,6 +386,12 @@ export const JourneyCloseTab = ({
                             <p className="font-mono font-bold text-2xl text-amber-700">{journey.close_data.packages_to_retry}</p>
                         </div>
                     </div>
+                    {journey.close_data.notes && (
+                        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-sm" data-testid="close-notes-display">
+                            <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide mb-1">Notas de cierre</p>
+                            <p className="text-sm text-slate-800 whitespace-pre-wrap">{journey.close_data.notes}</p>
+                        </div>
+                    )}
                     {closeImages.length > 0 && (
                         <div className="mt-4">
                             <p className="text-xs text-slate-500 uppercase mb-2">Evidencia fotografica de cierre</p>
