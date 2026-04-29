@@ -259,7 +259,7 @@ async def start_journey(journey_id: str, data: JourneyStartData, user: dict = De
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
-    if journey["status"] != "scheduled":
+    if journey["status"] not in ("scheduled", "planificada"):
         raise HTTPException(status_code=400, detail="La ruta ya fue iniciada o cerrada")
     if not data.checklist_completed:
         raise HTTPException(status_code=400, detail="Debe completar el checklist antes de iniciar")
