@@ -43,6 +43,7 @@ async def get_journeys(
     client_id: Optional[str] = None,
     provider_id: Optional[str] = None,
     status: Optional[str] = None,
+    q: Optional[str] = None,
     page: int = 1,
     page_size: int = 25,
     user: dict = Depends(get_current_user),
@@ -65,6 +66,23 @@ async def get_journeys(
         query["provider_id"] = provider_id
     if status:
         query["status"] = status
+
+    # iter89 — full-text search across order_id, driver_name, routal_plan_id/label, client_name
+    if q:
+        q_trim = q.strip()
+        if q_trim:
+            import re
+            rx = re.compile(re.escape(q_trim), re.IGNORECASE)
+            query["$and"] = [
+                {"$or": [
+                    {"order_id": rx},
+                    {"driver_name": rx},
+                    {"routal_plan_id": rx},
+                    {"routal_plan_label": rx},
+                    {"client_name": rx},
+                    {"provider_name": rx},
+                ]},
+            ]
 
     query = apply_assignment_filter(user, query)
 

@@ -50,6 +50,12 @@ const Journeys = () => {
     const [selectedStatus, setSelectedStatus] = useState('all');
     const [showFilters, setShowFilters] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    // iter89 — debounced search query for server-side search
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+        return () => clearTimeout(t);
+    }, [searchQuery]);
 
     // Pagination
     const [pageSize, setPageSize] = useState(25);
@@ -61,15 +67,17 @@ const Journeys = () => {
 
     // P08 — Journeys via useJourneys hook (cancela auto, retry x2 en network errors)
     // iter88: server-side pagination real para no truncar datasets >25 rutas.
+    // iter89: server-side search via `q` param (debounced).
     const journeysFilters = useMemo(() => ({
         date_from: dateFrom ? format(dateFrom, 'yyyy-MM-dd') : undefined,
         date_to: dateTo ? format(dateTo, 'yyyy-MM-dd') : undefined,
         client_id: selectedClient !== 'all' ? selectedClient : undefined,
         provider_id: selectedProvider !== 'all' ? selectedProvider : undefined,
         status: selectedStatus !== 'all' ? selectedStatus : undefined,
+        q: debouncedSearch || undefined,
         page: currentPage,
         page_size: pageSize,
-    }), [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus, currentPage, pageSize]);
+    }), [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus, debouncedSearch, currentPage, pageSize]);
 
     const { data: journeysData, loading: journeysLoading, error: journeysError, refetch: refetchJourneys } = useJourneys(journeysFilters);
     const journeys = useMemo(() => journeysData?.data || [], [journeysData]);
@@ -121,28 +129,15 @@ const Journeys = () => {
         setSearchQuery('');
     };
 
-    // iter88: con server-side pagination, el backend ya devuelve la página correcta.
-    // Search client-side solo filtra visualmente sobre los items visibles (la tabla es la página).
-    // Si el usuario busca, resetea a la página 1 para evitar resultados vacíos.
-    const filteredJourneys = useMemo(() => {
-        if (!searchQuery.trim()) return journeys;
-        const q = searchQuery.toLowerCase().trim();
-        return journeys.filter(j =>
-            (j.order_id || '').toLowerCase().includes(q) ||
-            (j.driver_name || '').toLowerCase().includes(q) ||
-            (j.client_name || '').toLowerCase().includes(q) ||
-            (j.provider_name || '').toLowerCase().includes(q) ||
-            (j.routal_plan_id || '').toLowerCase().includes(q) ||
-            (j.routal_plan_label || '').toLowerCase().includes(q)
-        );
-    }, [journeys, searchQuery]);
+    // iter89: search ya es server-side vía `q` param (debounced). No filtramos client-side.
+    const filteredJourneys = journeys;
 
     const totalPages = Math.max(1, serverPagination.total_pages || 1);
     const totalCount = serverPagination.total_count || 0;
-    const paginatedJourneys = filteredJourneys; // backend ya paginó
+    const paginatedJourneys = filteredJourneys; // backend ya paginó + filtró
 
-    // Reset page only when filters/pageSize change (not when journeys reloads)
-    useEffect(() => { setCurrentPage(1); }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus, pageSize, searchQuery]);
+    // Reset page only when filters/pageSize/search change
+    useEffect(() => { setCurrentPage(1); }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus, pageSize, debouncedSearch]);
 
     const handleDelete = async () => {
         const j = deleteModal.journey;
