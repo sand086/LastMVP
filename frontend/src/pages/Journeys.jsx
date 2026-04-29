@@ -60,16 +60,23 @@ const Journeys = () => {
     const [deleting, setDeleting] = useState(false);
 
     // P08 — Journeys via useJourneys hook (cancela auto, retry x2 en network errors)
+    // iter88: server-side pagination real para no truncar datasets >25 rutas.
     const journeysFilters = useMemo(() => ({
         date_from: dateFrom ? format(dateFrom, 'yyyy-MM-dd') : undefined,
         date_to: dateTo ? format(dateTo, 'yyyy-MM-dd') : undefined,
         client_id: selectedClient !== 'all' ? selectedClient : undefined,
         provider_id: selectedProvider !== 'all' ? selectedProvider : undefined,
         status: selectedStatus !== 'all' ? selectedStatus : undefined,
-    }), [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus]);
+        page: currentPage,
+        page_size: pageSize,
+    }), [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus, currentPage, pageSize]);
 
     const { data: journeysData, loading: journeysLoading, error: journeysError, refetch: refetchJourneys } = useJourneys(journeysFilters);
-    const journeys = useMemo(() => journeysData?.data || journeysData || [], [journeysData]);
+    const journeys = useMemo(() => journeysData?.data || [], [journeysData]);
+    const serverPagination = useMemo(
+        () => journeysData?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1 },
+        [journeysData, pageSize]
+    );
 
     // Clients + Providers + Config: one-shot al montar (no requieren retry/cancel)
     const fetchAux = useCallback(async () => {
@@ -114,7 +121,9 @@ const Journeys = () => {
         setSearchQuery('');
     };
 
-    // Client-side search + pagination
+    // iter88: con server-side pagination, el backend ya devuelve la página correcta.
+    // Search client-side solo filtra visualmente sobre los items visibles (la tabla es la página).
+    // Si el usuario busca, resetea a la página 1 para evitar resultados vacíos.
     const filteredJourneys = useMemo(() => {
         if (!searchQuery.trim()) return journeys;
         const q = searchQuery.toLowerCase().trim();
@@ -128,14 +137,12 @@ const Journeys = () => {
         );
     }, [journeys, searchQuery]);
 
-    const totalPages = Math.max(1, Math.ceil(filteredJourneys.length / pageSize));
-    const paginatedJourneys = useMemo(() => {
-        const start = (currentPage - 1) * pageSize;
-        return filteredJourneys.slice(start, start + pageSize);
-    }, [filteredJourneys, currentPage, pageSize]);
+    const totalPages = Math.max(1, serverPagination.total_pages || 1);
+    const totalCount = serverPagination.total_count || 0;
+    const paginatedJourneys = filteredJourneys; // backend ya paginó
 
-    // Reset page when filters change
-    useEffect(() => { setCurrentPage(1); }, [searchQuery, pageSize, journeys]);
+    // Reset page only when filters/pageSize change (not when journeys reloads)
+    useEffect(() => { setCurrentPage(1); }, [dateFrom, dateTo, selectedClient, selectedProvider, selectedStatus, pageSize, searchQuery]);
 
     const handleDelete = async () => {
         const j = deleteModal.journey;
@@ -443,7 +450,7 @@ const Journeys = () => {
                             {/* Pagination */}
                             <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200" data-testid="pagination-bar">
                                 <div className="flex items-center gap-2 text-sm text-slate-500">
-                                    <span>{filteredJourneys.length} ruta{filteredJourneys.length !== 1 ? 's' : ''}</span>
+                                    <span>{totalCount} ruta{totalCount !== 1 ? 's' : ''}</span>
                                     <span className="text-slate-300">|</span>
                                     <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
                                         <SelectTrigger className="w-20 h-7 text-xs" data-testid="page-size-select"><SelectValue /></SelectTrigger>
