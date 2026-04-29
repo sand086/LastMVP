@@ -518,6 +518,8 @@ async def generate_report_excel(data: ReportRequest, user: dict = Depends(get_cu
                 "Km": cd.get("km_traveled", 0),
                 "Hora Inicio": sd.get("departure_time", ""),
                 "Hora Cierre": cd.get("closed_at", ""),
+                "Notas de Inicio": sd.get("notes", ""),
+                "Notas de Cierre": cd.get("notes", ""),
             })
         pd.DataFrame(routes_data).to_excel(writer, sheet_name="Rutas", index=False)
 
