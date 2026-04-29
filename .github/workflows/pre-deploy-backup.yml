@@ -1,0 +1,150 @@
+name: Pre-Deploy Backup (Production)
+
+# Manual-trigger workflow para generar un backup completo de la DB de producción
+# antes de cualquier deploy. Sube el backup como artefacto de GitHub con 90 días
+# de retención. Idempotente y no destructivo (read-only sobre la DB).
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Razón del backup (ej: pre-deploy iter77-87)'
+        required: true
+        default: 'pre-deploy snapshot'
+        type: string
+      collections:
+        description: 'Colecciones (csv) — vacío = todas'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install MongoDB tools
+        run: |
+          wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
+          echo "deb [arch=amd64,arm64] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+          sudo apt-get update -qq
+          sudo apt-get install -y mongodb-database-tools mongodb-mongosh
+          mongodump --version | head -1
+
+      - name: Set timestamp env
+        run: echo "TS=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_ENV
+
+      - name: Validate secrets
+        env:
+          MONGO_URL: ${{ secrets.PROD_MONGO_URL }}
+          DB_NAME: ${{ secrets.PROD_DB_NAME }}
+        run: |
+          if [ -z "$MONGO_URL" ] || [ -z "$DB_NAME" ]; then
+            echo "❌ Faltan secrets: PROD_MONGO_URL o PROD_DB_NAME en Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          echo "✓ Secrets configurados correctamente"
+
+      - name: Generate full DB backup
+        env:
+          MONGO_URL: ${{ secrets.PROD_MONGO_URL }}
+          DB_NAME: ${{ secrets.PROD_DB_NAME }}
+          COLLECTIONS_INPUT: ${{ github.event.inputs.collections }}
+        run: |
+          set -e
+          BACKUP_DIR="$RUNNER_TEMP/backup_$TS"
+          mkdir -p "$BACKUP_DIR"
+          
+          if [ -z "$COLLECTIONS_INPUT" ]; then
+            echo "→ Backup completo de toda la DB ..."
+            mongodump --uri="$MONGO_URL" --db="$DB_NAME" --out="$BACKUP_DIR" --quiet
+          else
+            IFS=',' read -ra COLS <<< "$COLLECTIONS_INPUT"
+            for col in "${COLS[@]}"; do
+              col_trim=$(echo "$col" | xargs)
+              echo "→ Dumping $col_trim ..."
+              mongodump --uri="$MONGO_URL" --db="$DB_NAME" --collection="$col_trim" --out="$BACKUP_DIR" --quiet
+            done
+          fi
+          
+          echo ""
+          echo "📊 Resumen del backup:"
+          ls -lh "$BACKUP_DIR/$DB_NAME"/ | head -50
+          echo ""
+          
+          TOTAL_SIZE=$(du -sh "$BACKUP_DIR" | awk '{print $1}')
+          NUM_FILES=$(find "$BACKUP_DIR" -name "*.bson" | wc -l)
+          echo "Total: $TOTAL_SIZE en $NUM_FILES colecciones"
+          
+          echo "BACKUP_DIR=$BACKUP_DIR" >> $GITHUB_ENV
+          echo "TOTAL_SIZE=$TOTAL_SIZE" >> $GITHUB_ENV
+          echo "NUM_FILES=$NUM_FILES" >> $GITHUB_ENV
+
+      - name: Generate metadata file
+        env:
+          MONGO_URL: ${{ secrets.PROD_MONGO_URL }}
+          DB_NAME: ${{ secrets.PROD_DB_NAME }}
+        run: |
+          cat > "$BACKUP_DIR/BACKUP_INFO.txt" <<EOF
+          Backup Pre-Deploy (Producción)
+          ════════════════════════════════
+          Timestamp:     $TS
+          Razón:         ${{ github.event.inputs.reason }}
+          Colecciones:   ${{ github.event.inputs.collections || 'TODAS' }}
+          Iniciado por:  ${{ github.actor }}
+          Run ID:        ${{ github.run_id }}
+          Total size:    $TOTAL_SIZE
+          Files:         $NUM_FILES colecciones
+          
+          Counts en el momento del backup:
+          ────────────────────────────────
+          EOF
+          mongosh "$MONGO_URL/$DB_NAME" --quiet --eval '
+            const cols = db.getCollectionNames().sort();
+            cols.forEach(c => {
+                const cnt = db[c].countDocuments({});
+                print(`  ${c.padEnd(40)} ${String(cnt).padStart(8)} docs`);
+            });
+          ' >> "$BACKUP_DIR/BACKUP_INFO.txt"
+          
+          echo "✓ Metadata guardado en BACKUP_INFO.txt"
+          cat "$BACKUP_DIR/BACKUP_INFO.txt"
+
+      - name: Upload backup as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-backup-${{ env.TS }}
+          path: ${{ env.BACKUP_DIR }}
+          retention-days: 90
+          compression-level: 9
+
+      - name: Workflow summary
+        if: always()
+        run: |
+          echo "## 🛡 Backup completado" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Timestamp** | $TS |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Razón** | ${{ github.event.inputs.reason }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tamaño total** | $TOTAL_SIZE |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Colecciones** | $NUM_FILES |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Artefacto** | \`prod-backup-$TS\` (90 días retention) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Iniciado por** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Restaurar desde este backup (si algo sale mal post-deploy)" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# 1. Descarga el artefacto desde la pestaña Actions de este run" >> $GITHUB_STEP_SUMMARY
+          echo "# 2. Descomprime el zip" >> $GITHUB_STEP_SUMMARY
+          echo "unzip prod-backup-$TS.zip -d ./backup" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 3. Restaura (--drop reemplaza colecciones existentes)" >> $GITHUB_STEP_SUMMARY
+          echo "mongorestore --uri=\"\$MONGO_URL\" --drop ./backup/$DB_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 4. Para restaurar solo una colección" >> $GITHUB_STEP_SUMMARY
+          echo "mongorestore --uri=\"\$MONGO_URL\" --drop --nsInclude=\"$DB_NAME.journeys\" ./backup/$DB_NAME" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
