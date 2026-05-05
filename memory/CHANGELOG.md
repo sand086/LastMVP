@@ -1,5 +1,33 @@
 # LastMile OS - Changelog
 
+## 2026-05-05 — PR2: Auditoría de Performance P0+P1 (Fixes A→F)
+
+### Diagnóstico (PROD)
+- MongoDB Atlas ping = **1.1s** (vs ~5-50ms esperado, indica latencia de red elevada).
+- `/api/journeys` con 10 reqs concurrentes: **11-16s cada una** (sin paralelismo en código + pool MongoDB sin warmup).
+- 6 queries DB **secuenciales** en `/api/journeys` (count + find + clients + providers + 2× incidents.aggregate).
+- `AsyncIOMotorClient` sin configuración de pool (defaults: minPoolSize=0, sin compresión, serverSelectionTimeoutMS=30s).
+- ROUTAL_TIMEOUT = 30s causaba que image proxy 404 bloqueara workers por 30s.
+
+### Fixes aplicados
+- **Fix A** `dependencies.py`: `AsyncIOMotorClient` con `maxPoolSize=50`, `minPoolSize=10`, `maxIdleTimeMS=60000`, `waitQueueTimeoutMS=5000`, `serverSelectionTimeoutMS=5000`, `compressors="zlib"`, `retryWrites=True`. Pool warm desde el arranque.
+- **Fix B** `routes/journey_routes.py`: `/api/journeys` ahora ejecuta `count + find + clients + providers` en `asyncio.gather` paralelo, y los 2 `incidents.aggregate` también paralelos. De 6 roundtrips secuenciales a 1+1 wallclock.
+- **Fix C** `routes/user_routes.py`: `/api/clients` y `/api/providers` con `@ttl_cache(ttl_seconds=300)` y `invalidate_prefix()` en mutaciones (POST/PUT/DELETE).
+- **Fix D**: incidents aggregations paralelas con `asyncio.gather` (parte de Fix B).
+- **Fix E** `server.py`: nuevos índices en `journeys` — `migrated_to_journeys` (sparse), `_legacy_incidents_remaining` (sparse), compound `[client_id, date, status]` y `[provider_id, date]`.
+- **Fix F** `services/routal_client.py`: ROUTAL_TIMEOUT default 30s → **10s** (configurable vía env).
+
+### Validación (testing agent iter59, preview)
+- **17/17 tests passed** en 3.62s (`/app/backend/tests/test_iter59_perf_p0_p1.py`).
+- **10 GET /api/journeys concurrentes** → wall=**0.78s** (antes 11-16s), max individual 0.77s, avg 0.74s. **~15× mejora**.
+- Contrato API `/api/journeys` preservado: `data[] + pagination.{total_count,total_pages,page,page_size}` + items con `client_name`, `provider_name`, `incidents_count`, `open_incidents_count`.
+- Cache invalidation `clients_list` y `providers_list` confirmada en POST/PUT/DELETE.
+
+### Pendiente / Backlog
+- **Atlas region/tier**: testing solo cubrió preview (Mongo localhost). Para confirmar mejora real en PROD, hay que **redeployar** y medir con `/api/system/performance`. Si la latencia base de Atlas sigue alta (1.1s ping), el techo de mejora será limitado por la red — escalar a Emergent Support para alinear región Atlas ↔ pod PROD.
+- **Optional perf pulida** (P2): reusar `_cache` interno de `clients_list`/`providers_list` dentro de `/api/journeys` (hoy aún hace DB, pero en paralelo no agrega wallclock). Surface Mongo pool metrics en `/api/admin/health`.
+- **Watch out** Fix F: si Routal `/v2/plan/{id}/stops` con planes muy grandes tarda >10s, ahora fallará. No cubierto por tests.
+
 ## 2026-05-05 — PR1: Limpieza de ruido en Error Tracker
 
 ### Diagnóstico (`/system/errors` PROD: 197 no-revisados)
