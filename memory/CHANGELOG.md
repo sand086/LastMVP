@@ -1,5 +1,34 @@
 # LastMile OS - Changelog
 
+## 2026-05-05 — Bug fix: Reportes Admin duplicaban rutas Routal (iter79)
+
+### Reporte del usuario
+- Día 2026-04-24 en LastMile/Power BI: **38 rutas**.
+- Mismo día en reporte Admin Excel: **43 rutas** (5 extras).
+- Discrepancia solo en rutas Routal: cada `Vehículo N` aparecía 2 veces (1 con order_id MX-... real + 1 con UUID interno del plan legacy).
+
+### RCA
+- 11 endpoints de reportes/analytics NO aplicaban el filtro de migración iter79.
+- Cuando un `journey legacy` (plan-based) se split a N `journeys nuevos` (route-based), el legacy queda en BD con `migrated_to_journeys: [id1, id2, ...]`.
+- `/api/journeys` ya filtraba con `$or: [migrated_to_journeys missing, _legacy_incidents_remaining>0]`, pero `/api/admin/routes-report`, `/api/admin/export-liquidacion` y 10 endpoints de analytics NO.
+
+### Fix aplicado
+- **Nuevo helper** `apply_legacy_journey_filter()` en `dependencies.py` — defensivo contra `$or`/`$and` existentes (combina con `$and` para no romper full-text search).
+- **Aplicado en 11 endpoints**:
+  - `admin_module_routes.py:routes_report` (que también alimenta `export-liquidacion` y `routes-report/export`).
+  - `analytics_routes.py`: `get_heatmap_data`, `export_heatmap_data`, `get_quality_report`, `export_quality_report`, `export_incidents`, `report_kpis`, `get_reports_heatmap`, `report_attempts`, `report_sla`, `generate_ai_report`.
+
+### Validación (testing agent iter83 — 21/21 tests passed)
+- Fixture: 1 legacy + 2 nuevos, día 2026-05-04 → reporte retorna 2 (NO 3) ✅.
+- Edge case: si legacy tiene `_legacy_incidents_remaining > 0`, sí aparece (3) ✅.
+- Edge case: `_legacy_incidents_remaining = 0` o ausente → oculto ✅.
+- Regresión: `/api/journeys?q=...` (full-text search con `$or`) sigue OK con el `$and` defensivo ✅.
+- Regresión completa de los 11 endpoints + cache PR2 (clients/providers TTL): clean ✅.
+
+### Pendiente (acción usuario)
+- 🚀 **Redeploy a PROD** para que el fix surta efecto.
+- 📊 Tras redeploy, verificar que reporte Admin del día 2026-04-24 muestra 38 rutas (no 43).
+
 ## 2026-05-05 — PR2: Auditoría de Performance P0+P1 (Fixes A→F)
 
 ### Diagnóstico (PROD)
