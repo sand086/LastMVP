@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from dependencies import db, get_current_user
+from dependencies import db, get_current_user, apply_legacy_journey_filter
 from ttl_cache import ttl_cache
 
 logger = logging.getLogger(__name__)
@@ -356,6 +356,11 @@ async def routes_report(
     user: dict = Depends(_require_admin),
 ):
     j_query = {"date": {"$gte": date_from, "$lte": date_to}}
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys that have been
+    # split into route-based journeys (iter79 migration). Without this filter
+    # the report duplicates routes — e.g. day 2026-04-24 showed 43 vs LastMile's
+    # 38, with one row for the legacy plan + one row per route-based journey.
+    j_query = apply_legacy_journey_filter(j_query)
     if provider_id:
         j_query["provider_id"] = provider_id
     if status:

@@ -206,6 +206,31 @@ def apply_assignment_filter(user: dict, query: dict) -> dict:
             query["provider_id"] = {"$in": assigned_providers}
     return query
 
+
+def apply_legacy_journey_filter(query: dict) -> dict:
+    """Hide legacy plan-based Routal journeys that have been split into route-based
+    journeys (iter79 migration). Mirrors the filter used in GET /api/journeys.
+
+    Two cases keep a legacy doc visible:
+    1. It was never migrated (`migrated_to_journeys` field absent — most journeys).
+    2. It was migrated BUT still has orphan incidents (`_legacy_incidents_remaining > 0`).
+
+    Defensive against existing $or/$and in the query: combines using $and so we
+    never stomp existing search/role filters.
+    """
+    legacy_or = [
+        {"migrated_to_journeys": {"$exists": False}},
+        {"_legacy_incidents_remaining": {"$gt": 0}},
+    ]
+    if "$and" in query:
+        query["$and"].append({"$or": legacy_or})
+    elif "$or" in query:
+        existing_or = query.pop("$or")
+        query["$and"] = [{"$or": existing_or}, {"$or": legacy_or}]
+    else:
+        query["$or"] = legacy_or
+    return query
+
 # ==================== UTILITY FUNCTIONS ====================
 
 def _next_day(date_str: str) -> str:

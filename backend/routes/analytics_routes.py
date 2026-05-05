@@ -15,7 +15,8 @@ from datetime import datetime, timezone, timedelta
 import pandas as pd
 
 from dependencies import (
-    db, limiter, get_current_user, require_role, apply_assignment_filter, _next_day,
+    db, limiter, get_current_user, require_role, apply_assignment_filter,
+    apply_legacy_journey_filter, _next_day,
 )
 from models import ReportRequest
 
@@ -63,6 +64,8 @@ async def get_heatmap_data(
     if date_to:
         j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
     j_query = apply_assignment_filter(user, j_query)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    j_query = apply_legacy_journey_filter(j_query)
 
     journeys = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(500)
     journey_ids = [j["id"] for j in journeys]
@@ -118,6 +121,8 @@ async def export_heatmap_data(
     if date_to:
         j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
     j_query = apply_assignment_filter(user, j_query)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    j_query = apply_legacy_journey_filter(j_query)
 
     journeys_list = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(500)
     journey_ids = [j["id"] for j in journeys_list]
@@ -194,6 +199,8 @@ async def get_quality_report(
     journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
     journey_query = apply_assignment_filter(user, journey_query)
     journey_query = _apply_id_filter(journey_query, "provider_id", provider_id)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    journey_query = apply_legacy_journey_filter(journey_query)
 
     journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
     journey_ids = [j["id"] for j in journeys]
@@ -310,6 +317,8 @@ async def export_quality_report(
     journey_query = {"date": {"$gte": date_from, "$lt": _next_day(date_to)}, "status": {"$in": ["closed", "in_progress", "scheduled"]}}
     journey_query = apply_assignment_filter(user, journey_query)
     journey_query = _apply_id_filter(journey_query, "provider_id", provider_id)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    journey_query = apply_legacy_journey_filter(journey_query)
 
     journeys = await db.journeys.find(journey_query, {"_id": 0}).to_list(1000)
     journey_map = {j["id"]: j for j in journeys}
@@ -646,6 +655,8 @@ async def export_incidents(
             j_query["date"] = {"$gte": date_from}
         if date_to:
             j_query.setdefault("date", {})["$lt"] = _next_day(date_to)
+        # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+        j_query = apply_legacy_journey_filter(j_query)
         journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(500)
         query["journey_id"] = {"$in": [j["id"] for j in journeys]}
 
@@ -963,7 +974,7 @@ async def report_kpis(
         date_to = now.strftime("%Y-%m-%d")
 
     journeys = await db.journeys.find(
-        {"date": {"$gte": date_from, "$lt": _next_day(date_to)}}, {"_id": 0}
+        apply_legacy_journey_filter({"date": {"$gte": date_from, "$lt": _next_day(date_to)}}), {"_id": 0}
     ).to_list(10000)
 
     clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
@@ -1057,6 +1068,8 @@ async def get_reports_heatmap(
     if provider_id:
         j_query["provider_id"] = provider_id
     j_query = apply_assignment_filter(user, j_query)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    j_query = apply_legacy_journey_filter(j_query)
 
     journeys = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(5000)
     journey_ids = [j["id"] for j in journeys]
@@ -1128,6 +1141,8 @@ async def report_attempts(
     if provider_id:
         j_query["provider_id"] = provider_id
     j_query = apply_assignment_filter(user, j_query)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    j_query = apply_legacy_journey_filter(j_query)
 
     journeys = await db.journeys.find(j_query, {"_id": 0, "id": 1}).to_list(5000)
     journey_ids = [j["id"] for j in journeys]
@@ -1222,6 +1237,8 @@ async def report_sla(
     if provider_id:
         j_query["provider_id"] = provider_id
     j_query = apply_assignment_filter(user, j_query)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    j_query = apply_legacy_journey_filter(j_query)
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     providers_map = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
@@ -1340,6 +1357,8 @@ async def generate_ai_report(
     if provider_id:
         j_query["provider_id"] = provider_id
     j_query = apply_assignment_filter(user, j_query)
+    # Bug fix 2026-05-05: hide legacy plan-based Routal journeys (iter79).
+    j_query = apply_legacy_journey_filter(j_query)
 
     journeys = await db.journeys.find(j_query, {"_id": 0}).to_list(10000)
     if not journeys:

@@ -1,0 +1,39 @@
+{
+  "summary": "iter83 — Bug fix validated: apply_legacy_journey_filter hides plan-based legacy journeys that were migrated to route-based ones. 21/21 tests passed in 29.50s. Reproduced original PROD bug (legacy + 2 new = 3 rows) and confirmed fix returns only 2 rows. Edge cases verified: _legacy_incidents_remaining>0 keeps legacy visible (3 rows), =0 hides it, missing field hides it. /api/journeys?q=... full-text search still works with the legacy filter (defensive $and combination is correct). All 11 instrumented endpoints non-regressed: GET /api/admin/routes-report (+filters), GET /api/admin/export-liquidacion, POST /api/admin/routes-report/export, GET /api/analytics/heatmap, POST /api/analytics/heatmap-export, GET /api/reports/quality, POST /api/reports/quality-export, GET /api/export/incidents, GET /api/reports/kpis, GET /api/reports/heatmap, GET /api/reports/attempts, GET /api/reports/sla, POST /api/reports/generate-ai. iter59 cache regression also clean.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/reports/quality-export",
+        "issue": "Endpoint uses Form(...) fields, while sibling /api/analytics/heatmap-export and /api/admin/routes-report/export accept JSON/query. Inconsistent body parsing across export endpoints can confuse callers and led to a 422 in this test suite (fixed locally). Recommend aligning to JSON or query params across all export endpoints."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter83_legacy_journey_filter.py",
+    "/app/test_reports/pytest/iter83.xml"
+  ],
+  "action_items": [
+    "(Optional) Standardize export endpoint body conventions (Form vs JSON vs query) across analytics_routes.py — currently /reports/quality-export is Form while /analytics/heatmap-export uses query and /admin/routes-report/export accepts JSON.",
+    "(Optional) Consider refactoring journey_routes.py:55-58 to call apply_legacy_journey_filter(query) instead of duplicating the $or block inline. The current inline + manual $and combination at line 76 happens to be correct because top-level $or and $and are AND'd by Mongo, but using the helper would be more consistent and DRY.",
+    "(Optional) Add an explicit unit test for apply_legacy_journey_filter (3 branches: empty query, query with $or, query with $and). The integration coverage is solid but a pure unit test would catch future helper regressions instantly."
+  ],
+  "critical_code_review_comments": [
+    "dependencies.py apply_legacy_journey_filter (lines 210-232): correctly handles the three branches (no $or/$and, existing $or, existing $and). Defensive design verified by test_search_finds_seeded_journey_and_hides_legacy. Minor: the function mutates the input dict and returns it — fine here, but consider documenting the side effect since callers like routes_report assign the result back and ignore the side effect would be tempting to remove.",
+    "journey_routes.py GET /journeys (lines 55-58): inline filter duplicates the helper logic instead of calling apply_legacy_journey_filter. If the legacy hide-rule ever changes (e.g. add a third condition), this site will be missed. Tech-debt risk.",
+    "admin_module_routes.py routes_report (line 363): correctly sets j_query before adding provider_id/status/driver — order is important because apply_legacy_journey_filter sets $or, and subsequent direct key assignments to provider_id/status/driver_name are top-level fields (AND'd correctly by Mongo). Verified by test_filter_by_driver.",
+    "analytics_routes.py: all 10 callers verified to pass (lines 68, 125, 203, 321, 659, 977, 1072, 1145, 1241, 1361). The pattern is consistent: build initial query → apply_assignment_filter → apply_legacy_journey_filter. Good consistency.",
+    "Edge case worth noting (no fix needed): a legacy journey with `migrated_to_journeys=[]` (empty list, not missing) would currently be HIDDEN since `migrated_to_journeys` field exists. If iter79 migration ever wrote an empty array as a marker, those would silently disappear from reports. Verified by test_routes_report_hides_legacy_when_no_orphan_incidents (the seeded legacy uses non-empty list, but the rule applies the same to empty arrays). Recommend also asserting `migrated_to_journeys.0` exists if there's any chance of empty arrays in the data."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter83_legacy_journey_filter.py"
+  ],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "N/A (backend-only scope)"},
+  "test_credentials": "dev@me.mx / LastMile2026 (developer)",
+  "seed_data_creation": "Per-module ephemeral fixture: 2 route-based journeys + 1 legacy journey with migrated_to_journeys list, all on date 2026-05-04, prefixed TEST_iter83_legacy_*. Inserted via direct local Mongo (legacy migration fields not exposed via API). Cleanup via delete_many on module teardown — verified no leftover docs after run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression command: cd /app/backend && python -m pytest tests/test_iter83_legacy_journey_filter.py -v. Tests insert journey docs directly via pymongo (MONGO_URL/DB_NAME from backend/.env) because migrated_to_journeys is not settable via API. If preview MongoDB ever points to a different DB than the local one, this seeding strategy will silently break — the API would not see seeded docs. Validate by checking MONGO_URL in backend/.env still points to the same instance the API uses. The 21 tests cover: 3 legacy filter scenarios on /api/admin/routes-report, 2 search scenarios on /api/journeys, 4 routes-report regression tests, 10 analytics endpoint regressions, 2 cache regressions.",
+  "rca of the issue": "PROD reported 43 vs 38 routes (5 extras). Root cause: 11 reporting endpoints did NOT apply the iter79 migration filter — they returned both the OLD plan-based legacy journey doc AND the NEW route-based journeys created during migration. Users saw duplicate Routal rows with driver_name='Vehículo N' and order_id matching the legacy plan UUID. Fix: extracted the existing GET /api/journeys filter ($or: migrated_to_journeys missing OR _legacy_incidents_remaining>0) into a shared helper apply_legacy_journey_filter (dependencies.py:210) and applied it in admin_module_routes.routes_report and 10 analytics_routes endpoints. The helper is defensive against existing $or/$and (combines via $and). Validation: seeded a 1-legacy + 2-new fixture, confirmed routes-report returns only the 2 new (legacy hidden) when no orphan incidents, and all 3 when _legacy_incidents_remaining>0. No regressions detected on the 11 instrumented endpoints, /api/journeys search, or iter59 caches."
+}
