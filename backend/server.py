@@ -375,6 +375,18 @@ api_router.include_router(routal_migration_router)
 app.include_router(api_router)
 
 
+# Alias bare /health → /api/health for monitors/k8s probes that hit the root path.
+# Returns 200 with minimal body to avoid bloating logs; full health is at /api/health.
+@app.get("/health", include_in_schema=False)
+async def health_alias():
+    """Lightweight liveness probe alias.
+    Some external monitors/k8s probes call /health (no /api prefix). We respond
+    with a minimal 200 to keep them happy without running the full DB check on
+    every poll. Use /api/health for the comprehensive readiness payload.
+    """
+    return {"status": "ok"}
+
+
 # Backward compat redirect for /api-docs
 @app.get("/api-docs")
 async def redirect_api_docs():

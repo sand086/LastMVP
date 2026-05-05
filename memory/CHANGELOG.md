@@ -1,5 +1,22 @@
 # LastMile OS - Changelog
 
+## 2026-05-05 — PR1: Limpieza de ruido en Error Tracker
+
+### Diagnóstico (`/system/errors` PROD: 197 no-revisados)
+- **58,592 hits** `GET /health 404` — probe interno (k8s/monitor) llamando a `/health` sin prefijo `/api`.
+- **181 hits** `GET /api/integrations/routal/image/... 404` — imágenes Routal expiradas (1 row por `image_id`).
+- **45 hits** `GET /api/client-config 403` — `Journeys.jsx` llamaba `listClientConfigs()` para todos los roles, pero el endpoint solo permite `developer`.
+- **9 × HTTP 500** transitorios `connection pool paused` (MongoDB Atlas, ventana 30s del 2026-05-04).
+
+### Fixes aplicados
+- `backend/middleware.py`: agregado `/health` a `skip_paths`; agregado `/api/integrations/routal/image/` y `/api/integrations/routal/signature/` a `expected_404_prefixes`; agregado skip global para HTTP 429 (rate-limit es respuesta defensiva esperada, no bug).
+- `backend/server.py`: nuevo alias `GET /health` → `{"status":"ok"}` (lightweight liveness probe sin DB check, separado del `/api/health` completo).
+- `frontend/src/pages/Journeys.jsx`: `listClientConfigs()` ahora solo se llama si `user.role === 'developer'`. Otros roles ya no triggerean 403 al entrar a `/journeys`.
+
+### Limpieza retroactiva en PROD
+- Marcados 191 errores ruido como `reviewed=true` vía script (4 iteraciones por cap de 200 del listado).
+- Estado final: **6 errores reales pendientes** (sync-journey 400, journey close/start 422, backfill 502, incidente DELETE 404). Estos quedan para PR 2.
+
 ## 2026-04-15 — 5 Feature Prompts Implementados (P1-P5)
 
 ### P1: Refresh Token para Power BI

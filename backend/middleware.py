@@ -145,7 +145,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         
         # Skip static files and health checks for logging
-        skip_paths = ["/api/health", "/uploads/", "/static/", "/favicon.ico"]
+        # Note: bare "/health" is included for k8s/monitor probes that don't use the
+        # /api prefix — backend ingress still routes them here and they would
+        # otherwise spam system_errors with 404s.
+        skip_paths = ["/api/health", "/health", "/uploads/", "/static/", "/favicon.ico"]
         should_log = not any(path.startswith(sp) for sp in skip_paths)
         
         response = None
@@ -215,6 +218,11 @@ class AuditMiddleware(BaseHTTPMiddleware):
         if status_code == 401:
             return
 
+        # 429 (rate limit): respuesta defensiva esperada, NO es un bug del código.
+        # Tracking these floods system_errors when bots/scripts hit limits.
+        if status_code == 429:
+            return
+
         # 404 en patrones de business-logic esperado
         if status_code == 404:
             expected_404_prefixes = (
@@ -230,6 +238,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 "/api/admin/export-liquidacion",  # período sin datos
                 "/api/admin/routes-report",       # idem
                 "/api/reports/export",             # idem
+                "/api/integrations/routal/image/", # imágenes Routal expiradas/borradas
+                "/api/integrations/routal/signature/", # firmas Routal expiradas/borradas
             )
             if any(path.startswith(p) for p in expected_404_prefixes):
                 return

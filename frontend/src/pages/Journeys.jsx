@@ -36,6 +36,7 @@ const Journeys = () => {
     const { canEdit, hasRole, isCoordinator } = useAuth();
     const canDelete = hasRole(['coordinator', 'developer']);
     const canRunSelection = isCoordinator();
+    const isDeveloper = hasRole(['developer']);
     const [clients, setClients] = useState([]);
     const [providers, setProviders] = useState([]);
     const [pulseConfig, setPulseConfig] = useState(null);
@@ -89,22 +90,28 @@ const Journeys = () => {
     // Clients + Providers + Config: one-shot al montar (no requieren retry/cancel)
     const fetchAux = useCallback(async () => {
         try {
-            const results = await Promise.allSettled([
+            // listClientConfigs requiere rol developer en el backend (403 para otros);
+            // omitimos la llamada para roles no autorizados y evitamos ruido en
+            // /system/errors. Otros roles ven Auditorías como deshabilitada (vacío).
+            const tasks = [
                 getClients(),
                 getProviders(),
                 api.get('/admin/config'),
-                listClientConfigs().catch(() => ({ data: { data: [] } })),
-            ]);
+            ];
+            if (isDeveloper) {
+                tasks.push(listClientConfigs().catch(() => ({ data: { data: [] } })));
+            }
+            const results = await Promise.allSettled(tasks);
             const [clientsRes, providersRes, configRes, selRes] = results;
             if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data);
             if (providersRes.status === 'fulfilled') setProviders(providersRes.value.data);
             if (configRes.status === 'fulfilled') setPulseConfig(configRes.value.data?.pulse_config || null);
-            if (selRes.status === 'fulfilled') {
+            if (selRes && selRes.status === 'fulfilled') {
                 const items = selRes.value.data?.data || [];
                 setSelectionClients(items.filter(c => c.selection_enabled && c.active !== false));
             }
         } catch { /* silent — clients/providers no son críticos */ }
-    }, []);
+    }, [isDeveloper]);
 
     useEffect(() => { fetchAux(); }, [fetchAux]);
 
