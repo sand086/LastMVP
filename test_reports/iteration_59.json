@@ -1,0 +1,41 @@
+{
+  "summary": "iter59 — Perf audit P0+P1 (Fixes A→F) validated on preview. 17/17 tests passed in 3.62s. Concurrency win confirmed: 10 parallel GET /api/journeys completed in wall=0.78s (previously 11-16s per request) with max individual latency 0.77s and avg 0.74s. /api/journeys contract preserved (data[] + pagination.total_count/total_pages/page/page_size, items with client_name, provider_name, incidents_count, open_incidents_count). Clients/providers ttl_cache verified warm + invalidation on POST/PUT/DELETE. Dashboard stats/incidents-breakdown still healthy. Indexes logged as created/verified on every boot.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/journeys",
+        "issue": "Pagination object duplicates keys (total/total_count and total_pages/pages). Intentional for backward compat per review_request, but long-term one pair should be deprecated to reduce payload and client confusion."
+      },
+      {
+        "endpoint": "GET /api/journeys",
+        "issue": "clients/providers are fetched from DB inside the endpoint (not from the @ttl_cache of /api/clients|/api/providers). Fix B comment acknowledges this; low impact given projections are light, but the cache win is left on the table for this hot endpoint."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter59_perf_p0_p1.py",
+    "/app/test_reports/pytest/iter59.xml"
+  ],
+  "action_items": [
+    "(Optional) Collapse pagination duplicate keys (total vs total_count, total_pages vs pages) after a frontend migration window.",
+    "(Optional) Reuse the in-process ttl_cache of /api/clients & /api/providers inside GET /api/journeys enrichment path to avoid the last two DB roundtrips.",
+    "(Optional) Surface Mongo pool metrics (checked_out, available, wait_queue_size) on /api/admin/health for future regressions — pool tuning change is currently invisible at runtime."
+  ],
+  "critical_code_review_comments": [
+    "dependencies.py: mongo_client is instantiated at import time with serverSelectionTimeoutMS=5000 — good for fail-fast, but the same module also raises on missing JWT_SECRET BEFORE the DB client is used; order is fine today but a future re-order could surface noisy import errors. Consider a get_db() factory.",
+    "journey_routes.py GET /journeys: asyncio.gather of count + find + clients + providers is correct, but if any task raises, the 4 exceptions are not individually logged — gather fails fast and the caller sees a 500 with a generic message. Add return_exceptions=False + try/except wrapper to log which task failed for future perf regressions.",
+    "journey_routes.py GET /journeys: query building above gather runs apply_assignment_filter which mutates `query` — safe here since each request has its own dict, but worth a docstring note since the function is reused in many places.",
+    "user_routes.py @ttl_cache on /clients and /providers: the cache key includes the `user` Depends argument. Since both endpoints return the SAME data to every user (no per-user filter), this likely results in one cache entry per distinct user object. Consider making the cache key user-agnostic to maximize hit rate (currently still correct, just sub-optimal).",
+    "routal_client.py: dropping ROUTAL_TIMEOUT 30s → 10s is safe for sync-journey and image-proxy happy-paths, but any upstream Routal endpoint that legitimately takes >10s (e.g. very large /v2/plan/{id}/stops) will now 500 where it used to succeed. No test in this suite covers a large plan — flag for main agent to monitor."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter59_perf_p0_p1.py"],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "N/A (backend-only scope)"},
+  "test_credentials": "dev@me.mx / LastMile2026 (developer)",
+  "seed_data_creation": "Ephemeral TEST_iter59_* client + provider created and deleted inline per test (cache invalidation). No persistent seed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression command: cd /app/backend && python -m pytest tests/test_iter59_perf_p0_p1.py -v. To re-run the concurrency assertion with metrics: pytest tests/test_iter59_perf_p0_p1.py::TestConcurrency_Journeys -v -s. Preview baseline measured 2026-05-05: 10 parallel /api/journeys → wall 0.78s, max 0.77s, avg 0.74s. Login <5s, dashboard cached <2s. If perf regresses, first suspect is Mongo pool (maxPoolSize=50/minPoolSize=10 in dependencies.py) and the asyncio.gather in routes/journey_routes.py:101-108.",
+  "rca of the issue": "N/A — all P0+P1 fixes validated. Contract unchanged, cache invalidation works on POST/PUT/DELETE for both /api/clients and /api/providers, incident counts correct, indexes created on boot, Routal timeout change non-breaking for the covered flows, and 10-concurrent stress completes ~15× faster than the 3s target."
+}

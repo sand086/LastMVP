@@ -7,6 +7,7 @@ from typing import List
 from datetime import datetime, timezone
 
 from dependencies import db, get_current_user, require_role
+from ttl_cache import ttl_cache, invalidate_prefix
 from models import (
     UserCreate, ClientBase, ClientResponse,
     ProviderBase, ProviderResponse,
@@ -93,6 +94,7 @@ async def delete_user(user_id: str, admin: dict = Depends(require_role(["coordin
 # ==================== CLIENTS ====================
 
 @router.get("/clients", response_model=List[ClientResponse])
+@ttl_cache(ttl_seconds=300, prefix="clients_list")
 async def get_clients(user: dict = Depends(get_current_user)):
     clients = await db.clients.find({}, {"_id": 0}).to_list(100)
     return clients
@@ -106,6 +108,7 @@ async def create_client(data: ClientBase, user: dict = Depends(require_role(["co
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.clients.insert_one(new_client)
+    invalidate_prefix("clients_list")
     return {"id": new_client["id"], "name": new_client["name"]}
 
 
@@ -119,6 +122,7 @@ async def update_client(client_id: str, data: dict, user: dict = Depends(require
     result = await db.clients.update_one({"id": client_id}, {"$set": update_fields})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    invalidate_prefix("clients_list")
     return {"message": "Cliente actualizado"}
 
 
@@ -127,12 +131,14 @@ async def delete_client(client_id: str, user: dict = Depends(require_role(["coor
     result = await db.clients.delete_one({"id": client_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    invalidate_prefix("clients_list")
     return {"message": "Cliente eliminado"}
 
 
 # ==================== PROVIDERS ====================
 
 @router.get("/providers", response_model=List[ProviderResponse])
+@ttl_cache(ttl_seconds=300, prefix="providers_list")
 async def get_providers(user: dict = Depends(get_current_user)):
     providers = await db.providers.find({}, {"_id": 0}).to_list(100)
     return providers
@@ -148,6 +154,7 @@ async def create_provider(data: ProviderBase, user: dict = Depends(require_role(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.providers.insert_one(new_provider)
+    invalidate_prefix("providers_list")
     return {k: v for k, v in new_provider.items() if k != "_id"}
 
 
@@ -162,6 +169,7 @@ async def update_provider(provider_id: str, data: dict, user: dict = Depends(req
     result = await db.providers.update_one({"id": provider_id}, {"$set": update_fields})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+    invalidate_prefix("providers_list")
     return {"message": "Proveedor actualizado"}
 
 
@@ -170,4 +178,5 @@ async def delete_provider(provider_id: str, user: dict = Depends(require_role(["
     result = await db.providers.delete_one({"id": provider_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+    invalidate_prefix("providers_list")
     return {"message": "Proveedor eliminado"}

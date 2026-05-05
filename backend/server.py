@@ -484,6 +484,11 @@ async def _create_indexes():
     await db.journeys.create_index("provider_id", background=True)
     await db.journeys.create_index([("date", -1), ("status", 1)], background=True)
     await db.journeys.create_index("branch_id", background=True)
+    # Perf 2026-05-05: indexes for /api/journeys list filters
+    await db.journeys.create_index("migrated_to_journeys", background=True, sparse=True)
+    await db.journeys.create_index("_legacy_incidents_remaining", background=True, sparse=True)
+    await db.journeys.create_index([("client_id", 1), ("date", -1), ("status", 1)], background=True)
+    await db.journeys.create_index([("provider_id", 1), ("date", -1)], background=True)
 
     # Branch indexes (RT-13 / iter71)
     await db.branches.create_index([("client_id", 1), ("code", 1)], unique=True, background=True)

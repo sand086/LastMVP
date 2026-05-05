@@ -14,7 +14,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 ROUTAL_BASE_URL = os.environ.get("ROUTAL_BASE_URL", "https://api.routal.com")
-ROUTAL_TIMEOUT = float(os.environ.get("ROUTAL_TIMEOUT_SECONDS", "30"))
+# Perf 2026-05-05: dropped from 30s → 10s. Image proxy 404s used to hold a
+# request for 30s before timing out, blocking server workers under load.
+ROUTAL_TIMEOUT = float(os.environ.get("ROUTAL_TIMEOUT_SECONDS", "10"))
 
 
 class RoutalAuthError(Exception):

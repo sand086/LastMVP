@@ -90,13 +90,26 @@ async def get_journeys(
     page_size = min(max(1, page_size), 100)
     skip = (page - 1) * page_size
 
-    total_count = await db.journeys.count_documents(query)
+    # Perf optimization (2026-05-05): parallelize all DB calls. Previously this
+    # endpoint did 6 sequential roundtrips (count + find + clients + providers +
+    # 2× incidents.aggregate). With Atlas latency ~1s in PROD, that meant 6s+
+    # under contention. Now: 1 roundtrip wallclock + projections lighter.
+    # NOTE: clients/providers come from cached endpoints (5 min TTL) but we
+    # still hit DB here for parity with role filters. Tiny so no impact.
+    journey_proj = {"_id": 0}
+
+    count_task = db.journeys.count_documents(query)
+    find_task = db.journeys.find(query, journey_proj).sort("date", -1).skip(skip).limit(page_size).to_list(page_size)
+    clients_task = db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+    providers_task = db.providers.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+
+    total_count, journeys, clients_list, providers_list = await asyncio.gather(
+        count_task, find_task, clients_task, providers_task
+    )
     total_pages = max(1, -(-total_count // page_size))
 
-    journeys = await db.journeys.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(page_size).to_list(page_size)
-
-    clients = {c["id"]: c["name"] for c in await db.clients.find({}, {"_id": 0}).to_list(100)}
-    providers = {p["id"]: p["name"] for p in await db.providers.find({}, {"_id": 0}).to_list(100)}
+    clients = {c["id"]: c["name"] for c in clients_list}
+    providers = {p["id"]: p["name"] for p in providers_list}
 
     journey_ids = [j["id"] for j in journeys]
     incident_counts = {}
@@ -110,10 +123,13 @@ async def get_journeys(
             {"$match": {"journey_id": {"$in": journey_ids}, "status": "open"}},
             {"$group": {"_id": "$journey_id", "count": {"$sum": 1}}},
         ]
-        async for doc in db.incidents.aggregate(pipeline_total):
-            incident_counts[doc["_id"]] = doc["count"]
-        async for doc in db.incidents.aggregate(pipeline_open):
-            open_incident_counts[doc["_id"]] = doc["count"]
+        # Run both incident aggregations in parallel
+        total_docs, open_docs = await asyncio.gather(
+            db.incidents.aggregate(pipeline_total).to_list(len(journey_ids)),
+            db.incidents.aggregate(pipeline_open).to_list(len(journey_ids)),
+        )
+        incident_counts = {d["_id"]: d["count"] for d in total_docs}
+        open_incident_counts = {d["_id"]: d["count"] for d in open_docs}
 
     for j in journeys:
         j["client_name"] = clients.get(j.get("client_id"), "")

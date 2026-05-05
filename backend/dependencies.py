@@ -28,7 +28,20 @@ load_dotenv(ROOT_DIR / '.env')
 # ==================== DATABASE ====================
 
 mongo_url = os.environ['MONGO_URL']
-mongo_client = AsyncIOMotorClient(mongo_url)
+# Pool tunings — perf audit 2026-05-05 found Atlas latency 1.1s on cold pool +
+# severe degradation under concurrency (10 parallel reqs → 11-16s each).
+# Defaults of motor (minPoolSize=0, no compression, 30s server selection timeout)
+# pay handshake/SCRAM auth on every burst. We warm a pool and fail fast.
+mongo_client = AsyncIOMotorClient(
+    mongo_url,
+    maxPoolSize=int(os.environ.get("MONGO_MAX_POOL", "50")),
+    minPoolSize=int(os.environ.get("MONGO_MIN_POOL", "10")),
+    maxIdleTimeMS=60000,
+    waitQueueTimeoutMS=5000,
+    serverSelectionTimeoutMS=5000,
+    compressors="zlib",
+    retryWrites=True,
+)
 db = mongo_client[os.environ['DB_NAME']]
 
 # ==================== JWT CONFIG ====================
