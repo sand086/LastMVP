@@ -1,0 +1,34 @@
+{
+  "summary": "Backend-only test of selection auto-backfill fix (iter85). 9/9 tests pass — all 8 requested scenarios verified plus scheduler smoke test. The resilience fix for Routal webhook outages works correctly: skips API when pending>0, returns routal_inactive when integration disabled, stages plans when API returns data, and the manual endpoint contract is preserved (no auto-backfill in POST /api/selection/run/{client_id}). Regressions iter83 (/api/admin/routes-report) and iter84 (/api/health checks.routal_sync) still pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter85_selection_backfill.py",
+    "/app/test_reports/pytest/iter85.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/selection_backfill.py uses `consecutive_below` heuristic (>=2 pages with 90% below range → stop) — adequate, but when Routal returns plans in non-strict date order (e.g. paused/rescheduled plans), some in-range plans may be missed. Low probability but worth a note.",
+    "backfill_plans_for_date always calls rc.aclose() in finally — good. But the outer exception handler wraps only _request; get_plan errors are individually caught per-plan which is correct and resilient.",
+    "maybe_backfill_if_empty uses `processed: False` as the 'pending' signal. Correct for fresh-day scenario; re-runs within same cutoff won't re-backfill because run_daily_selection marks plans processed=True. This is the desired behavior.",
+    "Scheduler loop catches backfill errors separately from run_daily_selection (good isolation) — if backfill fails but Routal webhook later arrives, next cutoff will still work normally.",
+    "Consider: if backfill results in staged=0 AND error='routal_inactive' (integration disabled for a client that has selection_enabled=True), the scheduler still calls run_daily_selection which returns total=0. That's fine, but operations should be alerted. Currently only logged at INFO level."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter85_selection_backfill.py (NEW)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A"},
+  "test_credentials": "dev@me.mx / LastMile2026 (from /app/backend/.env defaults)",
+  "seed_data_creation": "All test data uses TEST_iter85_<uuid> client_id prefix and is cleaned up in try/finally. No persistent seed left behind.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Test file at /app/backend/tests/test_iter85_selection_backfill.py covers the selection_backfill resilience layer (iter85 fix). The db fixture creates a fresh Motor client per-test to avoid event-loop-reuse issues with module-scope Motor clients under pytest-asyncio (strict mode). Uses unittest.mock.patch on IntegrationService.get_routal_client and on workers.routal_event_processor._handle_plan_created_direct. Regression markers: iter83 endpoint /api/admin/routes-report REQUIRES date_from & date_to query params. Scheduler loop logs 'started' and 'cancelled' lines cleanly under hot-reload — no backfill import errors.",
+  "rca of the issue": "Original bug RCA (from problem statement): Cubbo MX stopped receiving Routal webhooks since 2026-04-26 → routal_daily_plans empty → scheduler tick finds 0 staged plans → 0 drivers selected. Fix validated: services/selection_backfill.py adds a fallback that pulls plans directly from Routal API /v2/plans when staging is empty, then hydrates via /v2/plan/{id}. Scheduler now calls maybe_backfill_if_empty() BEFORE run_daily_selection, making the system resilient to webhook outages. Manual endpoint POST /api/selection/run/{client_id} was explicitly left unchanged (contract preserved)."
+}

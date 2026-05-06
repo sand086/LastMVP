@@ -349,6 +349,23 @@ async def _scheduler_loop(db):
                         if now_cdmx < target:
                             continue
                         try:
+                            # Bug fix 2026-05-06: auto-backfill from Routal API when
+                            # webhooks haven't delivered plans. Cubbo MX hadn't
+                            # received a webhook in 10 days but scheduler kept firing
+                            # with empty staging → 0 selected. This makes the scheduler
+                            # resilient to webhook outages.
+                            from services.selection_backfill import maybe_backfill_if_empty
+                            try:
+                                bf = await maybe_backfill_if_empty(db, cid, now_cdmx.date())
+                                if bf and bf.get("staged", 0) > 0:
+                                    logger.info(
+                                        f"[selection.scheduler] auto-backfilled {bf['staged']} plans "
+                                        f"for {cid} cutoff={sched} (webhooks gap)"
+                                    )
+                            except Exception as bfe:
+                                logger.warning(
+                                    f"[selection.scheduler] backfill failed for {cid} cutoff={sched}: {bfe}"
+                                )
                             await run_daily_selection(db, cid)
                             last_runs[sched] = today_str
                             await db.client_config.update_one(
