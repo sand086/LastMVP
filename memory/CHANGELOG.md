@@ -1,5 +1,39 @@
 # LastMile OS - Changelog
 
+## 2026-05-06 — Bug fix: Selection scheduler ignoraba clientes con webhooks rotos
+
+### Reporte del usuario
+- En PROD `/settings → Auditorías → Cubbo MX`, el scheduler con cortes 06:00 y 15:01 CDMX corría según calendario pero las journeys no se cargaban automáticamente.
+- "Resumen de hoy" mostraba PLANES=0, SELECCIONADOS=0, P1/P2=0 ambas ejecuciones.
+- Solo funcionaba al pulsar manualmente "Ejecutar ahora" o "Recuperar rango".
+
+### RCA
+- Cubbo MX no recibía webhooks de Routal desde **2026-04-26** (10 días). Verificado vía `/api/webhooks/routal/{client_id}/status`: `last_event_at: 2026-04-26T03:27:15`.
+- El scheduler depende de que `routal_daily_plans` esté pre-poblada por webhooks (`plan.created`/`plan.updated`).
+- Sin webhooks → staging vacío → `run_daily_selection()` retorna `total: 0` → 0 audits.
+- "Recuperar rango" funcionaba porque consulta directamente la API Routal `GET /v2/plans` (no depende de webhooks).
+
+### Fix aplicado
+- **Nuevo módulo** `services/selection_backfill.py`:
+  - `backfill_plans_for_date(db, client_id, target_date)`: pulls plans directamente desde Routal API `/v2/plans` + `/v2/plan/{id}` con caps de seguridad (PAGE_SIZE=100, MAX_PAGES=30, MAX_HYDRATE=200). Idempotente (upsert por `client_id+driver_id+date`).
+  - `maybe_backfill_if_empty(db, client_id, target_date)`: ejecuta el backfill SOLO si `routal_daily_plans` no tiene registros pendientes (no consume rate-limit cuando webhooks sí están llegando).
+- **Scheduler modificado** (`workers/routal_selection_worker.py`): cada cutoff ahora llama `maybe_backfill_if_empty()` antes de `run_daily_selection()`, haciendo el sistema resiliente a outages de webhooks.
+- **No tocado**: el endpoint manual `POST /api/selection/run/{client_id}` mantiene su contrato (no auto-backfill) — el usuario sigue eligiendo cuándo invocar la API Routal manualmente.
+
+### Validación (testing agent iter85 — 9/9 tests passed)
+- `routal_inactive` retorna `staged=0` sin lanzar excepción ✅
+- Si hay plans staged, NO se llama API Routal (preserva rate-limit) ✅
+- Si staging vacío + Routal inactivo → mensaje claro ✅
+- Mock de Routal API hidrata plans correctamente ✅
+- `run_daily_selection` con plans staged sigue funcionando (sin regresión) ✅
+- Scheduler arranca sin errores ✅
+- Regresiones iter83 (`/api/admin/routes-report`) y iter84 (`/api/health.routal_sync`) intactas ✅
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD** para activar el auto-backfill.
+- Tras redeploy, mañana 2026-05-07 a las 06:00 CDMX el scheduler debería cargar drivers automáticamente sin intervención manual, incluso si Routal sigue sin enviar webhooks.
+- Revisar también la integración de webhooks Routal: ir a Settings → Integraciones, copiar la URL de webhook de Cubbo MX (`/api/webhooks/routal/0b6590e9-...`) y verificar que esté configurada correctamente en Routal. El auto-backfill es resiliencia de fallback, no reemplaza los webhooks (más eficiente).
+
 ## 2026-05-06 — Bug fix: Routal sync worker no actualizaba algunos journeys
 
 ### Reporte del usuario
