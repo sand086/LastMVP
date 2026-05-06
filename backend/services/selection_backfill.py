@@ -127,6 +127,11 @@ async def backfill_plans_for_date(db, client_id: str, target_date: date) -> dict
                 if str(drv_name).startswith("LastmileScanSessions"):
                     continue
                 route_stops = [s for s in stops if s.get("route_id") == drv_id]
+                # Bug fix 2026-05-06: skip routes with no packages. Matches user
+                # request "solo contemple rutas que contengan paquetes" — empty
+                # routes pollute /journeys and waste audit slots.
+                if not route_stops:
+                    continue
                 payload = {
                     "id": plan_id,
                     "plan_id": plan_id,

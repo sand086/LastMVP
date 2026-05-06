@@ -1,0 +1,34 @@
+{
+  "summary": "Iter86 backend-only testing complete. 14/14 pytest tests pass covering: (1) empty-route filter in auto-backfill, (2) empty-route filter in manual backfill endpoint, (3-5) additive quota scenarios A/B/C (total never exceeds max_daily_audits across multiple run_daily_selection invocations), (6) phase + journey_id preservation of already-selected drivers, (7) idempotency without new plans, (8) max_daily=0 edge, (9) cap-saturated late driver → unselected, (10) iter85 auto-backfill regression, (11) /api/health + scheduler + /api/admin/routes-report regression.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter86_additive_quota.py",
+    "/app/test_reports/pytest/iter86.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Worker correctly reads already_selected BEFORE algorithm (line 163-169) and computes remaining_quota = max(0, max_daily - len(already_selected)) — prevents over-selection on backfill re-runs.",
+    "candidate_drivers excludes already-selected set, passed with max_daily=remaining_quota to _select_drivers — algorithmic invariant preserved.",
+    "Preservation branch (line 217-222): when driver already in already_selected, only plan.processed=True is updated, audit_log NOT upserted — phase + journey_id intact.",
+    "Both auto-backfill (services/selection_backfill.py L129-134) and manual backfill (routes/selection_routes.py L306-313) skip routes with empty route_stops consistently; manual endpoint counts them as skipped_no_driver.",
+    "unselected cleanup (delete_many L173-175) runs before algorithm so newly-arrived drivers in 2nd run can be re-evaluated against remaining quota.",
+    "Summary totals use selected_set = already_selected | new_selected (L197), so summary.selected reflects the cumulative count correctly.",
+    "Non-blocking observation: when remaining_quota=0 and there are new candidate drivers, loop still writes unselected rows — good. Ensures visibility of drivers that could not be audited due to cap."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "n/a"},
+  "test_credentials": "dev@me.mx / LastMile2026 (used for live API regression checks)",
+  "seed_data_creation": "Per-test ephemeral seed with TEST_iter86_<uuid> client_id in client_config, routal_daily_plans, driver_audit_log. All cleaned up in finally blocks.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter86 (cupo aditivo + filtro rutas vacías) validated end-to-end. 14 pytest cases in /app/backend/tests/test_iter86_additive_quota.py. Key invariants: (a) selected_count per date never exceeds max_daily_audits across N backfill runs, (b) drivers already selected keep original phase and journey_id, (c) routes with zero route_stops are skipped in both backfill paths. Live endpoints /api/health, /api/admin/routes-report verified. Scheduler logs show clean startup without import errors. No changes to webhook path (_handle_plan_created) required.",
+  "rca of the issue": "N/A — this was a feature validation, not a bug fix iteration. The fix in routal_selection_worker.py L156-193 correctly implements the additive quota by computing remaining_quota from existing audit_log entries before calling _select_drivers with only new candidates."
+}

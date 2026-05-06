@@ -305,6 +305,12 @@ async def backfill_from_routal(
                     continue
                 # Filter stops to only the ones assigned to THIS route
                 route_stops = [s for s in stops if s.get("route_id") == drv_id]
+                # Bug fix 2026-05-06: skip routes with no packages. Empty shells
+                # pollute /journeys and waste audit slots. Matches the auto-backfill
+                # behavior in services/selection_backfill.py.
+                if not route_stops:
+                    skipped_no_driver += 1
+                    continue
                 payload = {
                     "id": plan_id,
                     "plan_id": plan_id,

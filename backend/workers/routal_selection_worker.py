@@ -153,54 +153,87 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
     async for doc in db.driver_audit_log.aggregate(pipeline):
         audit_counts[doc["_id"]] = int(doc["count"])
 
-    # STEP 4 — algorithm
-    selected_list, phase_map = _select_drivers(
-        drivers_today=drivers_today,
-        audited_yesterday=audited_yesterday,
-        audit_counts=audit_counts,
-        max_daily=max_daily,
-        target_date=target_date,
+    # STEP 4 — historial: drivers already selected today (re-run safe).
+    # We read this BEFORE running the algorithm so we can compute the remaining
+    # quota and only consider new candidates. This makes the function additive:
+    # subsequent backfills (manual or auto) can fill up to max_daily without
+    # re-electing or excessively double-counting drivers selected earlier.
+    already_selected = set()
+    already_phase_map: dict = {}
+    cursor_a = db.driver_audit_log.find(
+        {"client_id": client_id, "date": target_dt, "selection_status": "selected"},
+        {"_id": 0, "driver_id": 1, "selection_phase": 1},
     )
-    selected_set = set(selected_list)
+    async for doc in cursor_a:
+        already_selected.add(doc["driver_id"])
+        already_phase_map[doc["driver_id"]] = doc.get("selection_phase") or "phase_1"
 
-    # STEP 5 — idempotency: clean previous unselected for this date (re-run safe)
+    # STEP 5 — idempotency: clean previous unselected for this date so newly
+    # arrived drivers can be re-evaluated against the remaining quota.
     await db.driver_audit_log.delete_many({
         "client_id": client_id, "date": target_dt, "selection_status": "unselected",
     })
 
-    # Drivers already selected today (don't recreate Journey on re-run)
-    already_selected = set()
-    cursor_a = db.driver_audit_log.find(
-        {"client_id": client_id, "date": target_dt, "selection_status": "selected"},
-        {"_id": 0, "driver_id": 1},
-    )
-    async for doc in cursor_a:
-        already_selected.add(doc["driver_id"])
-    new_selected = selected_set - already_selected
+    # STEP 6 — algorithm on REMAINING quota with NEW candidates only.
+    # Bug fix 2026-05-06: previously the algorithm was called with all drivers_today
+    # and max_daily, which could over-select on subsequent backfills (e.g. first
+    # run picks 10/30, second run picks another 25 → total 35, exceeding cap).
+    remaining_quota = max(0, max_daily - len(already_selected))
+    candidate_drivers = [d for d in drivers_today if d not in already_selected]
 
-    # STEP 6 — create Journeys for new selected
+    if remaining_quota > 0 and candidate_drivers:
+        selected_list, phase_map = _select_drivers(
+            drivers_today=candidate_drivers,
+            audited_yesterday=audited_yesterday,
+            audit_counts=audit_counts,
+            max_daily=remaining_quota,
+            target_date=target_date,
+        )
+    else:
+        selected_list, phase_map = [], {}
+
+    new_selected = set(selected_list)
+    # Combined view for summary metrics (already + new) — never re-elect existing
+    selected_set = already_selected | new_selected
+
+    # STEP 7 — create Journeys for new selected; do NOT touch audit_log entries
+    # of drivers already selected (preserves their original phase / journey_id).
     from workers.routal_event_processor import _handle_plan_created_direct  # lazy import
 
-    counts = {"phase_1": 0, "phase_2": 0, "selected_new": 0, "selected_existing": len(already_selected & selected_set)}
+    counts = {
+        "phase_1": sum(1 for d in already_selected if already_phase_map.get(d) == "phase_1"),
+        "phase_2": sum(1 for d in already_selected if already_phase_map.get(d) == "phase_2"),
+        "selected_new": 0,
+        "selected_existing": len(already_selected),
+    }
     for plan in plans:
         drv = plan.get("driver_id")
         if not drv:
             continue
         plan_branch_id = plan.get("branch_id")
-        if drv in selected_set:
+
+        # Already selected earlier today: don't overwrite the audit log entry
+        # (preserves the original phase + journey_id). Just mark plan processed.
+        if drv in already_selected:
+            await db.routal_daily_plans.update_one(
+                {"client_id": client_id, "driver_id": drv, "date": target_dt},
+                {"$set": {"processed": True, "processed_at": _now_iso()}},
+            )
+            continue
+
+        if drv in new_selected:
             phase = phase_map.get(drv, "phase_1")
             counts[phase] = counts.get(phase, 0) + 1
 
             journey_id = None
-            if drv in new_selected:
-                try:
-                    journey_id = await _handle_plan_created_direct(
-                        db, plan["route_metadata"], client_id, branch_id=plan_branch_id,
-                    )
-                    counts["selected_new"] += 1
-                except Exception as e:
-                    logger.error(f"[selection] journey create failed for {drv}: {e}")
-                    journey_id = None
+            try:
+                journey_id = await _handle_plan_created_direct(
+                    db, plan["route_metadata"], client_id, branch_id=plan_branch_id,
+                )
+                counts["selected_new"] += 1
+            except Exception as e:
+                logger.error(f"[selection] journey create failed for {drv}: {e}")
+                journey_id = None
 
             await db.driver_audit_log.update_one(
                 {"client_id": client_id, "driver_id": drv, "date": target_dt},
@@ -220,7 +253,7 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
                 upsert=True,
             )
         else:
-            # STEP 7 — unselected
+            # STEP 8 — unselected
             await db.driver_audit_log.update_one(
                 {"client_id": client_id, "driver_id": drv, "date": target_dt},
                 {"$set": {
