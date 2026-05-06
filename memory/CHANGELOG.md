@@ -1,5 +1,37 @@
 # LastMile OS - Changelog
 
+## 2026-05-06 — Mejoras backfill: cupo aditivo + filtro rutas vacías
+
+### Petición del usuario
+1. **Backfill y auto_backfill solo deben contemplar rutas con paquetes** (descartar rutas vacías que ensucian `/journeys`).
+2. **Permitir que ejecuciones subsecuentes del backfill sumen rutas adicionales hasta llegar al límite Drivers/día**: ej. `max_daily=30`, primera corrida selecciona 10 → segunda corrida puede agregar hasta 20 más, sin exceder 30.
+
+### Cambios aplicados
+- **`services/selection_backfill.py`**: skip routes con `route_stops` vacío después del filtro `s.route_id == drv_id` (auto-backfill del scheduler).
+- **`routes/selection_routes.py` (manual `backfill-from-routal`)**: mismo filtro, contabilizado en `skipped_no_driver`.
+- **`workers/routal_selection_worker.py:run_daily_selection`** (refactor crítico):
+  - Lee `already_selected` desde `driver_audit_log` ANTES de correr el algoritmo.
+  - Calcula `remaining_quota = max(0, max_daily - len(already_selected))`.
+  - Pasa solo `candidate_drivers` (excluye los ya seleccionados) y `max_daily=remaining_quota` a `_select_drivers()`.
+  - Drivers ya seleccionados se preservan **intactos**: NO se hace upsert para no pisar `selection_phase` ni `journey_id`. Solo se marca el plan como `processed=True`.
+  - Bug previo: re-corrida con plans nuevos podía hacer over-selection (10 + 25 = 35 cuando max=30). Ahora siempre `total ≤ max_daily_audits`.
+
+### Validación (testing agent iter86 — 14/14 tests passed)
+- Filtro rutas vacías en auto-backfill ✅
+- Filtro rutas vacías en manual backfill ✅
+- Cupo aditivo escenario A (max=5, 3+4 → 5 total con 2 unselected) ✅
+- Cupo aditivo escenario B (max=10, 10+5 → 10 total, 5 unselected, cupo agotado) ✅
+- Cupo aditivo escenario C (max=10, 5+5 → 10 total, cupo justo) ✅
+- Preservación de `phase` + `journey_id` en drivers ya seleccionados ✅
+- Idempotencia sin plans nuevos ✅
+- Edge `max_daily=0` ✅
+- Edge driver tardío con cupo saturado → unselected ✅
+- Regresión iter85 auto-backfill, iter83 reportes Admin, iter59 perf ✅
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD** para activar las mejoras.
+- Tras redeploy, el backfill y auto-backfill descartarán rutas sin paquetes y respetarán siempre el cupo `max_daily_audits` aunque se ejecuten múltiples veces al día.
+
 ## 2026-05-06 — Bug fix: Selection scheduler ignoraba clientes con webhooks rotos
 
 ### Reporte del usuario
