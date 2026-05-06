@@ -40,6 +40,30 @@ async def _sync_one(db, journey, api_base, sem):
                         f"[routal-sync] journey={journey['id']} delivered+={d} failed+={f} "
                         f"recipient_filled+={rf} pending={summary.get('still_pending', 0)}"
                     )
+            else:
+                # Bug fix 2026-05-06: surface ok=false errors. Previously they were
+                # silently swallowed and the journey kept being a candidate forever
+                # without any visibility — making the user see "no updates" until
+                # they manually clicked sync.
+                logger.warning(
+                    f"[routal-sync] journey={journey['id']} sync NOT ok: "
+                    f"{summary.get('error', 'unknown')[:200]}"
+                )
+                # Stamp routal_synced_at anyway so we don't re-pick this journey
+                # immediately next tick (creates a 5-min cooldown). When the
+                # underlying issue (e.g. plan deleted on Routal side) clears,
+                # the cooldown lets us retry without busy-looping.
+                try:
+                    from datetime import datetime, timezone
+                    await db.journeys.update_one(
+                        {"id": journey["id"]},
+                        {"$set": {
+                            "routal_synced_at": datetime.now(timezone.utc).isoformat(),
+                            "routal_last_sync_error": (summary.get("error") or "")[:200],
+                        }},
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"[routal-sync] error syncing journey={journey.get('id')}: {e}")
 
@@ -58,13 +82,21 @@ async def _tick(db):
     cursor = db.journeys.find(
         {
             "source": "routal",
-            "status": {"$in": ["planificada", "en_ruta"]},
+            # Bug fix 2026-05-06: include "in_progress" — after iter84/iter85 the
+            # status normalization landed and journeys move planificada → in_progress
+            # → closed. Worker was only catching "planificada" + obsolete "en_ruta".
+            "status": {"$in": ["planificada", "en_ruta", "in_progress", "scheduled"]},
             "date": {"$gte": cutoff_date},
             "routal_plan_id": {"$exists": True, "$ne": None},
-            "$or": [
-                {"routal_synced_at": {"$exists": False}},
-                {"routal_synced_at": {"$lt": skip_synced_after}},
-            ],
+            # Defensive: $not $gte covers ALL three cases:
+            #   (a) field missing
+            #   (b) field present but null
+            #   (c) field with old timestamp (< cutoff)
+            # The previous $or used $exists:False which silently skipped journeys
+            # where the field was created with explicit null value at journey insert
+            # — which appears to be the case for some PROD docs (e.g. f4ce8961 was
+            # never synced despite being a valid candidate).
+            "routal_synced_at": {"$not": {"$gte": skip_synced_after}},
         },
         {"_id": 0, "id": 1, "client_id": 1, "routal_plan_id": 1, "date": 1, "driver_name": 1,
          "packages_total": 1, "packages_delivered": 1, "packages_failed": 1},
@@ -99,7 +131,9 @@ async def _loop(db):
                 t0 = datetime.now(timezone.utc)
                 count = await _tick(db)
                 elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
-                logger.debug(f"[routal-sync] tick processed {count} journeys in {elapsed:.1f}s")
+                # Bug fix 2026-05-06: was DEBUG, hidden in PROD. Now INFO so we
+                # can verify the worker is alive and how many journeys it's processing.
+                logger.info(f"[routal-sync] tick processed {count} journeys in {elapsed:.1f}s")
             except Exception as e:
                 logger.error(f"[routal-sync] tick error: {e}")
             await asyncio.sleep(INTERVAL_MIN * 60)

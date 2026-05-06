@@ -224,6 +224,51 @@ async def health():
         except Exception as e:
             return {"status": "error", "error": str(e)[:120]}
 
+    async def _check_routal_sync():
+        """Routal sync worker health: latest routal_synced_at on a journey doc.
+        If it's > ROUTAL_SYNC_INTERVAL_MINUTES * 3, the worker is likely stuck.
+        Also reports active candidates count so we can spot configuration drift.
+        """
+        try:
+            last = await _aio.wait_for(
+                db.journeys.find_one(
+                    {"routal_synced_at": {"$exists": True, "$ne": None}},
+                    {"_id": 0, "routal_synced_at": 1},
+                    sort=[("routal_synced_at", -1)],
+                ),
+                timeout=0.3,
+            )
+            last_hb_ago = None
+            if last and last.get("routal_synced_at"):
+                try:
+                    ts = datetime.fromisoformat(str(last["routal_synced_at"]).replace("Z", "+00:00"))
+                    last_hb_ago = round((datetime.now(timezone.utc) - ts).total_seconds())
+                except Exception:
+                    last_hb_ago = None
+            # Count candidates currently pending (matches the worker's own filter)
+            from datetime import timedelta as _td
+            cutoff_date = (datetime.now(timezone.utc) - _td(days=7)).strftime("%Y-%m-%d")
+            skip_synced_after = (datetime.now(timezone.utc) - _td(minutes=5)).isoformat()
+            candidates = await _aio.wait_for(
+                db.journeys.count_documents({
+                    "source": "routal",
+                    "status": {"$in": ["planificada", "en_ruta", "in_progress", "scheduled"]},
+                    "date": {"$gte": cutoff_date},
+                    "routal_plan_id": {"$exists": True, "$ne": None},
+                    "routal_synced_at": {"$not": {"$gte": skip_synced_after}},
+                }),
+                timeout=0.3,
+            )
+            return {
+                "status": "ok",
+                "last_heartbeat_seconds_ago": last_hb_ago,
+                "pending_candidates": candidates,
+            }
+        except _aio.TimeoutError:
+            return {"status": "timeout"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:120]}
+
     def _check_storage():
         # Storage actual: disco local del pod (Emergent native).
         # Devolver 'local' implica: archivos NO sobreviven redeploy (riesgo conocido P0).
@@ -240,8 +285,8 @@ async def health():
         except Exception as e:
             return {"status": "error", "error": str(e)[:80]}
 
-    db_check, ai_check, kosmo_check = await _aio.gather(
-        _check_db(), _check_ai_eval(), _check_kosmo_sync(),
+    db_check, ai_check, kosmo_check, routal_check = await _aio.gather(
+        _check_db(), _check_ai_eval(), _check_kosmo_sync(), _check_routal_sync(),
     )
     storage_check = _check_storage()
     breakers = _check_circuit_breakers()
@@ -266,6 +311,7 @@ async def health():
             "database": db_check,
             "ai_eval_worker": ai_check,
             "kosmo_sync": kosmo_check,
+            "routal_sync": routal_check,
             "storage": storage_check,
             "circuit_breakers": breakers,
         },

@@ -1,5 +1,37 @@
 # LastMile OS - Changelog
 
+## 2026-05-06 — Bug fix: Routal sync worker no actualizaba algunos journeys
+
+### Reporte del usuario
+- En PROD, journey `f4ce8961-5269-4836-8425-ccc28b69854c` (status `planificada`, 38 paquetes) no actualizaba sus paquetes automáticamente.
+- Sync manual funcionaba; el worker autónomo no.
+- Otros journeys con status idéntico (`planificada`) sí estaban siendo sincronizados — solo algunos se quedaban pegados.
+
+### RCA
+1. **Filtro MongoDB no defensivo**: `{"$or": [{"$exists": False}, {"$lt": cutoff}]}` perdía documentos con campo presente pero `null`. Test confirmado: filtro viejo encuentra 2/3 docs (missing + old), filtro nuevo encuentra 3/3 (missing + null + old).
+2. **Status `in_progress` no contemplado**: el worker filtraba solo `planificada` + `en_ruta` (obsoleto). Tras iter84/iter85 los journeys también pasan por `in_progress` antes de cerrar — esos quedaban fuera del barrido.
+3. **Errores silenciados**: `_sync_one` solo logueaba si había cambios. Si Routal API devolvía error (`ok=false`), el journey quedaba siendo retried indefinidamente sin que se viera nada en logs ni en `/api/health`.
+4. **`/api/health` no exponía Routal sync**: solo había heartbeats de `kosmo_sync` y `ai_eval_worker`. Imposible ver desde fuera si el worker Routal estaba vivo o atascado.
+
+### Fixes aplicados
+- **`workers/routal_sync_worker.py`**:
+  - Filtro `routal_synced_at` reescrito a `{"$not": {"$gte": skip_synced_after}}` — defensivo contra missing/null/old (los 3 casos válidos).
+  - Status filter ahora incluye `in_progress` y `scheduled` además de `planificada` y `en_ruta`.
+  - `_sync_one` ahora loguea WARNING cuando `summary.ok=false` y estampa `routal_synced_at` + `routal_last_sync_error` en el journey para evitar busy-loops y dar visibilidad.
+  - Tick log subido de `DEBUG` → `INFO` para verificar latido del worker en logs PROD.
+- **`server.py`**:
+  - Nuevo check `routal_sync` en `/api/health`: reporta `last_heartbeat_seconds_ago` (basado en `routal_synced_at` más reciente) y `pending_candidates` (cuántos journeys está esperando sincronizar el worker).
+
+### Validación
+- Test directo en MongoDB con 4 docs (missing/null/old/recent): filtro viejo falla en `null`, filtro nuevo correcto.
+- Backend reinicia sin errores, worker arranca y loguea `tick processed 0 journeys` cada 10 min.
+- `/api/health` ahora muestra el nuevo bloque `routal_sync` con métricas vivas.
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD** para activar el fix.
+- Tras redeploy, en PROD el journey `f4ce8961` debería sincronizarse en el siguiente tick (≤10 min). Validar en `/api/health` que `routal_sync.pending_candidates` baja a 0.
+- Si algún journey queda con `routal_last_sync_error` setteado, ese campo expone el error de Routal (plan eliminado, key inválida, etc.) — útil para troubleshooting reactivo.
+
 ## 2026-05-05 — Bug fix: Reportes Admin duplicaban rutas Routal (iter79)
 
 ### Reporte del usuario
