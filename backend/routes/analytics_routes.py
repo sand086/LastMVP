@@ -805,6 +805,16 @@ async def report_journeys(
             "incidents_total": incidents_count,
             "incidents_open": open_incidents,
             "created_at": j.get("created_at"),
+            # Power BI integration: Routal cross-reference identifiers.
+            # Use routal_route_id as the canonical key to JOIN with Routal data
+            # (one journey = one Routal route). routal_plan_id is the parent plan
+            # (a plan contains 1..N routes).
+            "source": j.get("source"),
+            "routal_route_id": j.get("routal_route_id"),
+            "routal_plan_id": j.get("routal_plan_id"),
+            "routal_plan_label": j.get("routal_plan_label"),
+            "routal_driver_id": j.get("routal_driver_id"),
+            "routal_project_id": j.get("routal_project_id"),
         })
     return {"data": result, "total": len(result)}
 
@@ -878,6 +888,10 @@ async def report_packages(
             "client_name": clients.get(journey.get("client_id"), ""),
             "provider_name": providers.get(journey.get("provider_id"), ""),
             "driver_name": journey.get("driver_name", ""),
+            # Power BI: Routal cross-reference (inherited from journey).
+            "routal_route_id": journey.get("routal_route_id"),
+            "routal_plan_id": journey.get("routal_plan_id"),
+            "routal_driver_id": journey.get("routal_driver_id"),
         })
     return {"data": result, "total": len(result)}
 
@@ -1537,6 +1551,9 @@ async def report_schema():
                     "journey_id", "date", "client_id", "client_name", "provider_id", "provider_name",
                     "driver_name", "status", "packages_total", "packages_delivered", "packages_failed",
                     "delivery_rate", "km_traveled", "incidents_total", "incidents_open",
+                    # Routal integration fields (Power BI cross-reference)
+                    "source", "routal_route_id", "routal_plan_id", "routal_plan_label",
+                    "routal_driver_id", "routal_project_id",
                 ],
             },
             {
@@ -1555,6 +1572,8 @@ async def report_schema():
                     "recipient_name", "address", "zone", "status", "failure_reason", "delivery_attempt",
                     "evidence_score", "evidence_type", "kosmo_proof_count", "kosmo_proof_urls",
                     "reviewed_by", "reviewed_at", "client_name", "provider_name", "driver_name",
+                    # Routal integration (inherited from journey, Power BI cross-reference)
+                    "routal_route_id", "routal_plan_id", "routal_driver_id",
                 ],
             },
             {
@@ -1924,6 +1943,86 @@ async def report_schema():
             "obtain_token": "POST /api/auth/login with {email, password}",
             "expiry": "8 horas (configurable via JWT_EXPIRY_HOURS)",
             "auto_logout": "Frontend redirige a /login con reason=expired al recibir 401",
+            "powerbi_refresh_token": {
+                "purpose": "Token de larga vida (90 días) para integraciones Power BI / Tableau / scripts.",
+                "obtain": "POST /api/auth/refresh-token (rol developer) — retorna { refresh_token, expires_at }",
+                "exchange": "POST /api/auth/exchange-token con { refresh_token } — retorna access_token (8h)",
+                "rotation": "Refresh tokens NO rotan automáticamente; genera uno nuevo antes de los 90 días.",
+            },
+        },
+        "integrations": {
+            "routal_cross_reference": {
+                "description": (
+                    "Power BI (y cualquier consumer del API) puede cruzar journeys/packages "
+                    "de LastMile con planes/rutas de Routal usando los campos `routal_*` "
+                    "expuestos en /api/reports/journeys y /api/reports/packages."
+                ),
+                "key_fields": [
+                    {
+                        "field": "routal_route_id",
+                        "type": "string",
+                        "description": (
+                            "Identificador único de la RUTA en Routal (1 ruta = 1 driver = 1 journey de LastMile "
+                            "tras la migración iter79). Es el JOIN KEY canónico para cruzar con Routal."
+                        ),
+                        "exists_when": "source == 'routal' (journeys creados por webhook o backfill de Routal).",
+                        "example": "69fba4dc989e3c8ee77fb70c",
+                    },
+                    {
+                        "field": "routal_plan_id",
+                        "type": "string",
+                        "description": (
+                            "Identificador del PLAN padre en Routal. Un plan contiene 1..N rutas. "
+                            "Útil para agrupar journeys del mismo plan en Power BI."
+                        ),
+                        "example": "69fba2b5411d96a701b42275",
+                    },
+                    {
+                        "field": "routal_plan_label",
+                        "type": "string",
+                        "description": "Etiqueta humana del plan en Routal (ej. fecha + nombre cliente).",
+                        "example": "NOE CUAU- 602256",
+                    },
+                    {
+                        "field": "routal_driver_id",
+                        "type": "string",
+                        "description": (
+                            "ID del driver/ruta en Routal. En el modelo route-based actual coincide "
+                            "con routal_route_id (un route en Routal corresponde a un driver)."
+                        ),
+                    },
+                    {
+                        "field": "routal_project_id",
+                        "type": "string",
+                        "description": (
+                            "ID del proyecto/sucursal en Routal. Útil cuando un cliente tiene varias "
+                            "sucursales (ej. Cubbo CDMX vs Cubbo GDL) cada una con su propio Routal project."
+                        ),
+                    },
+                ],
+                "powerbi_recipe": {
+                    "step_1": "Conector Web → URL: https://lastmile-mvp.emergent.host/api/reports/journeys?date_from=2026-01-01&date_to=2026-12-31",
+                    "step_2": "Header: Authorization = Bearer {refresh_token_canjeado}",
+                    "step_3": (
+                        "En Routal: usar API o export para traer plans/routes con sus IDs. "
+                        "JOIN en Power BI: LastMile.routal_route_id == Routal.route.id (1:1)."
+                    ),
+                    "step_4": (
+                        "Para journeys sin source='routal' (Kosmo, manual, legacy pre-migración) "
+                        "los campos routal_* serán null — filtrarlos antes del JOIN."
+                    ),
+                },
+                "notes": [
+                    "Journeys creados ANTES de la migración iter79 (2026-02) tienen routal_plan_id pero NO routal_route_id. Han sido marcados con migrated_to_journeys[] y NO aparecen en /api/reports/journeys (filtrados por apply_legacy_journey_filter). Sus journeys hijos route-based SÍ aparecen con routal_route_id correcto.",
+                    "Si necesitas reportes históricos pre-iter79 con el modelo plan-based original, usa journey_id como key (LastMile siempre lo expone). routal_plan_id permite agrupar al nivel plan.",
+                ],
+            },
+            "kosmo_cross_reference": {
+                "description": "Para journeys con source='kosmo', el campo cosmo_route_id en /api/reports/packages permite cruzar con tracking de Kosmo.",
+                "key_fields": [
+                    {"field": "cosmo_route_id", "type": "string", "description": "ID de ruta en Kosmo (paquetes)."},
+                ],
+            },
         },
         "security": {
             "cors": "Restringido a dominios autorizados (configurable via CORS_ORIGINS)",
