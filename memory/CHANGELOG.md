@@ -1,5 +1,47 @@
 # LastMile OS - Changelog
 
+## 2026-05-07 — UX: Auto-fill estructurado para "Nueva incidencia"
+
+### Reporte del usuario
+- Agentes registran incidencias desde el botón "Registrar Incidencia" en `Guías → detalle paquete`.
+- El campo Descripción se prellena con texto genérico (`"Incidencia registrada desde Guias para paquete X"`).
+- Los agentes lo borran y escriben manualmente la lista de criterios IA fallidos del modal "Evaluación de evidencia". Trabajo repetitivo.
+
+### Solución (Propuesta A — template determinístico, sin LLM)
+- Nuevo helper `frontend/src/lib/incidentTemplate.js`:
+  - `buildIncidentDescription(pkg, journey)` genera template estructurado en español a partir de `pkg.evidence_detail.criteria_met`, `delivery_type` y alertas IA.
+  - `suggestSeverity(score)` mapea score → `Alto/Medio/Bajo` (<50/<80/100).
+  - `suggestIncidentType(deliveryType, hasCriticalFail, failedKeys)` mapea al catálogo canónico `INCIDENT_TYPES` (`autorizacion_tercero_incorrecta`, `evidencia_entrega_incorrecta`, `evidencia_incidencia_incorrecta`, `notas_incorrectas`).
+- Refactor `ReviewModal.jsx`: `CRITERIA` y `detectDeliveryType` ahora son named exports (reutilizables en helper sin duplicar catálogo).
+- `JourneyDetail.jsx:handleRegisterIncidentFromGuias` ahora aplica el helper. El agente ve el template y puede editarlo libremente antes de "Registrar".
+
+### Ejemplo output (replicando screenshot del usuario)
+```
+Faltantes detectados en evaluación IA · Tipo B (Entrega a Terceros) · Score 75/100
+
+CRITERIOS FALLIDOS:
+• Tercero recibiendo — Persona (vecino/familiar/vigilante)
+• Mensaje WhatsApp [CRÍTICO] — Notificación al cliente final
+
+ALERTAS IA:
+• Foto de persona recibiendo el paquete (criterio obligatorio TIPO B)
+• La foto 0 muestra el paquete en mano, pero no es clara la identidad de quien lo sostiene
+
+Score IA original: 75 → recalculado por criterios: 50
+Guía: fjt09OoG827FkWs1 · Driver: Juan Cervantes Martinez
+```
++ severity sugerida: `Medio` (score 75)
++ incident_type sugerido: `autorizacion_tercero_incorrecta` (Tipo B + mensaje_whatsapp fallido)
+
+### Validación
+- Lint frontend: clean ✅
+- Smoke test inline JS con fixture replicando screenshot: output exacto ✅
+- Bundle compila sin errores en preview ✅
+
+### Pendiente
+- 🚀 **Redeploy a PROD** para que agentes vean el template auto-llenado.
+- Si en futuro se quiere upgrade a Propuesta B (narrativa con LLM), el helper actual queda como **fallback** y se agrega un botón "✨ Sugerir IA" sin tocar este código.
+
 ## 2026-05-06 — Mejoras backfill: cupo aditivo + filtro rutas vacías
 
 ### Petición del usuario

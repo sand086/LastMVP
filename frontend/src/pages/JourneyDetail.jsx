@@ -26,6 +26,7 @@ import {
 } from '../lib/api';
 import api from '../lib/api';
 import { exportJourneyPdf } from '../lib/journeyPdfExport';
+import { buildIncidentDescription } from '../lib/incidentTemplate';
 import { 
     formatDate, 
     formatDateTime,
@@ -329,11 +330,15 @@ const JourneyDetail = () => {
 
     // Handler for inline incident registration from GuiasTab
     const handleRegisterIncidentFromGuias = (pkg) => {
+        // Auto-fill structured template from AI evaluation (criterios fallidos +
+        // alertas + score). Replaces the previous generic placeholder. Agent can
+        // edit freely before saving.
+        const tpl = buildIncidentDescription(pkg, journey);
         setIncidentForm({
             occurred_at: new Date().toISOString().slice(0, 16),
-            incident_type: '',
-            description: `Incidencia registrada desde Guias para paquete ${pkg.tracking_number || pkg.order_reference_id || ''}`,
-            severity: 'Medio',
+            incident_type: tpl.incident_type || '',
+            description: tpl.description,
+            severity: tpl.severity || 'Medio',
             tracking_number: pkg.tracking_number || pkg.order_reference_id || '',
             action_taken: '',
             comentario_asesor: '',

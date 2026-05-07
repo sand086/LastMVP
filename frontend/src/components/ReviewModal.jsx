@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Loader2, Check, X, Minus, AlertTriangle, ChevronDown } from 'lucide-react';
 
 /* ─── Criterion definitions by delivery type ─── */
-const CRITERIA = {
+export const CRITERIA = {
     A: {
         label: 'Entrega Exitosa',
         items: [
@@ -51,7 +51,7 @@ const REJECTION_REASONS = [
 ];
 
 /* ─── Auto-detect delivery type from package ─── */
-function detectDeliveryType(pkg) {
+export function detectDeliveryType(pkg) {
     if (!pkg) return 'A';
     const status = (pkg.status || '').toLowerCase();
     const evidence = pkg.evidence_detail || {};
