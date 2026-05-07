@@ -1,5 +1,44 @@
 # LastMile OS - Changelog
 
+## 2026-05-07 — Bug fix: auto-fill no contemplaba revisión manual
+
+### Reporte del usuario
+- En PROD, paquete `mO3Mv03B3tBi46mh` (journey `8567dc19...`) ya había sido **revisado manualmente** (Score 50, `manually_reviewed_note: "whatsapp_ausente"`, `reviewed_by: "Oswaldo Salinas"`).
+- Pero el modal "Nueva incidencia" mostraba: *"Sin criterios evaluados aún — registrar incidencia manual"*. Mensaje incorrecto.
+
+### RCA
+- El helper `buildIncidentDescription` solo consultaba `pkg.evidence_detail.criteria_met` (vía evaluación IA).
+- Cuando el paquete fue revisado manualmente vía `ReviewModal`, el backend guarda `manually_reviewed_note` + `review_note` + `adjusted_score` pero **no** un `criteria_met` consolidado en `evidence_detail` — eso se mantiene a nivel `training_samples` para fine-tuning.
+- → criteria_met vacío → todos los items "unevaluated" → fallback al texto genérico equivocado.
+
+### Fix aplicado
+- `lib/incidentTemplate.js` ahora consume **3 fuentes** en cascada:
+  1. **AI evaluation** (`evidence_detail.criteria_met`) — cuando IA evaluó.
+  2. **Manual review** (`manually_reviewed_note` + `review_note` + `rejection_reason`) — parsea formato `"slug"` o `"slug: detalle libre"` (ver `GuiasTab.jsx:170`), mapea slug→criterio del catálogo (`whatsapp_ausente → mensaje_whatsapp`, `foto_fachada_ausente → foto_fachada`, etc.).
+  3. **Fallback genérico** — solo cuando `(failed=0 && alerts=0 && note vacío && score=null)`.
+- Nuevo bloque "REVISIÓN MANUAL:" con el label legible del slug + free-text + `Revisado por: ...`.
+- `_scoreLine()` ahora soporta `adjusted_score` (cuando difiere de `ai_score`, lo expone como "Score IA → ajustado en revisión").
+- `REJECTION_REASONS` ahora named export en `ReviewModal.jsx` para reutilizar catálogo.
+
+### Output esperado para el caso reportado
+```
+Faltantes detectados · Tipo A (Entrega al Destinatario) · Score 50/100
+
+REVISIÓN MANUAL:
+• Captura de WhatsApp no proporcionada
+Revisado por: Oswaldo Salinas
+
+Score IA: 50/100
+Guía: mO3Mv03B3tBi46mh · Driver: Gerardo Salinas
+```
++ severity sugerida: `Medio` (score 50)
+
+### Validación
+- Lint clean ✅, bundle compila clean ✅.
+- Smoke test inline JS con fixture replicando el package real de PROD: produce output esperado ✅.
+
+⚠️ **Acción usuario**: 🚀 **Redeploy a PROD**.
+
 ## 2026-05-07 — UX: Auto-fill estructurado para "Nueva incidencia"
 
 ### Reporte del usuario

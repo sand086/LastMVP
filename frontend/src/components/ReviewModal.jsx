@@ -38,7 +38,7 @@ export const CRITERIA = {
 };
 
 /* ─── Rejection reasons catalog (9 options) ─── */
-const REJECTION_REASONS = [
+export const REJECTION_REASONS = [
     { value: 'foto_fachada_ausente', label: 'Foto de fachada ausente o inadecuada' },
     { value: 'guia_ilegible', label: 'Guia de envio ilegible' },
     { value: 'foto_receptor_ausente', label: 'Foto de receptor/tercero ausente' },
