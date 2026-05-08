@@ -5,6 +5,7 @@ import {
     Loader2, Check, X, CheckCircle2, ShieldCheck, FileWarning,
 } from 'lucide-react';
 import { SeverityBadge, getMaxSeverity, getErrorSeverity, DiscRow } from './GuiasHelpers';
+import PhotoThumb from '../PhotoThumb';
 
 const GuiasPackageDetail = ({
     pkg,
@@ -34,12 +35,11 @@ const GuiasPackageDetail = ({
                 {proofUrls.length > 0 ? (
                     <div className="flex gap-2 flex-wrap">
                         {proofUrls.slice(0, 4).map((url, i) => (
-                            <button key={`thumb-${pkg.id}-${i}`}
-                                    className="w-16 h-16 rounded border border-slate-200 overflow-hidden hover:border-blue-400 transition-colors"
-                                    onClick={() => openCarousel(pkg, i)}>
-                                <img src={url} alt={`Foto ${i + 1}`} className="w-full h-full object-cover"
-                                     onError={e => { e.target.src = ''; e.target.className = 'w-full h-full bg-slate-200'; }} />
-                            </button>
+                            <PhotoThumb key={`thumb-${pkg.id}-${i}`}
+                                        src={url}
+                                        alt={`Foto ${i + 1}`}
+                                        onClick={() => openCarousel(pkg, i)}
+                                        testId={`pkg-${pkg.id}-thumb-${i}`} />
                         ))}
                         {proofUrls.length > 4 && (
                             <button className="w-16 h-16 rounded border border-slate-200 bg-slate-100 flex items-center justify-center text-xs text-slate-500"

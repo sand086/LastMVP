@@ -1,5 +1,32 @@
 # LastMile OS - Changelog
 
+## 2026-05-08 — Bug fix: thumbnail roto cuando img falla (broken-icon)
+
+### Reporte del usuario
+- En PROD `journeys/98f3a194.../guías/Bj76EC2lVP2ePCYX`, la "Foto 2" mostraba el icono "broken image" verde-blanco del browser en lugar de la foto.
+
+### RCA
+- Backend valida 100% OK: las 3 imágenes se sirven en 200/300ms con ~200KB c/u, incluso bajo concurrencia.
+- Bug en `GuiasPackageDetail.jsx:41`:
+  ```jsx
+  onError={e => { e.target.src = ''; e.target.className = 'w-full h-full bg-slate-200'; }}
+  ```
+- Cuando la `<img>` falla (timeout transitorio, primer load durante login redirect, etc.), el handler ponía `src=''`. El browser interpreta src vacío como "URL inválida" → dispara OTRO `onError` recursivo + muestra el icono "broken image" nativo (NO el `bg-slate-200` esperado).
+
+### Fix aplicado
+- Nuevo componente `frontend/src/components/PhotoThumb.jsx`: 
+  - Estado `initial → retry → failed`. En primer error, reintenta UNA vez con cache-busting `?_t=timestamp` (cubre timeouts transitorios).
+  - En segundo error, swap a placeholder CSS-only con icono `<ImageOff>` y label "No carga" — clickeable para abrir carrusel y reintentar.
+  - `loading="lazy"` para no saturar al renderizar listas de paquetes.
+  - Nunca pone `src=''` → el navegador nunca muestra el broken-icon nativo.
+- `GuiasPackageDetail.jsx`: usa `<PhotoThumb>` en lugar del button+img inline.
+
+### Validación
+- Lint clean ✅, bundle compila clean ✅.
+- Test directo del backend: la foto problemática responde 200 + 200KB en <300ms consistentemente (5 muestras + concurrente 3x).
+
+⚠️ **Acción usuario**: 🚀 **Redeploy a PROD** + hard refresh.
+
 ## 2026-05-08 — Bug fix CRÍTICO: descripción solo listaba 1 criterio del slug
 
 ### Reporte del usuario
