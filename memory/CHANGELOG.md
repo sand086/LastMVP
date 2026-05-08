@@ -1,5 +1,25 @@
 # LastMile OS - Changelog
 
+## 2026-05-08 — UX: Toggle "Marcar/Desmarcar todos" en evaluación de evidencia
+
+### Petición del usuario
+- En el modal "Evaluación de evidencia" agregar un checkbox para marcar/desmarcar todos los criterios con check (Cumple) en un solo click.
+- Ubicación: en la cabecera "ENTREGA EXITOSA — N CRITERIOS" (alineado a la derecha).
+
+### Solución
+- `ReviewModal.jsx`: nuevo estado derivado `allPass` + handler `handleToggleAll()`.
+- Comportamiento: si todos los criterios están en `pass`, click → desmarca todos a `null`. Si NO, click → marca todos como `pass`.
+- UI: checkbox al lado del header con etiqueta dinámica:
+  - "Marcar todos como Cumple" cuando no todos están marcados.
+  - "Desmarcar todos" cuando todos ya están en pass.
+- Test IDs: `criteria-toggle-all` (el input) y `criteria-toggle-all-label`.
+- Funciona en los 3 tipos (A/B/C) — al cambiar tipo, el toggle se recalcula automáticamente.
+
+### Validación
+- Lint clean ✅, bundle compila clean ✅.
+
+⚠️ **Acción usuario**: 🚀 **Redeploy a PROD** + hard refresh para ver el toggle.
+
 ## 2026-05-08 — Confirmación: fix anterior NO está en PROD + refinamiento Tipo B
 
 ### Investigación

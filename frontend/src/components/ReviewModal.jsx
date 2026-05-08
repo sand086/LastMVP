@@ -184,6 +184,22 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
         setCriteriaStates(prev => ({ ...prev, [key]: prev[key] === state ? null : state }));
     };
 
+    // Bulk toggle: marca todos los criterios como pass / desmarca todos a null en un click.
+    // Útil para casos donde el coordinador ya validó visualmente toda la evidencia
+    // y solo quiere registrar el "todo OK" sin click por click.
+    const allPass = criteria.items.every(i => criteriaStates[i.key] === 'pass');
+    const handleToggleAll = () => {
+        const next = {};
+        if (allPass) {
+            // Todos pass → reset a null (desmarcar todos)
+            criteria.items.forEach(i => { next[i.key] = null; });
+        } else {
+            // Marcar todos como pass
+            criteria.items.forEach(i => { next[i.key] = 'pass'; });
+        }
+        setCriteriaStates(next);
+    };
+
     const handleConfirm = () => {
         const decision = showRejectPanel ? 'rejected' : 'approved';
         onConfirm({
@@ -251,7 +267,23 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
 
                     {/* Criteria cards */}
                     <div className="space-y-2">
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{criteria.label} — {criteria.items.length} criterios</p>
+                        <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{criteria.label} — {criteria.items.length} criterios</p>
+                            <label
+                                className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none hover:text-slate-900 transition-colors"
+                                data-testid="criteria-toggle-all-label"
+                                title={allPass ? 'Desmarcar todos los criterios' : 'Marcar todos como Cumple'}
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={allPass}
+                                    onChange={handleToggleAll}
+                                    className="w-4 h-4 rounded border-slate-300 cursor-pointer"
+                                    data-testid="criteria-toggle-all"
+                                />
+                                <span className="font-medium">{allPass ? 'Desmarcar todos' : 'Marcar todos como Cumple'}</span>
+                            </label>
+                        </div>
                         {criteria.items.map(item => (
                             <CriterionCard key={item.key} item={item} state={criteriaStates[item.key] || null} aiState={aiCriteriaStates[item.key]} onChange={handleCriterionChange} />
                         ))}
