@@ -1,5 +1,44 @@
 # LastMile OS - Changelog
 
+## 2026-05-08 — Bug fix CRÍTICO: descripción solo listaba 1 criterio del slug
+
+### Reporte del usuario
+- En PROD `https://lastmile-mvp.emergent.host/journeys/19f9fdc1.../guías/o448IY3NEkAnaB9h`, el coordinador marcó MÚLTIPLES criterios como X (No cumple) en el modal de evaluación, pero la descripción de "Nueva incidencia" solo listaba 1 (el del Motivo de rechazo).
+- Imagen: usuario marca con amarillo el bloque "CRITERIOS FALLIDOS:" y dice "Necesito que coloque todo lo que evaluamos como NO CUMPLE (el tache)".
+
+### RCA
+- Frontend `ReviewModal` enviaba al backend `criteria_evaluation: {key: 'pass'|'fail'|null}` con TODOS los criterios marcados.
+- Backend `PATCH /api/packages/{id}/review` solo guardaba `manually_reviewed`, `review_note` (slug) y `adjusted_score`. **Descartaba el `criteria_evaluation` completo.**
+- → Al abrir "Nueva incidencia" después, el helper solo encontraba el slug (`whatsapp_ausente`) y mapeaba 1 criterio.
+
+### Fix aplicado
+- **Backend** `journey_routes.py:review_package`: ahora persiste `criteria_evaluation` traduciendo `'pass'→true / 'fail'→false / null→null` y guardándolo en `evidence_detail.criteria_met`. Misma estructura que la evaluación IA — coexisten en el mismo campo.
+- También persiste `evidence_detail.delivery_type_detected` (formato 'A'/'B'/'C') para que el helper detecte correctamente el tipo en futuras revisiones.
+- **Frontend** `ReviewModal.detectDeliveryType`: ahora acepta short codes 'A'/'B'/'C' (en minúsculas) además de strings descriptivos como 'terceros'/'fallida'.
+- **Helper `incidentTemplate.js`**: sin cambios — ya leía `evidence_detail.criteria_met` correctamente. Ahora con el fix de backend, ese campo viene con TODOS los criterios marcados manualmente.
+
+### Validación
+- Test directo PATCH `/api/packages/{id}/review` con `criteria_evaluation` de 6 criterios (2 pass, 3 fail, 1 pass). Verifico: `evidence_detail.criteria_met` persistido con los 6 booleanos correctos. `delivery_type_detected: "B"` también persistido.
+- Simulación inline JS con la data persistida: output correcto con **3 criterios listados** (Tercero recibiendo + Mensaje WhatsApp + Timestamp).
+- Lint clean ambos lados.
+
+### Output esperado en PROD post-redeploy
+```
+Faltantes detectados · Tipo B (Entrega a Terceros) · Score 50/100
+
+CRITERIOS FALLIDOS:
+• Tercero recibiendo — Persona (vecino/familiar/vigilante)
+• Mensaje WhatsApp [CRÍTICO] — Notificacion al cliente final
+• Timestamp — Hora visible
+
+Score IA: 50/100
+Guía: o448IY3NEkAnaB9h · Driver: Alejandro Juárez
+```
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD** (incluye este bug fix + toggle "Marcar todos como Cumple" + fix incidentTemplate del 2026-05-07).
+- ⚠️ **Importante**: este fix solo aplica a paquetes revisados **DESPUÉS** del redeploy. Paquetes ya revisados antes del fix tienen el `criteria_met` vacío en BD — se mostrarán como antes (con el slug del motivo). Si necesitas re-procesar paquetes históricos, hay que re-evaluarlos manualmente.
+
 ## 2026-05-08 — UX: Toggle "Marcar/Desmarcar todos" en evaluación de evidencia
 
 ### Petición del usuario

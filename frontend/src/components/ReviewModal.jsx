@@ -58,6 +58,11 @@ export function detectDeliveryType(pkg) {
     const deliveryType = (evidence.delivery_type_detected || '').toLowerCase();
     const driverNote = (pkg.kosmo_driver_note || pkg.delivery_note || '').toLowerCase();
 
+    // Allow short codes (A/B/C) — used when persisted from manual review.
+    if (deliveryType === 'a') return 'A';
+    if (deliveryType === 'b') return 'B';
+    if (deliveryType === 'c') return 'C';
+
     if (status === 'failed' || status === 'returned' || deliveryType === 'fallida') return 'C';
     if (deliveryType === 'terceros' || deliveryType === 'tercero' || deliveryType === 'vecino' || deliveryType === 'familiar') return 'B';
     if (driverNote.includes('vecino') || driverNote.includes('tercero') || driverNote.includes('vigilante') || driverNote.includes('familiar') || driverNote.includes('portero')) return 'B';

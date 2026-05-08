@@ -600,6 +600,29 @@ async def review_package_with_note(
     if ai_incorrect:
         update_data["ai_evaluation_incorrect"] = True
 
+    # Bug fix 2026-05-08: persist the full criterion evaluation so future "Nueva
+    # incidencia" auto-fill can list ALL failed criteria (not just the slug from
+    # the rejection reason). Frontend ReviewModal sends criteria_evaluation as
+    # { criterion_key: 'pass' | 'fail' | null }. We translate to criteria_met
+    # boolean dict (pass=true / fail=false / null=null) which is the shape the
+    # helper expects. Stored under evidence_detail.criteria_met to match the
+    # AI evaluation shape — they coexist in the same place.
+    criteria_evaluation = body.get("criteria_evaluation") or {}
+    if criteria_evaluation and isinstance(criteria_evaluation, dict):
+        criteria_met = {}
+        for key, state in criteria_evaluation.items():
+            if state == "pass":
+                criteria_met[key] = True
+            elif state == "fail":
+                criteria_met[key] = False
+            else:
+                criteria_met[key] = None
+        update_data["evidence_detail.criteria_met"] = criteria_met
+        # Also persist the raw delivery_type detected at review time
+        delivery_type = body.get("delivery_type")
+        if delivery_type:
+            update_data["evidence_detail.delivery_type_detected"] = delivery_type
+
     result = await db.packages.update_one(
         {"id": package_id},
         {"$set": update_data},
