@@ -1,5 +1,31 @@
 # LastMile OS - Changelog
 
+## 2026-05-08 — Confirmación: fix anterior NO está en PROD + refinamiento Tipo B
+
+### Investigación
+- Usuario reportó que el bug "Sin criterios evaluados aún" persiste en `https://lastmile-mvp.emergent.host/journeys/73e0100f.../packages/CRQtlmrB7gtFvw7c`.
+- Análisis de bundles JS de PROD: chunk `2816.9e98ee62.chunk.js` **contiene "Sin criterios evaluados aún"** y NO contiene "REVISIÓN MANUAL". → Mi fix del 2026-05-07 (parser de `manually_reviewed_note`) **no fue desplegado** a PROD.
+- El package en PROD tiene la misma forma que el caso anterior: `manually_reviewed_note: "whatsapp_ausente"`, `reviewed_by: "Oswaldo Salinas"`, `ai_score: 50`. Mi helper en preview produce el output correcto.
+
+### Refinamiento aplicado (P2 del backlog que ya tenía marcado)
+- Si `manually_reviewed_note` es `whatsapp_ausente` o `foto_receptor_ausente` y `detectDeliveryType` defaultea a Tipo A (porque `delivery_type_detected` no estaba poblado), **forzar `deliveryType = 'B'`** (entrega a terceros). Esto permite mapear el slug `whatsapp_ausente → mensaje_whatsapp` (criterio que solo existe en Tipo B) y mostrar "Mensaje WhatsApp [CRÍTICO]" como criterio fallido en lugar del bloque genérico "REVISIÓN MANUAL".
+
+### Output esperado para el caso del usuario (preview)
+```
+Faltantes detectados · Tipo B (Entrega a Terceros) · Score 50/100
+
+CRITERIOS FALLIDOS:
+• Mensaje WhatsApp [CRÍTICO] — Notificación al cliente final
+
+Score IA: 50/100
+Guía: CRQtlmrB7gtFvw7c · Driver: Alejandro Juárez
+```
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD** — éste es el bloqueador. Sin redeploy, el bundle viejo seguirá mostrando el texto buggeado.
+- Tras redeploy, hacer un **hard refresh** (Ctrl+Shift+R / Cmd+Shift+R) o limpiar cache del browser para asegurar que el chunk nuevo se cargue.
+- Validar con el mismo paquete `CRQtlmrB7gtFvw7c` que la descripción muestra "CRITERIOS FALLIDOS: • Mensaje WhatsApp [CRÍTICO]..." y ya no "Sin criterios evaluados aún".
+
 ## 2026-05-07 — Bug fix: auto-fill no contemplaba revisión manual
 
 ### Reporte del usuario

@@ -104,7 +104,19 @@ export function buildIncidentDescription(pkg, journey) {
         };
     }
 
-    const deliveryType = detectDeliveryType(pkg).toUpperCase();
+    // Pre-parse manual review note FIRST so we can use it to refine delivery type detection.
+    const noteRaw = pkg.manually_reviewed_note || pkg.review_note || pkg.rejection_reason || '';
+    const parsedNote = _parseManualNote(noteRaw);
+
+    // Refine delivery type when AI didn't detect it but the manual review slug
+    // strongly suggests a third-party delivery (Tipo B).
+    let deliveryType = detectDeliveryType(pkg).toUpperCase();
+    if (deliveryType === 'A' && parsedNote?.slug) {
+        if (parsedNote.slug === 'whatsapp_ausente' || parsedNote.slug === 'foto_receptor_ausente') {
+            deliveryType = 'B';
+        }
+    }
+
     const criteriaItems = (CRITERIA[deliveryType] || CRITERIA.A).items;
     const criteriaLabel = (CRITERIA[deliveryType] || CRITERIA.A).label;
     const criteriaMet = pkg?.evidence_detail?.criteria_met || {};
@@ -113,10 +125,7 @@ export function buildIncidentDescription(pkg, journey) {
     const aiFailed = criteriaItems.filter(it => criteriaMet[it.key] === false);
     const aiUnevaluated = criteriaItems.filter(it => criteriaMet[it.key] == null);
 
-    // 2. Manual review note (if any) — covers the case where AI didn't evaluate
-    //    but a coordinator rejected/observed manually
-    const noteRaw = pkg.manually_reviewed_note || pkg.review_note || pkg.rejection_reason || '';
-    const parsedNote = _parseManualNote(noteRaw);
+    // 2. Manual review → criterion mapping (for the refined delivery type catalog)
     const manualFailedItem = parsedNote?.slug
         ? criteriaItems.find(it => it.key === REJECTION_TO_CRITERION[parsedNote.slug])
         : null;
