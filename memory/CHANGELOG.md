@@ -1,5 +1,29 @@
 # LastMile OS - Changelog
 
+## 2026-05-09 — Bug fix: sync no actualizaba URLs cuando Routal cambiaba report_id
+
+### Reporte del usuario
+- En PROD `journeys/363821e1.../guías/8PzBzRTz8l0kLmNp`, las 3 fotos mostraban "No carga" (mi placeholder de PhotoThumb tras el último deploy).
+
+### RCA
+- PhotoThumb hace su trabajo: el backend devuelve genuinamente `{"detail":"Imagen no disponible en Routal"}` (404).
+- Trace al `proxy_routal_image` reveló que Routal API responde `400 Bad Request` para los `report_id/image_id` guardados.
+- **Bug raíz**: Routal **cambia el `report_id`** del stop cuando el driver re-sube evidencia (o reorganización de storage). Test directo confirma que el report nuevo (`69fd19ad...`) responde 200, pero el viejo guardado (`69fd4ced...`) responde 400.
+- `routal_sync._sync_one` tenía guard `unchanged += 1` cuando `proof_count` y `status` coincidían — **ignoraba cambios en `report_id`**. Por eso re-sincronizar manualmente NO actualizaba las URLs (sync detectaba "sin cambios").
+
+### Fix aplicado
+- `services/routal_sync.py:_sync_one`: el guard ahora también compara `pkg.routal_report_id == evidence.report_id`. Si Routal reportó un report_id distinto, el sync actualiza `kosmo_proof_urls`, `kosmo_proof_count`, `routal_report_id` y la firma.
+- Resultado: re-sincronizar el journey ahora SÍ recupera las URLs nuevas. PhotoThumb las cargará correctamente sin retry.
+
+### Validación
+- Test directo en preview: sync que antes retornaba `unchanged: 43` (todos sin cambio) ahora retorna `delivered_synced: 10` cuando los reports cambiaron — sí captura el cambio.
+- Lint clean ✅.
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD** para activar el fix.
+- Después del redeploy, en cualquier journey con fotos rotas (como `363821e1`), **click "Re-sincronizar Routal"** desde el detalle. Las URLs se actualizarán automáticamente y las fotos cargarán.
+- Para automatizar: el worker `routal_sync_worker` también usa esta misma lógica en su tick periódico, así que journeys con report_id obsoleto se irán recuperando solos.
+
 ## 2026-05-08 — Bug fix: thumbnail roto cuando img falla (broken-icon)
 
 ### Reporte del usuario

@@ -224,6 +224,7 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
                 if (
                     pkg.get("status") == "delivered"
                     and pkg.get("kosmo_proof_count") == evidence.get("proof_count")
+                    and pkg.get("routal_report_id") == evidence.get("report_id")
                     and not ru
                 ):
                     unchanged += 1
