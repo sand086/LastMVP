@@ -1,5 +1,40 @@
 # LastMile OS - Changelog
 
+## 2026-05-09 — Self-healing del `routal_plan_id` (extensión)
+
+### Reporte del usuario
+- Journey `82d473f9...` (driver "Margarita Vargas Barajas", date 2026-05-08, plan_id en BD `69fd0c33...`).
+- En Routal el plan vigente es `69fe0483...` (URL del usuario lo confirma).
+- Routal API responde 400 "Plan not found" al sincronizar con el plan_id viejo. Worker queda atascado con `routal_last_sync_error: "Plan not found"` y cooldown.
+
+### RCA
+- Mismo patrón que con `report_id`: Routal **rota también el `plan_id`** cuando reorganiza un plan (split/merge/reedit en planner.routal.com).
+- `sync_journey_from_routal` detectaba el error pero solo lo loggeaba — no intentaba recuperar.
+- El flag `routal_synced_at` se actualizaba con cooldown → journey nunca se procesaba aunque hubiera un plan vigente.
+
+### Fix aplicado (`services/routal_sync.py`)
+- Nuevo helper `_heal_outdated_plan_id(rc, journey)`:
+  - Lista plans vigentes en Routal API filtrados por `journey.date` (paginado, hasta 2000 plans).
+  - Match en este orden: (a) `routal_route_id`, (b) `routal_driver_id`, (c) `routal_plan_label` exacto, (d) `driver_name` substring en route labels.
+  - Retorna el `plan_id` actual o `None`.
+- `sync_journey_from_routal` ahora intercepta errores 400/404/`not_found` en `get_plan` y:
+  1. Llama `_heal_outdated_plan_id(...)`.
+  2. Si encuentra un nuevo plan_id, persiste `routal_plan_id`, `routal_plan_id_healed_at`, limpia `routal_last_sync_error`.
+  3. Retry del `get_plan` con el nuevo ID.
+  4. Continúa el sync normal.
+
+### Validación (preview)
+- Test directo: corrupté `routal_plan_id` de un journey real con un ID falso. Llamada a `sync_journey_from_routal` → detectó 400, busó plan vigente por driver_name, encontró plan válido del mismo día, persistió + retry exitoso. ✅
+- Lint clean ✅.
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD**.
+- Tras redeploy, en el siguiente tick del worker (≤10 min) o al pulsar "Re-sincronizar Routal" en el detalle del journey:
+  - Journey `82d473f9` tendrá `routal_plan_id` actualizado a `69fe0483...`
+  - Status pasará de `planificada` a `closed/in_progress` según corresponda
+  - 49 packages reflejarán delivery status real
+- Los demás 56 journeys con `pending_candidates` también se irán recuperando solos.
+
 ## 2026-05-09 — Self-healing automático del proxy de imágenes Routal
 
 ### Reporte del usuario
