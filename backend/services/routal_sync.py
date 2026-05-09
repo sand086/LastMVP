@@ -85,85 +85,6 @@ def _build_proxy_image_url(api_base: str, client_id: str, report_id: str, image_
     return f"{api_base.rstrip('/')}/api/integrations/routal/image/{client_id}/{report_id}/{image_id}"
 
 
-async def _heal_outdated_plan_id(rc, journey: dict) -> Optional[str]:
-    """Look up the current Routal plan_id for a journey when the stored one is stale.
-
-    Strategy:
-      1. List Routal plans for `journey.date` (paginated).
-      2. Match by (a) routal_route_id present in plan.routes/drivers, OR
-         (b) routal_driver_id, OR (c) plan.label matches journey.routal_plan_label,
-         OR (d) driver_name matches one of the route labels.
-      3. Return the plan_id of the first match, or None.
-    """
-    target_date = journey.get("date")  # YYYY-MM-DD
-    if not target_date:
-        return None
-    try:
-        from datetime import datetime, timedelta, timezone
-        target_dt = datetime.fromisoformat(target_date).replace(tzinfo=timezone.utc)
-        next_day = target_dt + timedelta(days=1)
-    except Exception:
-        return None
-
-    route_id = journey.get("routal_route_id")
-    driver_id = journey.get("routal_driver_id")
-    plan_label = (journey.get("routal_plan_label") or "").strip().lower()
-    driver_name = (journey.get("driver_name") or "").strip().lower()
-
-    PAGE = 100
-    for page in range(20):  # cap 2000 plans
-        try:
-            data = await rc._request("GET", "/v2/plans", params={"limit": PAGE, "offset": page * PAGE})
-        except Exception as e:
-            logger.warning(f"[routal-sync] heal-plan list_plans page={page} failed: {e}")
-            return None
-        plans = data if isinstance(data, list) else (data.get("docs") or data.get("data") or data.get("plans") or [])
-        if not plans:
-            return None
-        page_below = 0
-        for p in plans:
-            exd = p.get("execution_date")
-            if not exd:
-                continue
-            try:
-                pdt = datetime.fromisoformat(str(exd).replace("Z", "+00:00"))
-            except Exception:
-                continue
-            if pdt < target_dt:
-                page_below += 1
-                continue
-            if pdt >= next_day:
-                continue
-
-            # In-range candidate. Match by route_id / driver_id / label / driver_name
-            plan_id_candidate = p.get("id") or p.get("plan_id")
-            if not plan_id_candidate:
-                continue
-
-            # Check route_id / driver_id by hydrating the plan once
-            try:
-                detail = await rc.get_plan(plan_id_candidate)
-            except Exception:
-                continue
-            routes = detail.get("routes") or detail.get("drivers") or []
-
-            if route_id and any(r.get("id") == route_id or r.get("external_id") == route_id for r in routes):
-                return plan_id_candidate
-            if driver_id and any((r.get("driver") or {}).get("id") == driver_id for r in routes):
-                return plan_id_candidate
-            if plan_label and (str(detail.get("label") or "")).strip().lower() == plan_label:
-                return plan_id_candidate
-            if driver_name and any(driver_name in str(r.get("label") or "").lower() for r in routes):
-                return plan_id_candidate
-
-        # Routal returns plans newest-first. Bail when whole pages are below target.
-        if page_below >= len(plans) * 0.9:
-            return None
-        if len(plans) < PAGE:
-            return None
-    return None
-
-
 def _extract_evidence(report: dict, client_id: str, api_base: str) -> dict:
     """Pull evidence fields from a Routal `service_report_*` doc."""
     images = report.get("images") or []
@@ -193,9 +114,7 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
 
     journey = await db.journeys.find_one(
         {"id": journey_id},
-        {"_id": 0, "id": 1, "client_id": 1, "routal_plan_id": 1, "routal_route_id": 1,
-         "routal_driver_id": 1, "routal_plan_label": 1, "source": 1, "status": 1,
-         "date": 1, "driver_name": 1},
+        {"_id": 0, "id": 1, "client_id": 1, "routal_plan_id": 1, "source": 1, "status": 1, "date": 1},
     )
     if not journey:
         return {"ok": False, "error": "journey not found", "journey_id": journey_id}
@@ -215,34 +134,8 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
         try:
             detail = await rc.get_plan(plan_id)
         except Exception as e:
-            err = str(e)
-            # Self-healing: Routal rotates plan_id when a plan is reorganized.
-            # If the stored plan_id no longer exists, look up the current one
-            # by execution_date + driver_name (or routal_route_id) and retry.
-            if ("not_found" in err.lower() or "404" in err or "400" in err) and journey.get("date"):
-                logger.info(f"[routal-sync] {journey_id} plan_id {plan_id} stale → self-heal lookup")
-                healed_plan_id = await _heal_outdated_plan_id(rc, journey)
-                if healed_plan_id and healed_plan_id != plan_id:
-                    try:
-                        detail = await rc.get_plan(healed_plan_id)
-                        await db.journeys.update_one(
-                            {"id": journey_id, "client_id": client_id},
-                            {"$set": {
-                                "routal_plan_id": healed_plan_id,
-                                "routal_plan_id_healed_at": _now_iso(),
-                            }, "$unset": {"routal_last_sync_error": ""}},
-                        )
-                        plan_id = healed_plan_id
-                        logger.info(f"[routal-sync] {journey_id} healed plan_id {plan_id}")
-                    except Exception as e2:
-                        logger.error(f"[routal-sync] heal succeeded lookup but get_plan({healed_plan_id}) failed: {e2}")
-                        return {"ok": False, "error": f"routal api error: {str(e2)[:200]}"}
-                else:
-                    logger.error(f"[routal-sync] get_plan {plan_id} failed and could not heal: {err}")
-                    return {"ok": False, "error": f"routal api error: {err[:200]}"}
-            else:
-                logger.error(f"[routal-sync] get_plan {plan_id} failed: {err}")
-                return {"ok": False, "error": f"routal api error: {err[:200]}"}
+            logger.error(f"[routal-sync] get_plan {plan_id} failed: {e}")
+            return {"ok": False, "error": f"routal api error: {str(e)[:200]}"}
 
         stops_by_id = {s["id"]: s for s in (detail.get("stops") or []) if s.get("id")}
 
