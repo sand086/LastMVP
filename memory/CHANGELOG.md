@@ -1,5 +1,34 @@
 # LastMile OS - Changelog
 
+## 2026-05-09 — Self-healing automático del proxy de imágenes Routal
+
+### Reporte del usuario
+- En PROD `journeys/363821e1.../guías/wOKsUDptnpWPOXgr` las fotos siguen sin cargar (mismo journey que ayer, otro paquete).
+- Sync manual sigue diciendo `unchanged: 43` en PROD → confirma que el fix del 2026-05-09 (comparar `routal_report_id`) **NO está desplegado en PROD**.
+
+### Investigación
+- Test directo a Routal API: el report_id guardado (`69fd112191a50011f7ad093e`) responde 400. El report actual del mismo stop es `69fe1d390c329db3682ec4e3` y SÍ responde 200.
+- Confirma que mi fix anterior (2026-05-09) sí resuelve el problema, pero solo aplicará después del redeploy.
+
+### Fix adicional (proactivo): self-healing en el proxy
+- `services/routal_sync.py:proxy_routal_image` ahora intercepta 400/404 de Routal API y:
+  1. Busca el package en BD por `routal_report_id` viejo + posición de la imagen.
+  2. Pulls plan vigente desde Routal API (`get_plan(routal_plan_id)`).
+  3. Match el stop por `tracking_number` y obtiene el reporte completado más reciente.
+  4. Persiste `kosmo_proof_urls`, `kosmo_proof_count`, `routal_report_id` y nuevo flag `routal_report_id_healed_at` en el package.
+  5. Retorna la imagen al usuario en la misma petición HTTP.
+- Cachea bajo AMBAS keys (vieja y nueva) para que las URLs cacheadas sigan funcionando.
+- Logging informativo en cada healing para auditoría.
+
+### Validación
+- Test directo en preview: package con `report_id` falso `0000...ffff0` + URLs apuntando a ID falso. Llamada a `proxy_routal_image` → detecta 400, hace heal, devuelve **1.47MB** (imagen real). Package en BD queda con `routal_report_id` correcto + flag `routal_report_id_healed_at`. ✅
+- Lint clean ✅.
+
+### Acción del usuario
+- 🚀 **Redeploy a PROD** para activar fix del 2026-05-09 + este self-healing.
+- Tras redeploy, el journey `363821e1` (y cualquier otro afectado) recuperarán fotos automáticamente la primera vez que se abran — sin necesidad de re-sync manual.
+- Para journeys masivos con URLs obsoletas, el worker `routal_sync_worker` también las recuperará en su tick de 10 min.
+
 ## 2026-05-09 — Bug fix: sync no actualizaba URLs cuando Routal cambiaba report_id
 
 ### Reporte del usuario
