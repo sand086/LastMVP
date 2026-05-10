@@ -321,11 +321,12 @@ async def proxy_routal_image(db, client_id: str, report_id: str, image_id: str) 
     image_id) so 7-day TTL is safe. Concurrent requests for the same key are
     coalesced via per-key asyncio.Lock to avoid duplicate Routal fetches.
 
-    Self-healing: if Routal returns 400/404 (the report_id was rotated by Routal
-    when the driver re-uploaded evidence), we look up the package by stored
-    routal_report_id, query the latest plan from Routal, find the up-to-date
-    report_id and image_ids, persist them, and retry once. This avoids the user
-    having to manually click "Re-sincronizar" every time Routal rotates IDs.
+    NOTE: This proxy does NOT auto-heal stale report_ids. If Routal rotates the
+    report_id (e.g. driver re-uploaded evidence hours after closure), the user
+    must explicitly press the "Re-sincronizar Routal" button to refresh the
+    package URLs. Background self-healing was removed intentionally to avoid
+    repeated heavy lookups on every image render and to enforce manual control
+    over operational malpractice.
     """
     key = _cache_key(client_id, report_id, image_id)
     cached = _read_cache(key)
@@ -354,30 +355,6 @@ async def proxy_routal_image(db, client_id: str, report_id: str, image_id: str) 
                 _write_cache(key, r.content, content_type)
                 return r.content, content_type
 
-            # SELF-HEALING — Routal rotated this report_id (driver re-uploaded
-            # evidence). Try to resolve the new report_id and retry once.
-            if r.status_code in (400, 404):
-                logger.info(
-                    f"[routal-image-proxy] {report_id}/{image_id} → HTTP {r.status_code}, "
-                    f"attempting self-heal"
-                )
-                healed = await _heal_outdated_report_id(db, rc, client_id, report_id, image_id)
-                if healed:
-                    new_report_id, new_image_id = healed
-                    new_url = f"{rc._base_url}/v3/stop/report/{new_report_id}/image/{new_image_id}"
-                    r2 = await rc._client.get(new_url, params=params)
-                    if r2.status_code == 200:
-                        content_type = r2.headers.get("content-type", "image/jpeg")
-                        # Cache under BOTH old and new keys so subsequent hits
-                        # to the cached old URL also succeed instantly.
-                        _write_cache(key, r2.content, content_type)
-                        _write_cache(_cache_key(client_id, new_report_id, new_image_id), r2.content, content_type)
-                        logger.info(
-                            f"[routal-image-proxy] healed {report_id}/{image_id} → "
-                            f"{new_report_id}/{new_image_id}"
-                        )
-                        return r2.content, content_type
-
             logger.warning(f"[routal-image-proxy] {report_id}/{image_id} → HTTP {r.status_code}")
             return None
         except Exception as e:
@@ -388,90 +365,4 @@ async def proxy_routal_image(db, client_id: str, report_id: str, image_id: str) 
                 await rc.aclose()
             except Exception:
                 pass
-
-
-async def _heal_outdated_report_id(db, rc, client_id: str, report_id: str, image_id: str) -> Optional[tuple]:
-    """Refresh URLs of packages that reference a stale report_id.
-
-    Strategy:
-    1. Find any LastMile package using this (client_id, report_id, image_id).
-    2. Look up the plan via journey.routal_plan_id.
-    3. Pull plan.stops from Routal API. For each completed stop with reports,
-       map the report position (1st report → 1st stop with reports, etc.) is
-       NOT reliable — instead match by tracking_number / external_id since the
-       package already has this. Updated report and its images replace
-       kosmo_proof_urls + routal_report_id.
-    4. Bulk-update all packages of this stop to the new IDs.
-    5. Return (new_report_id, new_image_id_at_same_index) so the caller can
-       retry the SAME image position.
-    """
-    try:
-        pkg = await db.packages.find_one(
-            {"routal_report_id": report_id},
-            {"_id": 0, "id": 1, "journey_id": 1, "tracking_number": 1,
-             "kosmo_proof_urls": 1, "kosmo_proof_signature_url": 1, "kosmo_proof_count": 1},
-        )
-        if not pkg:
-            return None
-        old_urls = pkg.get("kosmo_proof_urls") or []
-        # Index of the requested image inside the old URL list (so we can return
-        # the correct corresponding new image_id).
-        try:
-            old_idx = next(i for i, u in enumerate(old_urls) if image_id in str(u))
-        except StopIteration:
-            return None
-
-        journey = await db.journeys.find_one(
-            {"id": pkg["journey_id"]},
-            {"_id": 0, "routal_plan_id": 1, "client_id": 1},
-        )
-        if not journey or not journey.get("routal_plan_id"):
-            return None
-
-        plan = await rc.get_plan(journey["routal_plan_id"])
-        stops = plan.get("stops") or []
-        # Match the stop by tracking_number / external_id / reference_id
-        tn = pkg.get("tracking_number")
-        target_stop = None
-        for s in stops:
-            external = " ".join(str(s.get(k) or "") for k in ("external_id", "reference_id", "label", "id"))
-            if tn and tn in external:
-                target_stop = s
-                break
-        if not target_stop:
-            return None
-
-        reports = target_stop.get("reports") or []
-        # Pick the most recent completed report
-        completed = [r for r in reports if r.get("type") in ("service_report_completed", "service_report_failed", "service_report_incomplete")]
-        if not completed:
-            return None
-        report = completed[-1]
-        new_report_id = report.get("id")
-        new_images = report.get("images") or []
-        if not new_report_id or old_idx >= len(new_images):
-            return None
-        new_image_id = new_images[old_idx].get("id")
-        if not new_image_id:
-            return None
-
-        # Persist the refreshed URLs for ALL images of this report (not just one)
-        api_base = os.environ.get("REACT_APP_BACKEND_URL", "")
-        new_urls = [
-            f"{api_base}/api/integrations/routal/image/{client_id}/{new_report_id}/{img['id']}"
-            for img in new_images if img.get("id")
-        ]
-        await db.packages.update_one(
-            {"id": pkg["id"]},
-            {"$set": {
-                "kosmo_proof_urls": new_urls,
-                "kosmo_proof_count": len(new_urls),
-                "routal_report_id": new_report_id,
-                "routal_report_id_healed_at": datetime.now(timezone.utc).isoformat(),
-            }},
-        )
-        return new_report_id, new_image_id
-    except Exception as e:
-        logger.warning(f"[routal-image-proxy] heal failed for {report_id}: {e}")
-        return None
 

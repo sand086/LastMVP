@@ -1,5 +1,27 @@
 # LastMile OS - Changelog
 
+
+## 2026-05-10 — REVERTED: self-healing del proxy de imágenes Routal
+
+**Decisión del usuario**: Eliminar el sanado automático de `report_id` rotados en `proxy_routal_image`. Paridad con la decisión equivalente sobre `plan_id` (2026-05-09).
+
+**Motivación**: La rotación de `report_id` en Routal proviene de mala praxis operativa (drivers que re-suben evidencia horas después del cierre), no de un bug. Hacer un lookup pesado del plan + actualización masiva en cada render de imagen vieja generaba un loop costoso/infinito.
+
+**Cambios** (`/app/backend/services/routal_sync.py`):
+- `proxy_routal_image`: eliminado el bloque que llamaba a `_heal_outdated_report_id` ante 400/404. Ahora devuelve `None` (404 al cliente) limpio.
+- Eliminada la función `_heal_outdated_report_id` completa.
+- Docstring actualizado para documentar la decisión y derivar a "Re-sincronizar Routal" manual.
+
+**Comportamiento esperado**:
+- Si Routal rotó el `report_id`, las imágenes viejas devuelven 404 (placeholder CSS de `PhotoThumb` se muestra).
+- El operador debe presionar "Re-sincronizar Routal" en el journey para refrescar las URLs persistidas.
+- El sanado sigue ocurriendo dentro de `_sync_one` (manual sync), igual que antes.
+
+**Verificación**:
+- Backend arranca limpio (HTTP 200, workers OK).
+- Sin referencias residuales a `_heal_outdated_report_id` en el repo.
+
+
 ## 2026-05-09 — REVERTED: self-healing del `routal_plan_id`
 
 ### Decisión del usuario
