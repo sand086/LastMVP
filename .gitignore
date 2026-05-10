@@ -85,49 +85,7 @@ credentials.json
 *.pem
 *.key
 .credentials
-frontend/node_modules/.cache/default-development/67.pack
-frontend/node_modules/.cache/default-development/67.pack
-frontend/node_modules/.cache/default-development/12.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
+# Webpack/CRA frontend build caches
+frontend/node_modules/.cache/
 frontend/node_modules/.cache/default-development/4.pack
-frontend/node_modules/.cache/default-development/20.pack
-frontend/node_modules/.cache/default-development/24.pack
-frontend/node_modules/.cache/default-development/44.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/47.pack
-frontend/node_modules/.cache/default-development/18.pack
-frontend/node_modules/.cache/default-development/39.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
+frontend/node_modules/.cache/default-development/67.pack
