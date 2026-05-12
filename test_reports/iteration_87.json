@@ -1,0 +1,62 @@
+{
+  "summary": "Frontend-only review of ReviewModal + GuiasTab auto-incident-on-rejection flow. E2E playwright test was BLOCKED on preview environment because the login submit kept spinning ('Iniciando...') >5s and the test session never advanced past /login on multiple retries (the first run also returned 401 + 'Sesión expirada' before the form fully loaded). Code review of the changed files confirmed all 7 acceptance bullets are wired correctly. The functional/runtime portion (toast text, actual POST /api/incidents, incident appearing in Incidencias tab) could NOT be verified live by this agent.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Login (testing-blocker)",
+        "issue": "Login submit takes >5s on preview env; in one run frontend emitted a 401 + '[Auth] Sesión expirada — redirigiendo a login' immediately on landing before the form was ready. Not necessarily a real bug — likely preview cold start / hot-reload compile — but it prevented the playwright test from reaching the Guías tab to validate the new ReviewModal flow.",
+        "affected_selectors": ["input[type=email]", "button[type=submit]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "static_code_review_findings": {
+    "ReviewModal.jsx": [
+      "OK: import INCIDENT_TYPES from utils (line 5).",
+      "OK: incidentType state added (line 156) and reset in useEffect when modal opens/pkg changes (line 173).",
+      "OK: rejection-incident-type-select rendered in normal rejection panel (lines 330-335) with the 5 catalog options.",
+      "OK: override-incident-type-select rendered in yellow/manual-override panel (lines 365-370).",
+      "OK: handleConfirm forwards incident_type only on rejected decision (line 230).",
+      "OK: Confirm button disabled when (!rejectionReason || !incidentType) for both normal-reject and override panels (lines 384-386).",
+      "OK: All required data-testids present: rejection-incident-type-select, override-incident-type-select, rejection-reason-select, override-rejection-select, review-modal-confirm.",
+      "Nit (non-blocking): override panel uses different testids for the motivo select (override-rejection-select vs rejection-reason-select). Consistent and intentional, just calling it out."
+    ],
+    "GuiasTab.jsx": [
+      "OK: createIncident imported (line 13) and buildIncidentDescription imported (line 32).",
+      "OK: handleReviewModalConfirm calls reviewPackageWithNote first, then createIncident only when !isApproval && reviewData.incident_type (lines 196-218).",
+      "OK: Payload sent to createIncident matches spec — journey_id, occurred_at (new Date().toISOString()), incident_type, severity (from buildIncidentDescription, fallback 'Medio'), description, tracking_number, action_taken='', imputability='', source='evaluacion' (line 214).",
+      "OK: comentario_asesor sent ONLY when incident_type === 'otro' AND reason_detail present (lines 215-217). Matches spec exactly.",
+      "OK: Adjusted_score injected into pkg before buildIncidentDescription so the template reflects the override score (lines 200-203).",
+      "OK: incidentCreated flag drives differentiated toast: 'Guia rechazada e incidencia creada' vs plain 'Guia rechazada' (lines 229-235).",
+      "OK: Incident creation failure is caught locally and surfaces 'Guía rechazada, pero no se pudo crear la incidencia automática.' (line 225) — does NOT roll back the rejection, matching the spec.",
+      "OK: onRefreshJourney?.() called at the end (line 239), so the new incidence will land in journey.incidents on refetch.",
+      "OK: Approval path unchanged — still calls only reviewPackageWithNote with manually_reviewed=true and shows 'Guia aprobada' toast (lines 170-180, 230)."
+    ],
+    "consistency_with_spec": [
+      "All 7 acceptance bullets from the review request map 1:1 to the code paths above.",
+      "INCIDENT_TYPES catalog at /app/frontend/src/lib/utils.js:215 has exactly the 5 expected values."
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Main agent should self-verify the live flow on preview (login, open a journey with packages, open ReviewModal, force-fail all criteria, confirm both selects appear, select reason+tipo de incidencia, hit Confirmar rechazo, check toast 'Guia rechazada e incidencia creada', then navigate to Incidencias tab and confirm the new row has source='evaluacion').",
+    "Optional: also exercise the override path — pick an evaluated guide with score>=70, click 'Rechazar manualmente (override)', verify the yellow panel's override-incident-type-select is required to enable Confirmar.",
+    "Investigate the slow first-paint login on preview (5–10s 'Iniciando...' state). Likely just CRA dev-server cold start, but worth confirming since it impacts automated testing."
+  ],
+  "critical_code_review_comments": [
+    "No business-logic regressions introduced. The change is additive and well-scoped.",
+    "Minor: the failure toast for incident creation says 'Guía rechazada, pero no se pudo crear la incidencia automática.' (line 225) — but the success branch then ALSO fires toast.success('Guia rechazada') because incidentCreated stayed false. This means on incident-creation failure the user sees TWO toasts: one error + one success. Consider gating the success toast behind `else` or checking incidentCreated before showing the plain-rechazada success.",
+    "Minor: handleConfirm always forwards incident_type='' for approvals (line 230) — fine, but the caller relies on `!isApproval && reviewData.incident_type` so behavior is correct.",
+    "Nit: There is no client-side validation that incidentType is one of INCIDENT_TYPES.value before POSTing (defense in depth) — backend should still validate against the catalog."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (skipped per request)", "frontend": "code-review only — E2E blocked at login step" },
+  "test_credentials": "dev@me.mx / LastMile2026 — correct, login was slow but reached the form",
+  "seed_data_creation": "none",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The login form on https://lastmile-mvp.preview.emergentagent.com can take 8–15s to respond on a cold preview container. Wait for input[type=email] explicitly (don't use networkidle — there is a polling loop that never idles). After login, navigate via the 'Rutas' link, click the first journey card, click the 'Guías' tab, expand the first guia-row with kosmo evidence, and click the button that opens the ReviewModal (in GuiasPackageDetail.jsx). To force the rejection panel, click every criterion-fail-* button so all criteria become 'fail' (score caps to 50). Then validate: rejection-incident-type-select is visible, review-modal-confirm is disabled until BOTH rejection-reason-select and rejection-incident-type-select are filled, after confirming a POST /api/incidents must fire with source='evaluacion'. Override path = pick a guide where score>=70 after evaluating all criteria as pass, then click force-reject-toggle to expose override-incident-type-select.",
+  "rca of the issue": "n/a — no bug found in the code under review; live verification blocked by preview login latency."
+}

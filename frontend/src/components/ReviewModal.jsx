@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Loader2, Check, X, Minus, AlertTriangle, ChevronDown } from 'lucide-react';
+import { INCIDENT_TYPES } from '../lib/utils';
 
 /* ─── Criterion definitions by delivery type ─── */
 export const CRITERIA = {
@@ -147,6 +148,12 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
     const [rejectionReason, setRejectionReason] = useState('');
     const [reasonDetail, setReasonDetail] = useState('');
     const [showRejectPanel, setShowRejectPanel] = useState(false);
+    // Tipo de incidencia que se creará automáticamente al confirmar el rechazo.
+    // Reutiliza el catálogo INCIDENT_TYPES (mismas opciones que el modal
+    // "Nueva Incidencia"). Es requerido para confirmar cualquier rechazo
+    // — así toda guía rechazada genera su incidencia asociada y aparece en
+    // la pestaña Incidencias sin pasos manuales adicionales.
+    const [incidentType, setIncidentType] = useState('');
 
     const criteria = CRITERIA[deliveryType] || CRITERIA.A;
 
@@ -163,6 +170,7 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
             setRejectionReason('');
             setReasonDetail('');
             setShowRejectPanel(false);
+            setIncidentType('');
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally depends on pkg.id only, not the full object
     }, [open, pkg?.id]);
@@ -217,6 +225,9 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
             reason_detail: reasonDetail,
             ai_evaluation_incorrect: discrepancies.length > 0,
             discrepancies: discrepancies,
+            // Solo se envía cuando es rechazo — el caller crea la incidencia
+            // automáticamente reutilizando los campos del package + journey.
+            incident_type: decision === 'rejected' ? incidentType : '',
         });
     };
 
@@ -314,6 +325,16 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
                                 <option value="">Seleccionar motivo...</option>
                                 {REJECTION_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                             </select>
+                            <div>
+                                <p className="text-[11px] font-semibold text-red-700 mb-1">Tipo de incidencia *</p>
+                                <select value={incidentType} onChange={e => setIncidentType(e.target.value)}
+                                        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-red-400"
+                                        data-testid="rejection-incident-type-select">
+                                    <option value="">Seleccionar tipo de incidencia...</option>
+                                    {INCIDENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                </select>
+                                <p className="text-[10px] text-red-600 mt-1">Se creará la incidencia automáticamente al confirmar el rechazo.</p>
+                            </div>
                             <textarea value={reasonDetail} onChange={e => setReasonDetail(e.target.value)}
                                       placeholder="Detalle adicional (opcional)..."
                                       className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm h-14 resize-none bg-white focus:ring-2 focus:ring-red-400"
@@ -339,6 +360,16 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
                                 <option value="">Seleccionar motivo...</option>
                                 {REJECTION_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                             </select>
+                            <div>
+                                <p className="text-[11px] font-semibold text-red-700 mb-1">Tipo de incidencia *</p>
+                                <select value={incidentType} onChange={e => setIncidentType(e.target.value)}
+                                        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm bg-white"
+                                        data-testid="override-incident-type-select">
+                                    <option value="">Seleccionar tipo de incidencia...</option>
+                                    {INCIDENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                </select>
+                                <p className="text-[10px] text-red-600 mt-1">Se creará la incidencia automáticamente al confirmar el rechazo.</p>
+                            </div>
                             <textarea value={reasonDetail} onChange={e => setReasonDetail(e.target.value)}
                                       placeholder="Detalle..." className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm h-14 resize-none bg-white"
                                       data-testid="override-rejection-detail" />
@@ -349,7 +380,11 @@ export default function ReviewModal({ open, onClose, pkg, action, onConfirm, sav
                 <DialogFooter>
                     <Button variant="outline" size="sm" onClick={onClose} data-testid="review-modal-cancel">Cancelar</Button>
                     <Button size="sm" onClick={handleConfirm}
-                            disabled={saving || !allEvaluated || (showRejectPanel && !rejectionReason) || (!isApproval && allEvaluated && !rejectionReason)}
+                            disabled={
+                                saving || !allEvaluated
+                                || (showRejectPanel && (!rejectionReason || !incidentType))
+                                || (!isApproval && allEvaluated && (!rejectionReason || !incidentType))
+                            }
                             className={(!showRejectPanel && isApproval) ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}
                             data-testid="review-modal-confirm">
                         {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}

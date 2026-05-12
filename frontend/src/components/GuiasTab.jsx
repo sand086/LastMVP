@@ -10,6 +10,7 @@ import {
     reviewDiscrepancy,
     bulkUpdatePackageStatus,
     getAiEvalStatus,
+    createIncident,
 } from '../lib/api';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
@@ -28,6 +29,7 @@ import {
 import { GuiasKpisRow, GuiasSegmentFilters } from './guias/GuiasKpisRow';
 import { useGuiasMetrics } from './guias/useGuiasMetrics';
 import GuiasPackageDetail from './guias/GuiasPackageDetail';
+import { buildIncidentDescription } from '../lib/incidentTemplate';
 
 /* ─── Main component ─── */
 const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) => {
@@ -185,7 +187,52 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                     ...(reviewData.adjusted_score != null ? { ai_score: reviewData.adjusted_score, evidence_score: reviewData.adjusted_score } : {}),
                 },
             }));
-            toast.success(isApproval ? 'Guia aprobada' : 'Guia rechazada');
+
+            // Crear incidencia automáticamente cuando es rechazo con tipo
+            // seleccionado. Reusa el catálogo INCIDENT_TYPES y el helper
+            // buildIncidentDescription (mismo flujo que el modal "Nueva
+            // Incidencia" pero sin pasos extra para el operador).
+            let incidentCreated = false;
+            if (!isApproval && reviewData.incident_type) {
+                try {
+                    // Pasamos el adjusted_score al pkg para que el template
+                    // refleje el override manual en el "Score" del texto.
+                    const pkgWithScore = {
+                        ...pkg,
+                        adjusted_score: reviewData.adjusted_score,
+                    };
+                    const draft = buildIncidentDescription(pkgWithScore, journey);
+                    await createIncident({
+                        journey_id: journey.id,
+                        occurred_at: new Date().toISOString(),
+                        incident_type: reviewData.incident_type,
+                        severity: draft.severity || 'Medio',
+                        description: draft.description,
+                        tracking_number: pkg.tracking_number || pkg.order_reference_id || '',
+                        action_taken: '',
+                        imputability: '',
+                        source: 'evaluacion',
+                        ...(reviewData.incident_type === 'otro' && reviewData.reason_detail
+                            ? { comentario_asesor: reviewData.reason_detail }
+                            : {}),
+                    });
+                    incidentCreated = true;
+                } catch (incErr) {
+                    // No bloqueamos la revisión si falla la creación de la
+                    // incidencia: el rechazo ya está guardado y el operador
+                    // puede crear la incidencia manualmente.
+                    console.error('Error creando incidencia auto:', incErr);
+                    toast.error('Guía rechazada, pero no se pudo crear la incidencia automática.');
+                }
+            }
+
+            toast.success(
+                isApproval
+                    ? 'Guia aprobada'
+                    : incidentCreated
+                        ? 'Guia rechazada e incidencia creada'
+                        : 'Guia rechazada'
+            );
             setReviewModalOpen(false);
             setReviewModalPkg(null);
             advanceToNext(pkg.id);
