@@ -655,7 +655,7 @@ function ScheduleSection({ enabled, windows, canEdit, onToggle, onAdd, onUpdate,
                 )}
                 {windows.map((w, idx) => (
                     <WindowRow
-                        key={idx}
+                        key={`${w.name || 'window'}-${w.start || ''}-${w.end || ''}-${idx}`}
                         idx={idx}
                         window={w}
                         disabled={!canEdit}

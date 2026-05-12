@@ -308,7 +308,7 @@ const AntipatternsList = ({ items }) => {
             </CardHeader>
             <CardContent className="space-y-2">
                 {items.map((a, i) => (
-                    <div key={i} className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
+                    <div key={`${a.type}-${a.severity}-${i}`} className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
                         <div className="flex items-center gap-2 mb-1">
                             <Badge variant="outline" className="text-xs">{a.severity}</Badge>
                             <span className="font-mono text-xs">{a.type}</span>
