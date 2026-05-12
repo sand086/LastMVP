@@ -1,6 +1,30 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-12 — FIX P0: AI Eval worker no procesaba packages Routal
+
+**Síntoma reportado**: En `/admin?tab=model` el panel muestra "Worker activo", pero `Consumo de Tokens` y `/monitor` no reflejan actividad. Rutas con guías cerradas (ej. `/journeys/5b0a48ed-...`) quedan en "No evaluado por IA" indefinidamente.
+
+**Root cause**: dos bugs combinados que dejaron al worker procesando 0 packages desde la migración a flujo Routal-only:
+
+1. **`_cron_sweep` (ai_eval_worker.py L572)** filtraba por `tracking_url` no vacío. Ese campo es **legacy de Kosmo** y los packages sincronizados desde Routal lo dejan en `null`. Resultado en PROD: ~4636 packages elegibles, **0 matches** en el filtro.
+
+2. **`_evaluate_single_guia` (ai_eval_worker.py L190)** llamaba `evaluate_single_package_ai(pkg, has_incident)` **sin pasar `db`**. La rama optimizada que resuelve URLs internas `/api/integrations/routal/image/...` vía `proxy_routal_image` (con cache en disco) no se activaba; caía a `httpx.get(url_relativa)` que fallaba con `Request URL is missing 'http://' protocol`. Todas las imágenes terminaban en fallback de reglas sin evaluación AI.
+
+**Fix**:
+- Cambiado el filtro del cron a `kosmo_proof_count > 0` (campo que pueblan **tanto** Kosmo legacy como Routal sync).
+- Pasada la conexión `db` al evaluador para que use el proxy interno con cache.
+
+**Verificación en preview**:
+- Cron sweep encontró **10 rutas** con packages pendientes en <30s.
+- Jobs avanzan: `Evaluando 5/63`, ~37K tokens consumidos, 8% progreso en 1 min.
+- `httpx → api.routal.com` devuelve HTTP 200 para imágenes (descarga OK).
+- Token usage subió de 3 → 7 eventos en ~1 minuto.
+
+**Acción para PROD**: redeploy desde el panel de Emergent. Tras el deploy, el cron tardará ~30 min en barrer las 10 rutas con más backlog y luego seguirá iterando. Para acelerar, presionar "Reintentar Errores" en `/monitor` (96 jobs en Error a reciclar).
+
+
+
 ## 2026-05-10 — REVERTED: self-healing del proxy de imágenes Routal
 
 **Decisión del usuario**: Eliminar el sanado automático de `report_id` rotados en `proxy_routal_image`. Paridad con la decisión equivalente sobre `plan_id` (2026-05-09).

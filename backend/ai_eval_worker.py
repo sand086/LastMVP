@@ -187,7 +187,7 @@ async def _evaluate_single_guia(db, pkg_id: str, job_id: str, timeout_s: int) ->
             has_incident = incident is not None
 
         result = await asyncio.wait_for(
-            evaluate_single_package_ai(pkg, has_incident),
+            evaluate_single_package_ai(pkg, has_incident, db=db),
             timeout=timeout_s,
         )
 
@@ -567,10 +567,16 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
     while True:
         try:
             # Find journeys with unevaluated terminal packages
+            # NOTA: usamos kosmo_proof_count>0 como "tiene evidencia para evaluar".
+            # Este campo lo pueblan TANTO Kosmo legacy como Routal sync
+            # (cuenta de fotos en kosmo_proof_urls). El campo tracking_url SOLO
+            # existía en el flujo legacy de Kosmo y los packages Routal lo
+            # dejan en null, por lo que filtrar por tracking_url descartaba
+            # silenciosamente todo el inventario Routal (~4600 packages).
             pipeline = [
                 {"$match": {
                     "status": {"$in": ["delivered", "failed"]},
-                    "tracking_url": {"$nin": [None, ""]},
+                    "kosmo_proof_count": {"$gt": 0},
                     "$or": [
                         {"ai_evaluation.status": {"$exists": False}},
                         {"ai_evaluation.status": None},
