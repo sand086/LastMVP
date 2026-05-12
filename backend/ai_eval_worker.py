@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 RETRY_BACKOFF_BASE = int(os.environ.get("AI_EVAL_RETRY_BACKOFF_BASE", "1"))
 CRON_INTERVAL_MINUTES = int(os.environ.get("AI_EVAL_CRON_INTERVAL_MINUTES", "30"))
 WORKER_POLL_SECONDS = 10
+# Backlog cutoff: el cron sweep SOLO encola packages con delivered_at o
+# created_at >= esta fecha, Y journey.status != "closed". Diseñado para
+# evitar gastar IA en backlog histórico que ya no aporta valor operacional.
+# Formato ISO-8601 ("YYYY-MM-DD" o "YYYY-MM-DDTHH:MM:SS"). Vacío = sin filtro.
+CRON_BACKLOG_CUTOFF = os.environ.get("AI_EVAL_CRON_CUTOFF_DATE", "2026-05-10").strip()
 
 # Dynamic config (read from DB at start of each job):
 #   timeout_per_guia, max_routes_concurrent, batch_size_per_route, max_retries, model
@@ -573,15 +578,37 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
             # existía en el flujo legacy de Kosmo y los packages Routal lo
             # dejan en null, por lo que filtrar por tracking_url descartaba
             # silenciosamente todo el inventario Routal (~4600 packages).
+
+            # Backlog scope: SOLO evaluar guías recientes en rutas operativas.
+            # Esto evita gastar IA en backlog histórico cerrado.
+            match_filter = {
+                "status": {"$in": ["delivered", "failed"]},
+                "kosmo_proof_count": {"$gt": 0},
+                "ai_evaluation.status": {"$in": [None]},  # NULL incluye missing keys en MongoDB
+            }
+            # Filtro por journey no-cerrado (resuelto en 1 query previa para evitar $lookup costoso)
+            open_journey_ids = []
+            async for j in db.journeys.find(
+                {"status": {"$ne": "closed"}}, {"_id": 0, "id": 1}
+            ):
+                open_journey_ids.append(j["id"])
+            if open_journey_ids:
+                match_filter["journey_id"] = {"$in": open_journey_ids}
+            else:
+                # Sin journeys operativas → nada que evaluar este barrido
+                logger.debug("Cron sweep: no hay journeys operativas (todas cerradas)")
+                await asyncio.sleep(CRON_INTERVAL_MINUTES * 60)
+                continue
+
+            # Filtro por fecha de corte: solo guías entregadas/falladas a partir de cutoff
+            if CRON_BACKLOG_CUTOFF:
+                match_filter["$or"] = [
+                    {"delivered_at": {"$gte": CRON_BACKLOG_CUTOFF}},
+                    {"created_at": {"$gte": CRON_BACKLOG_CUTOFF}},
+                ]
+
             pipeline = [
-                {"$match": {
-                    "status": {"$in": ["delivered", "failed"]},
-                    "kosmo_proof_count": {"$gt": 0},
-                    "$or": [
-                        {"ai_evaluation.status": {"$exists": False}},
-                        {"ai_evaluation.status": None},
-                    ],
-                }},
+                {"$match": match_filter},
                 {"$group": {"_id": "$journey_id", "count": {"$sum": 1}}},
                 {"$sort": {"count": -1}},
                 {"$limit": 10},

@@ -15,13 +15,21 @@
 - Cambiado el filtro del cron a `kosmo_proof_count > 0` (campo que pueblan **tanto** Kosmo legacy como Routal sync).
 - Pasada la conexión `db` al evaluador para que use el proxy interno con cache.
 
-**Verificación en preview**:
-- Cron sweep encontró **10 rutas** con packages pendientes en <30s.
-- Jobs avanzan: `Evaluando 5/63`, ~37K tokens consumidos, 8% progreso en 1 min.
-- `httpx → api.routal.com` devuelve HTTP 200 para imágenes (descarga OK).
-- Token usage subió de 3 → 7 eventos en ~1 minuto.
+**Optimización adicional (mismo deploy)**:
+- Agregado filtro de **backlog scope** en el cron sweep para evitar gastar IA en histórico que ya no aporta valor operacional:
+  - `delivered_at` o `created_at` ≥ `AI_EVAL_CRON_CUTOFF_DATE` (default `2026-05-10`, configurable vía env var sin redeploy).
+  - `journey.status != "closed"` (solo rutas operativas — `scheduled`, `planificada`, `in_progress`).
+- Reducción del universo: 4636 → **1432 packages** en **60 rutas operativas** (~70% ahorro).
+- Resuelto via 1 query previa de journey_ids para evitar `$lookup` costoso en pipeline.
+- `enqueue_job` manual (botones "Evaluar IA todas" / "Reintentar Errores") **NO aplica** el cutoff — opera sobre toda la ruta solicitada.
 
-**Acción para PROD**: redeploy desde el panel de Emergent. Tras el deploy, el cron tardará ~30 min en barrer las 10 rutas con más backlog y luego seguirá iterando. Para acelerar, presionar "Reintentar Errores" en `/monitor` (96 jobs en Error a reciclar).
+**Verificación en preview**:
+- Cron sweep encontró 10 rutas en <30s tras filtro de fecha + status.
+- Jobs avanzan: `Evaluando 19/63` (32%), 144K tokens consumidos.
+- Token events: 3 → 26 eventos (24 evaluaciones). $0.27 USD acumulado en ~5 min.
+- `httpx → api.routal.com` devuelve HTTP 200 para imágenes (descarga OK).
+
+**Acción para PROD**: redeploy desde el panel de Emergent. Tras el deploy, el cron procesará solo el universo filtrado (~1400 packages, rutas abiertas, ≥10/05/2026). Para acelerar, presionar "Reintentar Errores" en `/monitor` (96 jobs reciclables — algunos quedarán filtrados si están en rutas cerradas o de fechas anteriores).
 
 
 
