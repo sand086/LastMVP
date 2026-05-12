@@ -35,10 +35,22 @@ async def _sync_one(db, journey, api_base, sem):
                 d = summary.get("delivered_synced", 0)
                 f = summary.get("failed_synced", 0)
                 rf = summary.get("recipient_filled", 0)
-                if d > 0 or f > 0 or rf > 0:
+                healed = summary.get("recovered_by_fallback", 0)
+                nomatch = summary.get("no_routal_match", 0)
+                if d > 0 or f > 0 or rf > 0 or healed > 0:
                     logger.info(
                         f"[routal-sync] journey={journey['id']} delivered+={d} failed+={f} "
-                        f"recipient_filled+={rf} pending={summary.get('still_pending', 0)}"
+                        f"recipient_filled+={rf} healed_service_id+={healed} "
+                        f"pending={summary.get('still_pending', 0)} no_match={nomatch}"
+                    )
+                elif nomatch > 0:
+                    # Caso ruidoso pero útil: sync corrió OK pero N packages NO
+                    # matchean ningún stop ni por id ni por tracking_number.
+                    # Probable causa: stops eliminados/reasignados en Routal.
+                    logger.warning(
+                        f"[routal-sync] journey={journey['id']} no_match={nomatch} "
+                        f"packages sin stop correspondiente en Routal (stops_in_routal="
+                        f"{summary.get('stops_in_routal',0)}, pkgs={summary.get('packages_in_journey',0)})"
                     )
             else:
                 # Bug fix 2026-05-06: surface ok=false errors. Previously they were

@@ -139,11 +139,29 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
 
         stops_by_id = {s["id"]: s for s in (detail.get("stops") or []) if s.get("id")}
 
+        # Fallback index: para sanar packages cuyo routal_service_id quedó stale
+        # (Routal puede rotar stop.id, o el package se creó con un id histórico).
+        # Indexamos los stops por TODAS sus claves alternativas para poder
+        # re-matchear por tracking_number / reference / external_id / fixed_id.
+        # Una misma stop puede aparecer bajo varias claves — la última gana, lo
+        # cual es seguro porque apuntamos al mismo objeto stop.
+        stops_by_altkey = {}
+        for s in (detail.get("stops") or []):
+            for alt_key in (
+                s.get("tracking_number"),
+                s.get("reference"),
+                s.get("client_external_id"),
+                s.get("fixed_id"),
+            ):
+                if alt_key:
+                    stops_by_altkey[str(alt_key)] = s
+
         # Index packages by routal_service_id (was set at journey creation time)
         packages = await db.packages.find(
             {"journey_id": journey_id, "client_id": client_id},
             {"_id": 0, "id": 1, "routal_service_id": 1, "status": 1, "kosmo_proof_count": 1,
-             "recipient_name": 1, "address": 1, "tracking_number": 1, "order_reference_id": 1},
+             "recipient_name": 1, "address": 1, "tracking_number": 1, "order_reference_id": 1,
+             "routal_report_id": 1},
         ).to_list(length=10000)
 
         # If journey doesn't have routal_plan_label/project_id yet, persist them
@@ -166,6 +184,7 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
         unchanged = 0
         no_match = 0
         recipient_filled = 0
+        recovered_by_fallback = 0  # packages cuyo routal_service_id se sanó por tracking_number
 
         def _build_recipient_update(stop, pkg):
             """Returns dict with PII-encrypted recipient fields if missing locally."""
@@ -188,10 +207,40 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
 
         for pkg in packages:
             svc_id = pkg.get("routal_service_id")
-            if not svc_id or svc_id not in stops_by_id:
+            stop = stops_by_id.get(svc_id) if svc_id else None
+
+            # Fallback matching: si el routal_service_id no matchea (porque
+            # Routal rotó stop.id, o el id histórico ya no existe), intentamos
+            # re-matchear por tracking_number contra las claves alternativas
+            # del stop (tracking_number, reference, client_external_id, fixed_id).
+            # Si encontramos match por fallback, persistimos el nuevo
+            # routal_service_id en el package — próximas syncs ya matchean
+            # directo sin volver a hacer este lookup.
+            if stop is None:
+                pkg_tracking = pkg.get("tracking_number") or pkg.get("order_reference_id")
+                if pkg_tracking and str(pkg_tracking) in stops_by_altkey:
+                    stop = stops_by_altkey[str(pkg_tracking)]
+                    new_svc_id = stop.get("id")
+                    if new_svc_id and new_svc_id != svc_id:
+                        await db.packages.update_one(
+                            {"id": pkg["id"], "client_id": client_id},
+                            {"$set": {
+                                "routal_service_id": new_svc_id,
+                                "routal_service_id_healed_at": _now_iso(),
+                            }},
+                        )
+                        # Reflejar el cambio en el dict en memoria para que
+                        # _build_recipient_update y demás logica use el id nuevo.
+                        pkg["routal_service_id"] = new_svc_id
+                        recovered_by_fallback += 1
+                        logger.info(
+                            f"[routal-sync] healed routal_service_id for pkg={pkg['id'][:8]} "
+                            f"by tracking_number={pkg_tracking}: {svc_id} → {new_svc_id}"
+                        )
+
+            if stop is None:
                 no_match += 1
                 continue
-            stop = stops_by_id[svc_id]
             stop_status = (stop.get("status") or "").lower()
 
             if stop_status == "completed":
@@ -304,6 +353,7 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
             "unchanged": unchanged,
             "no_routal_match": no_match,
             "recipient_filled": recipient_filled,
+            "recovered_by_fallback": recovered_by_fallback,
         }
     finally:
         try:

@@ -1,6 +1,42 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-12 — FIX P0: packages Routal stuck en "Pendiente" por drift de stop.id
+
+**Síntoma reportado**: Ruta en LastMile (`/journeys/06edf7ea-...`) muestra 0/35 paquetes entregados aunque en el planner de Routal todas las 35 paradas están en estado **"Completada"**. El botón "Re-sincronizar Routal" no recupera nada.
+
+**Root cause**: `sync_journey_from_routal` matcheaba packages ↔ stops Routal usando **una sola clave**: `pkg.routal_service_id == stop.id`. Cuando Routal rota el `stop.id` (similar a lo visto con `report_id` cuando un driver re-sube evidencia) los packages quedan en `no_match` silencioso → status `pending` permanente. Cada sync subsiguiente repite el mismo fallo porque no hay fallback.
+
+Distinción importante (aclarada por el operador): el `status` del **journey** (planificada / in_progress / closed) lo controla **el operador manualmente**, NO es responsabilidad del sync. El sync solo debe mantener actualizado el `status` de los **packages** según los stops de Routal.
+
+**Fix** (`/app/backend/services/routal_sync.py` + `/app/backend/workers/routal_sync_worker.py`):
+
+1. **Matching robusto en cascada**:
+   - Primera vuelta: `routal_service_id == stop.id` (comportamiento previo)
+   - Fallback: matchear por `pkg.tracking_number` (o `order_reference_id`) contra cualquiera de `stop.tracking_number / stop.reference / stop.client_external_id / stop.fixed_id`.
+
+2. **Auto-heal `routal_service_id`**: cuando el fallback encuentra match, persiste el nuevo `stop.id` y un timestamp `routal_service_id_healed_at`. Las syncs futuras matchean directo sin re-lookup.
+
+3. **Telemetría**:
+   - Summary del sync incluye nuevo campo `recovered_by_fallback: N`.
+   - Worker log incluye `healed_service_id+=N`.
+   - Si `no_routal_match > 0` y nada se sanó, emite `WARNING` con counts (visibilidad de drift residual — stops eliminados/reasignados).
+
+**Lo que NO cambia**:
+- `status` del journey sigue siendo manual del operador (apertura/cierre).
+- No se introduce auto-cierre.
+- Si el matching primario funciona, no se toca la DB (retro-compatible).
+
+**Verificación en preview**: sync manual sobre journey Routal `1c185ad0-...` devuelve `recovered_by_fallback: 0` (matching primario OK, sin regresión).
+
+**Acción para PROD**:
+1. Redeploy desde el panel de Emergent.
+2. Esperar máximo 10 min (intervalo del worker `ROUTAL_SYNC_INTERVAL_MINUTES`) o presionar **"Re-sincronizar Routal"** en `/journeys/06edf7ea-...` para forzar.
+3. Los 35 paquetes deberían pasar de Pendiente → Exitosa en una sola sync.
+4. En logs de PROD verás: `[routal-sync] journey=06edf7ea-... delivered+=35 healed_service_id+=35`.
+
+
+
 ## 2026-05-12 — FIX P0: AI Eval worker no procesaba packages Routal
 
 **Síntoma reportado**: En `/admin?tab=model` el panel muestra "Worker activo", pero `Consumo de Tokens` y `/monitor` no reflejan actividad. Rutas con guías cerradas (ej. `/journeys/5b0a48ed-...`) quedan en "No evaluado por IA" indefinidamente.
