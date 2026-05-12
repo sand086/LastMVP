@@ -193,6 +193,7 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
             // buildIncidentDescription (mismo flujo que el modal "Nueva
             // Incidencia" pero sin pasos extra para el operador).
             let incidentCreated = false;
+            let incidentError = false;
             if (!isApproval && reviewData.incident_type) {
                 try {
                     // Pasamos el adjusted_score al pkg para que el template
@@ -222,17 +223,21 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                     // incidencia: el rechazo ya está guardado y el operador
                     // puede crear la incidencia manualmente.
                     console.error('Error creando incidencia auto:', incErr);
-                    toast.error('Guía rechazada, pero no se pudo crear la incidencia automática.');
+                    incidentError = true;
                 }
             }
 
-            toast.success(
-                isApproval
-                    ? 'Guia aprobada'
-                    : incidentCreated
-                        ? 'Guia rechazada e incidencia creada'
-                        : 'Guia rechazada'
-            );
+            if (incidentError) {
+                toast.error('Guía rechazada, pero no se pudo crear la incidencia automática.');
+            } else {
+                toast.success(
+                    isApproval
+                        ? 'Guia aprobada'
+                        : incidentCreated
+                            ? 'Guia rechazada e incidencia creada'
+                            : 'Guia rechazada'
+                );
+            }
             setReviewModalOpen(false);
             setReviewModalPkg(null);
             advanceToNext(pkg.id);

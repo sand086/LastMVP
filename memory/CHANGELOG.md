@@ -1,6 +1,41 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-12 — FEATURE: incidencia auto-creada al rechazar guía desde ReviewModal
+
+**Petición del usuario** (con screenshots): fusionar el flujo del recuadro "Rechazo manual (override)" en `ReviewModal` con el modal "Nueva Incidencia". En vez de tener que abrir un segundo modal después de rechazar, que el operador elija el "Tipo de incidencia" desde el mismo modal de revisión y la incidencia se cree automáticamente, sin dejar de reflejarse en la pestaña Incidencias.
+
+**Implementación**:
+
+1. **`/app/frontend/src/components/ReviewModal.jsx`**:
+   - Nuevo estado `incidentType` (reset al abrir/cambiar de package).
+   - Nuevo selector "Tipo de incidencia *" agregado a AMBOS paneles:
+     - Panel rojo de rechazo (score < 70, panel obligatorio).
+     - Panel amarillo de override manual (score ≥ 70, "Rechazar manualmente").
+   - Reutiliza el catálogo `INCIDENT_TYPES` de `lib/utils.js` (5 opciones, mismo del modal "Nueva Incidencia").
+   - Botón "Confirmar rechazo" está deshabilitado hasta que el operador elija motivo + tipo de incidencia.
+   - `handleConfirm` pasa `incident_type` en el payload solo cuando es rechazo.
+   - Data-testids: `rejection-incident-type-select` (panel rojo), `override-incident-type-select` (panel amarillo).
+
+2. **`/app/frontend/src/components/GuiasTab.jsx`** (`handleReviewModalConfirm`):
+   - Import nuevo: `createIncident` desde `lib/api`, `buildIncidentDescription` desde `lib/incidentTemplate`.
+   - Cuando `action === 'rejected'` Y hay `incident_type` → llama a `createIncident()` justo después de `reviewPackageWithNote()`.
+   - Payload: `journey_id`, `occurred_at` (now), `incident_type`, `severity` (derivada del adjusted_score vía `suggestSeverity`), `description` (auto-generada con `buildIncidentDescription` — score, criterios fallidos, alertas IA, guía, driver), `tracking_number`, `source='evaluacion'` (distinguible de incidencias manuales), `comentario_asesor` (solo si tipo='otro').
+   - Si falla la creación de la incidencia, NO bloquea el rechazo (que ya se persistió). Se muestra UN solo toast (error o success, no ambos — fix sugerido por el testing agent).
+   - Mensajes de toast diferenciados: "Guía aprobada" / "Guia rechazada e incidencia creada" / "Guia rechazada" (incident_type no seleccionado) / error específico si falla la incidencia.
+   - `onRefreshJourney()` se sigue llamando → la incidencia aparece en la pestaña Incidencias sin pasos manuales.
+
+**No se rompió**: el modal "Nueva Incidencia" original sigue funcionando para casos que no nazcan de un rechazo de guía. El flujo de aprobación normal no cambia.
+
+**Verificación**:
+- Lint OK ambos archivos (sin warnings).
+- Smoke test del backend: `POST /api/incidents` con payload del frontend → HTTP 200, incidencia creada con `source='evaluacion'`. DELETE limpio funciona.
+- Code review del testing agent: "No business-logic regressions introduced. The change is additive and well-scoped." Identificó un bug de doble-toast que fue corregido.
+
+**Acción para PROD**: redeploy desde el panel de Emergent.
+
+
+
 ## 2026-05-12 — ROOT CAUSE + FIX: leader-election sin recovery tras redeploy
 
 **Incidente recurrente**: tras cada redeploy, el AI Eval worker queda muerto en PROD. El backend FastAPI responde 200 a nivel HTTP, pero la background task del worker nunca arranca, dejando cientos de jobs en cola sin procesar. Síntoma reportado por el usuario: dar clic en "Evaluar IA todas" no genera actividad en `/admin` ni `/monitor`, y los jobs quedan En_Cola indefinidamente.
