@@ -523,7 +523,17 @@ async def _adaptive_periodic_sync(db: AsyncIOMotorDatabase):
 
 
 def start_periodic_sync(db: AsyncIOMotorDatabase):
+    """Idempotent: re-llamar mientras la task previa está viva NO arranca otra.
+
+    Críticamente importante porque el leader-election puede promover el mismo
+    proceso varias veces (acquire inicial + retry promotion + hot reload), y
+    sin esta guarda se acumulan N loops `_adaptive_periodic_sync` paralelos
+    que saturan el event loop y hacen timeout endpoints como /health.
+    """
     global _sync_task
+    if _sync_task and not _sync_task.done():
+        logger.info("Kosmo adaptive sync already running — skip duplicate start")
+        return
     _sync_task = asyncio.create_task(_adaptive_periodic_sync(db))
     logger.info(f"Kosmo adaptive sync started (check every {SCHEDULER_CHECK_SECONDS}s, concurrency {SCRAPE_CONCURRENCY})")
 

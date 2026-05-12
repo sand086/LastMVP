@@ -696,7 +696,17 @@ async def _recover_orphan_jobs(db: AsyncIOMotorDatabase):
 
 
 def start_ai_eval_worker(db: AsyncIOMotorDatabase):
+    """Idempotent: re-llamar mientras workers previos están vivos NO arranca otros.
+
+    El leader-election puede promover el mismo proceso varias veces (acquire
+    inicial + retry promotion). Sin esta guarda se acumulan N _worker_loop +
+    N _cron_sweep en paralelo, multiplicando llamadas a LLM y saturando el
+    event loop.
+    """
     global _worker_task, _cron_task
+    if _worker_task and not _worker_task.done():
+        logger.info("AI Eval worker already running — skip duplicate start")
+        return
     # Recuperacion de jobs huerfanos (backend restart con jobs a medio evaluar)
     asyncio.create_task(_recover_orphan_jobs(db))
     _worker_task = asyncio.create_task(_worker_loop(db))

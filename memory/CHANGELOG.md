@@ -1,6 +1,46 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-12 — FIX P0 BLOQUEADOR DE DEPLOY: workers acumulándose, /health timeout
+
+**Síntoma reportado**: deploys a PROD fallaban con NGINX devolviendo 520 y log:
+```
+upstream timed out (110: Connection timed out) while reading response header
+from upstream "http://127.0.0.1:8001/health"
+```
+Repetido cada 10s durante minutos. El backend SÍ corría (kosmo_sync, AI Eval workers logueaban actividad), pero `/health` no respondía → Kubernetes marcaba pod unhealthy → ingress devolvía 520.
+
+**Root cause**: `start_periodic_sync` (kosmo) y `start_ai_eval_worker` NO eran idempotentes. Cada vez que se llamaban, creaban tasks nuevas vía `asyncio.create_task` SIN cancelar las anteriores. En combinación con el sistema de leader-election retry implementado el mismo día (callbacks `_start_bg_tasks` se ejecutan tanto en acquire inicial como en cada retry-promotion), los procesos acumulaban **N copias paralelas** de los loops del worker. Reproducido en preview: hot reload + retry promotion → 10 instancias paralelas de `kosmo_sync` corriendo al mismo tiempo → event loop saturado → `/health` tardaba **57s** en responder → NGINX timeout (10s default).
+
+**Fix** (mínimo, 2 archivos):
+
+1. `/app/backend/kosmo_sync.py` (función `start_periodic_sync`):
+   ```python
+   if _sync_task and not _sync_task.done():
+       logger.info("Kosmo adaptive sync already running — skip duplicate start")
+       return
+   ```
+
+2. `/app/backend/ai_eval_worker.py` (función `start_ai_eval_worker`):
+   ```python
+   if _worker_task and not _worker_task.done():
+       logger.info("AI Eval worker already running — skip duplicate start")
+       return
+   ```
+
+**Nota**: los otros 2 workers (`routal_sync_worker`, `routal_selection_worker`) ya tenían esta guarda — solo faltaba en estos 2.
+
+**Verificación end-to-end en preview**:
+- Antes del fix: `/health` → 57s (timeout en NGINX)
+- Después del fix: `/health` → 2-7ms consistente en 10 mediciones
+- Probado retry-promotion via `POST /api/ai-evaluation/reset-leader`:
+  - Lost lease → retry → acquired → "skip duplicate start" en ambos workers ✅
+  - `/health` se mantuvo en 2ms durante todo el ciclo
+
+**Acción para PROD**: redeploy. El backend ahora responderá al probe de NGINX de inmediato y el pod se marcará healthy.
+
+
+
 ## 2026-05-12 — FEATURE: incidencia auto-creada al rechazar guía desde ReviewModal
 
 **Petición del usuario** (con screenshots): fusionar el flujo del recuadro "Rechazo manual (override)" en `ReviewModal` con el modal "Nueva Incidencia". En vez de tener que abrir un segundo modal después de rechazar, que el operador elija el "Tipo de incidencia" desde el mismo modal de revisión y la incidencia se cree automáticamente, sin dejar de reflejarse en la pestaña Incidencias.
