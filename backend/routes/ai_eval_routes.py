@@ -275,6 +275,32 @@ async def retry_error_jobs(
     }
 
 
+
+# ── POST /api/ai-evaluation/reset-leader ────────────────────────
+@router.post("/reset-leader")
+async def reset_leader(user: dict = Depends(require_role(["developer"]))):
+    """Emergency: borra el lock de leader_election para 'bg_tasks'.
+
+    Útil cuando un pod muere abruptamente y deja un lock zombi vivo, lo que
+    impide a otros pods volverse leader y arrancar el AI Eval worker. Tras
+    llamar a este endpoint, en máximo HEARTBEAT_SECONDS (~10s) el retry de
+    cualquier worker activo se promueve y arranca los background tasks.
+
+    Detección típica: GET /api/ai-evaluation/health → status="stalled".
+    """
+    from datetime import datetime, timezone
+    deleted = await db.leader_election.delete_many({"role": "bg_tasks"})
+    return {
+        "deleted_locks": deleted.deleted_count,
+        "now": datetime.now(timezone.utc).isoformat(),
+        "next_step": (
+            "El worker activo (si está vivo) reintenta cada ~10s y debería "
+            "promoverse a leader en máximo 30s. Verifica con GET /health."
+        ),
+    }
+
+
+
 # ── GET /api/ai-evaluation/health ───────────────────────────────
 @router.get("/health")
 async def worker_health(user: dict = Depends(get_current_user)):
@@ -322,17 +348,22 @@ async def worker_health(user: dict = Depends(get_current_user)):
         except (ValueError, TypeError):
             pass
 
-    # Salud general: "healthy" / "saturated" / "stuck" / "stalled" / "paused"
+    # Salud general: "paused" / "stuck" / "saturated" / "stalled" / "healthy"
+    # NOTA: el orden importa. "stuck" debe verificarse ANTES que "saturated"
+    # porque 3 jobs zombi de 8 horas se ven como "saturated" pero son stuck.
     cfg_paused, _pause_reason = is_worker_paused(cfg)
     # Tolerancia stalled: 60s (6 ciclos de poll de 10s). Si el worker está vivo
     # y hay En_Cola, debería haber tomado un job en ese plazo.
     STALLED_THRESHOLD_S = 60
     if cfg_paused:
         status = "paused"
+    elif oldest_age_seconds and oldest_age_seconds > 30 * 60:
+        # Algún job lleva >30 min sin terminar → probable zombi (vs saturación
+        # legítima que se resolvería en minutos). El operador debe usar
+        # /recover-stuck o reiniciar deployment.
+        status = "stuck"
     elif evaluando >= max_routes_concurrent and en_cola > 0:
         status = "saturated"
-    elif oldest_age_seconds and oldest_age_seconds > 30 * 60:
-        status = "stuck"
     elif (
         en_cola > 0
         and evaluando == 0

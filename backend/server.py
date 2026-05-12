@@ -72,15 +72,31 @@ async def lifespan(app: FastAPI):
     # Leader election: when multiple Uvicorn workers run, only ONE spawns
     # background tasks (ai_eval_worker + kosmo_sync). Others skip.
     # Single-worker deploys (current preview) always become leader.
-    elected = await acquire_leader(db, role="bg_tasks")
-    if elected:
-        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync")
+    # NOTA: si NO somos leader inicialmente (lock zombi de pod muerto), el
+    # módulo leader_election agenda un retry en background y nos promueve
+    # cuando el lock expira. El callback abajo se ejecuta tanto en el acquire
+    # inicial como en la promoción via retry, para que los workers arranquen
+    # sin importar cuál fue el camino.
+    from leader_election import register_on_leader_callback
+
+    def _start_bg_tasks():
+        logger.info(f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)")
         start_periodic_sync(db)
         start_ai_eval_worker(db)
         start_selection_scheduler(db)
         start_routal_sync_worker(db)
+
+    register_on_leader_callback("bg_tasks", _start_bg_tasks)
+
+    elected = await acquire_leader(db, role="bg_tasks")
+    if elected:
+        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync")
+        _start_bg_tasks()
     else:
-        logger.info(f"[bg] Worker {worker_id()} is FOLLOWER — skipping background tasks")
+        logger.info(
+            f"[bg] Worker {worker_id()} is FOLLOWER — bg tasks deferred. "
+            f"Will auto-start when leader lease expires (retry running in background)."
+        )
 
     yield
 

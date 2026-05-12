@@ -1,6 +1,65 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-12 — ROOT CAUSE + FIX: leader-election sin recovery tras redeploy
+
+**Incidente recurrente**: tras cada redeploy, el AI Eval worker queda muerto en PROD. El backend FastAPI responde 200 a nivel HTTP, pero la background task del worker nunca arranca, dejando cientos de jobs en cola sin procesar. Síntoma reportado por el usuario: dar clic en "Evaluar IA todas" no genera actividad en `/admin` ni `/monitor`, y los jobs quedan En_Cola indefinidamente.
+
+**Root cause** (`/app/backend/leader_election.py`):
+
+`acquire_leader` solo intentaba ganar el lock una vez al arrancar el pod. Si fallaba (por ejemplo, porque un pod muerto en redeploy abrupto dejó su lock con `expires_at` futuro), el nuevo pod quedaba como `FOLLOWER` permanente — **nunca reintentaba**. Resultado:
+- Background tasks (AI Eval, Kosmo sync, Selection scheduler, Routal sync) jamás se inician
+- El backend luce sano a nivel API porque el endpoint sigue respondiendo
+- Jobs se acumulan En_Cola sin ser tomados
+- Único arreglo previo era reiniciar el deployment de nuevo y rezar que esta vez ganara el lock
+
+**Fix**:
+
+1. **Retry automático en `acquire_leader`** (`leader_election.py`):
+   - Si el acquire inicial falla, se agenda una coroutine de retry en background que poll cada 10s.
+   - Cuando el lock zombi expira (max 30s en condiciones normales), el retry gana el lock y dispara automáticamente los callbacks registrados → workers arrancan sin intervención.
+   - `release_leader` ahora cancela también el retry task.
+
+2. **Retry también en pérdida de lease durante runtime** (`_heartbeat_loop`):
+   - Si por algún motivo perdemos el lease en runtime (ej. admin borró el lock vía `reset-leader`), agendamos el retry automáticamente. Antes la coroutine simplemente terminaba.
+
+3. **Sistema de callbacks** (`register_on_leader_callback`):
+   - `server.py` registra el arranque de los workers como callback idempotente.
+   - El callback se ejecuta tanto en acquire inicial como en promoción via retry.
+
+4. **Endpoint de emergencia** `POST /api/ai-evaluation/reset-leader` (`/app/backend/routes/ai_eval_routes.py`):
+   - Borra todos los locks de `bg_tasks` en la colección `leader_election`.
+   - Permite destrabar PROD sin redeploy si el lock zombi sobrevive.
+   - Requiere rol `developer`.
+   - Tras llamarlo, el retry de cualquier pod activo se promueve en máximo 10s.
+
+5. **Status `/health` corregido**:
+   - Orden de checks invertido: `stuck` (job individual >30 min) ahora se evalúa **antes** que `saturated` para evitar que 3 jobs zombi de 8 horas se vean como "saturated".
+
+**Verificación en preview** (test end-to-end):
+- `POST /reset-leader` → `[leader] lost lease — agendando retry` (13:33:47)
+- 10s después: `[leader] promoted to leader after retry. Starting registered bg tasks.` (13:33:57)
+- Workers arrancan automáticamente sin restart manual.
+
+**Acciones para PROD**:
+
+1. **Redeploy** desde el panel de Emergent para llevar el código nuevo a PROD.
+2. Tras el deploy, el worker arranca automáticamente (con retry si el lock zombi sigue vivo). Verificar con:
+   ```
+   curl https://lastmile-mvp.emergent.host/api/ai-evaluation/health
+   ```
+   Debe retornar `healthy` o `saturated` (con jobs procesando).
+3. Si después de 2 min sigue `stalled`, ejecutar (token del operador):
+   ```
+   curl -X POST https://lastmile-mvp.emergent.host/api/ai-evaluation/reset-leader \
+     -H "Authorization: Bearer $TOKEN"
+   ```
+   Esto borra el lock zombi y dispara el retry. En max 30s arranca el worker.
+
+**Impacto operacional**: el incidente pasa de "8 horas de jobs atascados sin que nadie se entere" a "auto-recovery en <30s tras redeploy" + "fix manual en 1 curl si recurre".
+
+
+
 ## 2026-05-12 — INCIDENT PROD + FIX: AI Eval worker stalled detection
 
 **Incidente en PROD**: ~30 min después del redeploy con los fixes del cron sweep + image proxy, los jobs encolados dejaron de procesarse:

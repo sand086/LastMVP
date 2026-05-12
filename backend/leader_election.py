@@ -45,6 +45,17 @@ HEARTBEAT_SECONDS = max(5, LEASE_SECONDS // 3)
 _this_worker_id = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"
 _leader_roles: set[str] = set()
 _heartbeat_tasks: dict[str, asyncio.Task] = {}
+_retry_tasks: dict[str, asyncio.Task] = {}
+# Callbacks que se ejecutan cuando este worker es promovido a leader vía retry.
+# Permite que server.py registre el arranque del AI eval worker / kosmo sync
+# para que se inicien automáticamente cuando el lock zombi expira.
+_on_leader_callbacks: dict[str, callable] = {}
+
+
+def register_on_leader_callback(role: str, fn) -> None:
+    """Register a function to call when this worker is promoted to leader for `role`.
+    Called BOTH on initial acquire AND on retry promotion. Must be idempotent."""
+    _on_leader_callbacks[role] = fn
 
 
 async def _ensure_index(db) -> None:
@@ -56,7 +67,28 @@ async def _ensure_index(db) -> None:
 
 
 async def acquire_leader(db, role: str = "bg_tasks") -> bool:
-    """Try to become the leader for `role`. Returns True if this worker wins."""
+    """Try to become the leader for `role`. Returns True if this worker wins.
+
+    Background retry: if we don't win initially (another worker holds an active
+    lease), spawn a retry coroutine that polls every HEARTBEAT_SECONDS and tries
+    to take over when the existing lease expires. This protects against the
+    common deploy-recovery gap: pod A dies abruptly leaving a non-expired lock,
+    pod B starts up, can't acquire → without retry pod B stays as follower
+    forever and background workers never start.
+    """
+    won = await _try_acquire(db, role)
+    if won:
+        return True
+    # Start background retry — non-blocking. Returns False so caller knows
+    # we are not the leader RIGHT NOW, but the retry will promote us when the
+    # current leader's lease expires.
+    if role not in _retry_tasks or _retry_tasks[role].done():
+        _retry_tasks[role] = asyncio.create_task(_retry_until_leader(db, role))
+    return False
+
+
+async def _try_acquire(db, role: str) -> bool:
+    """Single acquisition attempt. Returns True on success."""
     await _ensure_index(db)
     now = datetime.now(timezone.utc)
     expires = now + timedelta(seconds=LEASE_SECONDS)
@@ -95,8 +127,42 @@ async def acquire_leader(db, role: str = "bg_tasks") -> bool:
     return False
 
 
+async def _retry_until_leader(db, role: str):
+    """Background coroutine: poll for leadership until won or task cancelled.
+
+    Critical for deploy-recovery. Without this, the new pod after a crashed
+    pod stays as follower until the next manual restart (worker NEVER starts).
+    """
+    on_leader_callbacks_fn = _on_leader_callbacks.get(role)
+    poll_interval = max(5, HEARTBEAT_SECONDS)
+    while role not in _leader_roles:
+        try:
+            await asyncio.sleep(poll_interval)
+            won = await _try_acquire(db, role)
+            if won:
+                logger.warning(
+                    f"[leader] promoted to leader for '{role}' after retry "
+                    f"(worker={_this_worker_id}). Starting registered bg tasks."
+                )
+                if on_leader_callbacks_fn:
+                    try:
+                        on_leader_callbacks_fn()
+                    except Exception as e:
+                        logger.error(f"[leader] on-promote callback failed: {e}")
+                return
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning(f"[leader] retry error for '{role}': {e}")
+
+
 async def _heartbeat_loop(db, role: str):
-    """Refresh the lease every HEARTBEAT_SECONDS while we remain the leader."""
+    """Refresh the lease every HEARTBEAT_SECONDS while we remain the leader.
+
+    Si perdemos el lease (otro pod tomó el lock, o un admin borró nuestro doc
+    via reset-leader), agendamos el retry para volver a luchar por el lock.
+    Esto evita quedarnos sin leader si el heartbeat falla durante runtime.
+    """
     try:
         while role in _leader_roles:
             await asyncio.sleep(HEARTBEAT_SECONDS)
@@ -107,8 +173,12 @@ async def _heartbeat_loop(db, role: str):
                 {"$set": {"expires_at": expires, "heartbeat_at": now}},
             )
             if result.matched_count == 0:
-                logger.warning(f"[leader] lost lease for '{role}' — another worker took over")
+                logger.warning(f"[leader] lost lease for '{role}' — agendando retry")
                 _leader_roles.discard(role)
+                # Re-agendar retry para no quedar sin leader si nadie más toma
+                # el lock. Idempotente: si ya hay retry corriendo, no se duplica.
+                if role not in _retry_tasks or _retry_tasks[role].done():
+                    _retry_tasks[role] = asyncio.create_task(_retry_until_leader(db, role))
                 return
     except asyncio.CancelledError:
         pass
@@ -122,6 +192,9 @@ async def release_leader(db, role: str = "bg_tasks") -> None:
     task = _heartbeat_tasks.pop(role, None)
     if task:
         task.cancel()
+    retry_task = _retry_tasks.pop(role, None)
+    if retry_task:
+        retry_task.cancel()
     try:
         await db.leader_election.delete_one({"role": role, "worker_id": _this_worker_id})
         logger.info(f"[leader] released '{role}'")
