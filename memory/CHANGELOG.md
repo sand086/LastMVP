@@ -1,6 +1,35 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-12 — INCIDENT PROD + FIX: AI Eval worker stalled detection
+
+**Incidente en PROD**: ~30 min después del redeploy con los fixes del cron sweep + image proxy, los jobs encolados dejaron de procesarse:
+- 3 jobs en estado `Evaluando` durante 27 min con `guias_evaluadas=0`, `tokens_consumidos=0`, `last_progress_at == fecha_inicio` (nunca progresaron).
+- 12 jobs en `En_Cola` sin tomarse a pesar de tener 3 slots libres lógicos.
+- `/api/ai-evaluation/health` reportaba `"status": "healthy"` (falso positivo).
+
+**Diagnóstico**: el background task `_worker_loop` del AI Eval worker dejó de correr en PROD. Probable causa: leader-election no recuperó el rol después del redeploy, o la coroutine crasheó silenciosamente sin re-arrancar. El backend FastAPI seguía operativo a nivel HTTP (de ahí el falso "healthy"), pero la tarea asíncrona del worker estaba muerta.
+
+**Mitigación inmediata (sin redeploy)**: ejecutado `POST /api/ai-evaluation/recover-stuck` con `stuck_minutes=5` → 3 jobs zombi marcados como Error, slots liberados. Pero los jobs En_Cola siguen sin procesarse porque el worker sigue muerto → el operador debe **reiniciar el deployment** desde el panel de Emergent.
+
+**Fix preventivo** (`/app/backend/routes/ai_eval_routes.py`): mejorado el endpoint `/api/ai-evaluation/health` para detectar este caso específico:
+- Nuevo status `"stalled"`: `en_cola > 0 && slots_in_use == 0 && last_terminal_age > 60s`. Indica worker vivo a nivel API pero background task muerta.
+- Nuevo status `"paused"`: refleja explícitamente cuando el worker está pausado (manual o por shadow autopause).
+- Nuevo campo en response: `last_terminal_age_seconds` (edad del último job que terminó).
+
+**Mapa de estados resultantes**:
+- `paused` → operador pausó o autopause disparó.
+- `saturated` → 3 slots usados, hay cola pendiente.
+- `stuck` → un job individual lleva >30 min en Evaluando.
+- `stalled` → ⚠️ background task muerta (acción: redeploy).
+- `healthy` → todo normal.
+
+**Acción para PROD**:
+1. **Redeploy** desde el panel de Emergent (reinicia el pod → arranca worker).
+2. Una vez deployado, validar `curl https://lastmile-mvp.emergent.host/api/ai-evaluation/health` debe retornar `healthy` o `saturated`, no `stalled`.
+
+
+
 ## 2026-05-12 — FIX P0: packages Routal stuck en "Pendiente" por drift de stop.id
 
 **Síntoma reportado**: Ruta en LastMile (`/journeys/06edf7ea-...`) muestra 0/35 paquetes entregados aunque en el planner de Routal todas las 35 paradas están en estado **"Completada"**. El botón "Re-sincronizar Routal" no recupera nada.

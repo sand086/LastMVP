@@ -310,11 +310,38 @@ async def worker_health(user: dict = Depends(get_current_user)):
         sort=[("fecha_termino", -1)],
     )
 
-    # Salud general: "healthy" / "saturated" / "stuck"
-    if evaluando >= max_routes_concurrent and en_cola > 0:
+    # Edad del último job terminado: si NO ha terminado nada en >5 min Y hay
+    # cola pendiente, el worker está stalled (vivo a nivel de API pero la
+    # background task del worker no toma jobs). Caso típico post-redeploy con
+    # leader election fallida o coroutine que crasheó sin reiniciarse.
+    last_terminal_age_seconds = None
+    if last_terminal and last_terminal.get("fecha_termino"):
+        try:
+            ft = datetime.fromisoformat(last_terminal["fecha_termino"].replace("Z", "+00:00"))
+            last_terminal_age_seconds = int((datetime.now(timezone.utc) - ft).total_seconds())
+        except (ValueError, TypeError):
+            pass
+
+    # Salud general: "healthy" / "saturated" / "stuck" / "stalled" / "paused"
+    cfg_paused, _pause_reason = is_worker_paused(cfg)
+    # Tolerancia stalled: 60s (6 ciclos de poll de 10s). Si el worker está vivo
+    # y hay En_Cola, debería haber tomado un job en ese plazo.
+    STALLED_THRESHOLD_S = 60
+    if cfg_paused:
+        status = "paused"
+    elif evaluando >= max_routes_concurrent and en_cola > 0:
         status = "saturated"
     elif oldest_age_seconds and oldest_age_seconds > 30 * 60:
         status = "stuck"
+    elif (
+        en_cola > 0
+        and evaluando == 0
+        and last_terminal_age_seconds is not None
+        and last_terminal_age_seconds > STALLED_THRESHOLD_S
+    ):
+        # Worker vivo a nivel API pero la background task no toma jobs.
+        # Recomendación: reiniciar el deployment (restart pod).
+        status = "stalled"
     else:
         status = "healthy"
 
@@ -332,6 +359,7 @@ async def worker_health(user: dict = Depends(get_current_user)):
             "oldest_running_age_seconds": oldest_age_seconds,
         },
         "last_terminal_job": last_terminal,
+        "last_terminal_age_seconds": last_terminal_age_seconds,
     }
 
 
