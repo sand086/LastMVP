@@ -1,6 +1,31 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-13 — FIX P0: crash al expandir guía (TypeError en getErrorSeverity)
+
+**Síntoma reportado**: en `/journeys/4659459c-5417-47b7-a78c-5b802a14a4a3` (PROD), al hacer click en la guía `Vs7EMusQ9tseeCoB` la app pide "recargar la página". Solo esa guía, en otras del mismo journey no pasa. El operador no puede revisarla.
+
+**Root cause** (`/app/frontend/src/components/guias/GuiasHelpers.jsx` línea 103):
+
+```javascript
+for (const rawKey of iaErrorsRaw) {   // ← asumía Array
+```
+
+`getErrorSeverity` asumía que `ia_errors_raw` es siempre Array. Sin embargo, el AI Eval worker persiste ese campo como **dict** (`{ error_key: 'critical'|'warning' }`) para los packages TIPO B/C donde detecta múltiples categorías de error. Hacer `for...of` sobre un objeto plano en JavaScript lanza `TypeError: iaErrorsRaw is not iterable` → React Error Boundary lo intercepta → muestra el banner de "recargar página".
+
+**Por qué solo una guía**: los otros packages tenían `ia_errors_raw` en formato Array (legacy) o `null` (sin evaluación AI). El package `Vs7EMusQ9tseeCoB` (entrega TIPO B a Fabián Hernández - vigilancia) tenía dict porque la evaluación AI agrupó 2 errores críticos: `missing_whatsapp_notification` y `incomplete_type_b_evidence`.
+
+**Fix**: normalización defensiva en `getErrorSeverity`:
+- Array → se itera tal cual (legacy preservado).
+- Object plain → `Object.keys()` para iterar las claves del dict.
+- Cualquier otra forma (string, number, etc) → array vacío, retorna null sin crash.
+
+Verificado con node script: 4 casos pasan (dict, array, null/undefined, forma inesperada). El package `Vs7EMusQ9tseeCoB` retorna correctamente `"critical"`.
+
+**Acción para PROD**: redeploy. Tras el deploy el operador puede expandir la guía sin error.
+
+
+
 ## 2026-05-13 — FIX P0: notas del driver no se sincronizaban para guías failed
 
 **Síntoma reportado**: en `/journeys/1b3c4094-...` el package `gfo7tSYML4OcIsgq` (Fallida) mostraba "Sin nota del driver" en LastMile, pero en Routal la sección "Comentarios" del reporte del stop tenía "Titular cancelo paquete". El usuario adjuntó screenshots de ambos sistemas para comparar.

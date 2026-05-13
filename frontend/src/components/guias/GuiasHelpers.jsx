@@ -100,7 +100,16 @@ export const getMaxSeverity = (iaSeverity) => {
 
 export const getErrorSeverity = (displayError, iaErrorsRaw, iaSeverity) => {
     if (!iaSeverity || !iaErrorsRaw) return null;
-    for (const rawKey of iaErrorsRaw) {
+    // iaErrorsRaw puede venir como array (legacy) o como dict (formato actual
+    // del AI eval worker: { error_key: 'critical'|'warning' }). Normalizamos
+    // a array de keys para iteración segura — si llega cualquier otra forma
+    // saltamos al fallback de getMaxSeverity sin crashear el render.
+    const rawKeys = Array.isArray(iaErrorsRaw)
+        ? iaErrorsRaw
+        : typeof iaErrorsRaw === 'object'
+            ? Object.keys(iaErrorsRaw)
+            : [];
+    for (const rawKey of rawKeys) {
         if (iaSeverity[rawKey]) {
             const rawWords = rawKey.replace(/_/g, ' ').toLowerCase();
             const displayWords = displayError.toLowerCase();
@@ -109,7 +118,7 @@ export const getErrorSeverity = (displayError, iaErrorsRaw, iaSeverity) => {
             }
         }
     }
-    if (iaErrorsRaw.length > 0 && Object.keys(iaSeverity).length > 0) {
+    if (rawKeys.length > 0 && Object.keys(iaSeverity).length > 0) {
         return getMaxSeverity(iaSeverity);
     }
     return null;
