@@ -54,19 +54,9 @@ export function suggestIncidentType(deliveryType, hasCriticalFail, failedKeys = 
     return '';
 }
 
-function _scoreLine(pkg) {
-    const aiScore = pkg.ai_score;
-    const ruleScore = pkg.evidence_score;
-    const adjusted = pkg.adjusted_score;
-    if (aiScore != null && ruleScore != null && aiScore !== ruleScore) {
-        return `Score IA original: ${aiScore} → recalculado por criterios: ${ruleScore}`;
-    }
-    if (adjusted != null && aiScore != null && adjusted !== aiScore) {
-        return `Score IA: ${aiScore}/100 → ajustado en revisión: ${adjusted}/100`;
-    }
-    if (aiScore != null) return `Score IA: ${aiScore}/100`;
-    if (adjusted != null) return `Score (ajustado): ${adjusted}/100`;
-    if (ruleScore != null) return `Score: ${ruleScore}/100`;
+function _scoreLine() {
+    // Deprecated: score line removed from auto-filled description per product
+    // request (2026-05-13). Kept as no-op to avoid breaking external imports.
     return null;
 }
 
@@ -118,12 +108,10 @@ export function buildIncidentDescription(pkg, journey) {
     }
 
     const criteriaItems = (CRITERIA[deliveryType] || CRITERIA.A).items;
-    const criteriaLabel = (CRITERIA[deliveryType] || CRITERIA.A).label;
     const criteriaMet = pkg?.evidence_detail?.criteria_met || {};
 
     // 1. AI-evaluated failed criteria
     const aiFailed = criteriaItems.filter(it => criteriaMet[it.key] === false);
-    const aiUnevaluated = criteriaItems.filter(it => criteriaMet[it.key] == null);
 
     // 2. Manual review → criterion mapping (for the refined delivery type catalog)
     const manualFailedItem = parsedNote?.slug
@@ -137,71 +125,33 @@ export function buildIncidentDescription(pkg, journey) {
     }
     const hasCriticalFail = failed.some(f => f.critical);
 
-    // 4. Free-text alerts (cap 6 to keep readable)
-    const detail = pkg?.evidence_detail || {};
-    const alerts = [
-        ...(Array.isArray(detail.alerts) ? detail.alerts : []),
-        ...(Array.isArray(detail.warnings) ? detail.warnings : []),
-        ...(Array.isArray(pkg.ai_errors) ? pkg.ai_errors : []),
-    ].filter(Boolean).slice(0, 6);
-
     const score = pkg.ai_score ?? pkg.adjusted_score ?? pkg.evidence_score;
     const lines = [];
 
-    // Header
-    const headerParts = [`Faltantes detectados · Tipo ${deliveryType} (${criteriaLabel})`];
-    if (score != null) headerParts.push(`Score ${score}/100`);
-    lines.push(headerParts.join(' · '));
-    lines.push('');
-
-    // Failed criteria block
+    // Solo bloque CRITERIOS FALLIDOS. Petición explícita del usuario: la
+    // descripción auto-rellenada debe contener ÚNICAMENTE los criterios del
+    // catálogo que fallaron, sin header, score, alertas IA, revisión manual,
+    // ni metadatos de guía/driver (esa info ya vive en otros campos del
+    // formulario y en el panel de evidencias de la guía).
     if (failed.length > 0) {
         lines.push('CRITERIOS FALLIDOS:');
         failed.forEach(f => {
             const critTag = f.critical ? ' [CRÍTICO]' : '';
             lines.push(`• ${f.label}${critTag} — ${f.desc}`);
         });
-        lines.push('');
     }
 
-    // Manual review block (when not already mapped to a criterion, or when
-    // there's free-text added by the reviewer)
-    if (parsedNote && (!manualFailedItem || parsedNote.freeText)) {
-        lines.push('REVISIÓN MANUAL:');
-        if (parsedNote.label) {
-            lines.push(`• ${parsedNote.label}`);
-        }
-        if (parsedNote.freeText) {
-            lines.push(`• ${parsedNote.freeText}`);
-        }
-        if (pkg.reviewed_by) {
-            lines.push(`Revisado por: ${pkg.reviewed_by}`);
-        }
-        lines.push('');
-    }
-
-    // AI alerts block
-    if (alerts.length > 0) {
-        lines.push('ALERTAS IA:');
-        alerts.forEach(a => lines.push(`• ${String(a).trim()}`));
-        lines.push('');
-    }
-
-    // Edge: nothing to show — fallback to generic placeholder
-    const nothingToReport = failed.length === 0 && alerts.length === 0 && !parsedNote;
-    if (nothingToReport && aiUnevaluated.length === criteriaItems.length && score == null) {
+    // Edge: nada que reportar → placeholder genérico. Mantenemos el fallback
+    // para que el formulario nunca quede vacío y el operador pueda llenar.
+    if (failed.length === 0) {
         return {
             description: `Incidencia registrada desde Guías${guide ? ` para paquete ${guide}` : ''}`,
-            severity: 'Medio',
-            incident_type: '',
+            severity: suggestSeverity(score),
+            incident_type: suggestIncidentType(deliveryType, false, []),
         };
     }
 
-    const scoreLine = _scoreLine(pkg);
-    if (scoreLine) lines.push(scoreLine);
-    lines.push(`Guía: ${guide}${driver ? ` · Driver: ${driver}` : ''}`);
-
-    // Suggest incident_type using BOTH AI failed and manual-mapped criteria
+    // Suggest incident_type using failed criteria
     const allFailedKeys = failed.map(f => f.key);
 
     return {
