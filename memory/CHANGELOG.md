@@ -1,6 +1,47 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-13 — FIX P0: notas del driver no se sincronizaban para guías failed
+
+**Síntoma reportado**: en `/journeys/1b3c4094-...` el package `gfo7tSYML4OcIsgq` (Fallida) mostraba "Sin nota del driver" en LastMile, pero en Routal la sección "Comentarios" del reporte del stop tenía "Titular cancelo paquete". El usuario adjuntó screenshots de ambos sistemas para comparar.
+
+**Root cause** (`/app/backend/services/routal_sync.py` rama `failed`, líneas 286-309 originalmente):
+
+`sync_journey_from_routal` SÍ extraía `driver_note` del report Routal (campo `report.comments`), pero en la rama de packages `failed`:
+1. SOLO escribía ese valor en `fail_reason`, NO en `kosmo_driver_note`.
+2. La rama `delivered` (líneas 263-264) sí escribía `kosmo_driver_note` correctamente.
+3. Resultado: 99.8% (433/434) de los packages failed en preview tenían `kosmo_driver_note` vacío. La UI mostraba "Sin nota del driver" indefinidamente.
+
+Adicionalmente, la rama failed no persistía `routal_report_id` ni `routal_signature_url` (asimetría con `delivered`), lo cual también impedía que el sync detectara el package como "unchanged" en futuras corridas → re-procesaba lo mismo sin actualizar.
+
+**Fix**:
+
+1. `services/routal_sync.py` (rama failed):
+   - Persistir `kosmo_driver_note`, `routal_report_id` y `routal_signature_url` igual que en rama `delivered`.
+   - Guarda "unchanged" ahora también requiere que `kosmo_driver_note` ya esté persistida (antes saltaba sin importar). Esto evita que packages histórcamente saltados queden estancados.
+
+2. `scripts/backfill_driver_notes_failed.py` (nuevo):
+   - One-shot reutilizable. Soporta `--dry-run` y `--limit N`.
+   - Identifica todos los journeys con packages failed sin nota Y que tienen `routal_plan_id` (1 query agregada por journey, no por package).
+   - Llama al `sync_journey_from_routal` parchado.
+   - Idempotente: re-correrlo solo sana lo que aún falta.
+   - Inicializa encryption singleton (necesario para `IntegrationService.get_routal_client`).
+
+**Verificación en preview** (sweep ejecutado):
+- Antes: 434 packages failed · 1 con nota (0.2%)
+- Después: 455 packages failed · 446 con nota (98.0%) · 9 sin nota legítimo (en Routal tampoco tienen comentario)
+- 249 packages sanados en 29.3 segundos, 0 errores.
+- Notas recuperadas son reales y descriptivas: "No coincide la dirección...", "Cliente ausente y solicita reprogramar...", "Falta torre y departamento...", etc.
+
+**Acción para PROD**:
+1. Redeploy desde panel Emergent (lleva el fix del sync).
+2. Para sanar retroactivamente las guías históricas: 
+   - Opción a) UI: presionar "Re-sincronizar Routal" journey por journey (tedioso si hay muchos).
+   - Opción b) Script: `cd /app/backend && python -m scripts.backfill_driver_notes_failed --dry-run` para previsualizar, luego sin `--dry-run` para ejecutar. El operador necesita acceso al pod (vía soporte Emergent).
+3. Validar abriendo `/journeys/1b3c4094-...` — el package `gfo7tSYML4OcIsgq` debe mostrar la nota del driver.
+
+
+
 ## 2026-05-12 — FIX P0 BLOQUEADOR DE DEPLOY: workers acumulándose, /health timeout
 
 **Síntoma reportado**: deploys a PROD fallaban con NGINX devolviendo 520 y log:

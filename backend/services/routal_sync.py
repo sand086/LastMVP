@@ -291,7 +291,10 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
                 )
                 evidence = _extract_evidence(failed_report, client_id, api_base) if failed_report else {}
                 ru = _build_recipient_update(stop, pkg)
-                if pkg.get("status") == "failed" and not ru:
+                if pkg.get("status") == "failed" and not ru and pkg.get("kosmo_driver_note"):
+                    # Solo skip si ya tenía la nota — antes saltábamos sin importar
+                    # si la nota estaba persistida, lo que dejó 433 packages sin
+                    # ella tras la migración Routal-only.
                     unchanged += 1
                     continue
                 update = {
@@ -304,6 +307,15 @@ async def sync_journey_from_routal(db, journey_id: str, api_base: str) -> dict:
                 if evidence:
                     update["kosmo_proof_urls"] = evidence["proof_urls"]
                     update["kosmo_proof_count"] = evidence["proof_count"]
+                    # Persistir nota del driver para que la UI la muestre
+                    # ("Comentarios" en Routal). Antes solo se hacía en la
+                    # rama de delivered, dejando 99.8% de las failed vacías.
+                    if evidence.get("driver_note"):
+                        update["kosmo_driver_note"] = evidence["driver_note"]
+                    if evidence.get("signature_url"):
+                        update["routal_signature_url"] = evidence["signature_url"]
+                    if evidence.get("report_id"):
+                        update["routal_report_id"] = evidence["report_id"]
                 update.update(ru)
                 if ru:
                     recipient_filled += 1
