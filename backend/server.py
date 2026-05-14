@@ -532,6 +532,22 @@ else:
         max_age=600,
     )
 
+
+# ─── CRITICAL: ultra-fast /health bypass (last middleware = outermost) ───
+# Este middleware intercepta /health y /api/health ANTES de cualquier otro
+# middleware (CORS, audit, security, rate-limit). Vital para el probe NGINX
+# de k8s: si el event loop está saturado por LLM calls / bg workers, los
+# probes timeout, el pod se marca unhealthy, deploy falla. Como FastAPI
+# aplica middlewares en orden REVERSO (último registrado = más externo),
+# este debe ser el ÚLTIMO add_middleware/@app.middleware del archivo.
+# Responde sin tocar DB ni event loop pesado.
+@app.middleware("http")
+async def _health_fast_bypass(request, call_next):
+    path = request.url.path
+    if path == "/health" or path == "/api/health":
+        return JSONResponse({"status": "ok"}, status_code=200)
+    return await call_next(request)
+
 # ==================== STARTUP / SHUTDOWN HELPERS ====================
 
 

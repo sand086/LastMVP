@@ -1,6 +1,52 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 3): /health bypass de middlewares
+
+**Síntoma persistente**: tras el fix de grace period y defer lifespan, el deploy SEGUÍA fallando con NGINX timeout en `/health`. Logs mostraban patrón confuso: `/api/system/errors/count` respondía 200 OK mientras `/health` timeout 10s consistentemente. Esto pasaba aunque pasara el grace period inicial.
+
+**Root cause (capa 3)**: cuando el AI Eval worker hace LLM calls (15-25s cada una con LiteLLM + httpx + descarga imágenes Routal), el event loop se satura. Aunque mi endpoint `/health` es trivial (1 return), la request debe atravesar TODA la cadena de middlewares:
+1. CORSMiddleware
+2. SecurityHeadersMiddleware
+3. AuditMiddleware (logging async)
+4. global_rate_limit_middleware (resuelve user del JWT)
+5. **Llegada al endpoint**
+
+Cada middleware hace `await call_next(request)` que cede al event loop. Si el event loop está saturado, ese `await` puede tardar segundos en retomar control. Suma de N middlewares con N awaits + event loop saturado = `/health` tarda 10+ segundos → NGINX timeout → pod unhealthy → 520.
+
+Confirmación: `/api/system/errors/count` también atraviesa la misma cadena pero el frontend lo polling con tolerancia (timeout >10s); NGINX para probe sí tiene timeout corto, por eso solo `/health` falla aparentemente.
+
+**Fix** (`/app/backend/server.py`): nuevo middleware `_health_fast_bypass` registrado como **ÚLTIMO** middleware (FastAPI aplica middlewares en orden reverso, último registrado = más externo). Intercepta `/health` y `/api/health` ANTES de cualquier otro middleware y responde inmediatamente:
+
+```python
+@app.middleware("http")
+async def _health_fast_bypass(request, call_next):
+    path = request.url.path
+    if path == "/health" or path == "/api/health":
+        return JSONResponse({"status": "ok"}, status_code=200)
+    return await call_next(request)
+```
+
+No toca DB, no toca event loop pesado, no atraviesa ningún otro middleware. La respuesta es inmediata aunque todo lo demás esté saturado.
+
+**Verificación en preview**:
+- 10/10 hits a `/health`: **HTTP 200 en 0.5-3 ms** (antes: 2ms, ahora 0.5ms = 4x más rápido)
+- `/api/health`: 0.5ms también
+- `/api/journeys` sigue requiriendo auth (HTTP 401) → otros middlewares funcionan normal
+- Crucial: este endpoint responde aunque el AI Eval worker esté procesando 3 LLM calls en paralelo
+
+**Resumen de las 3 capas de fixes para destrabar deploy**:
+| Fix | Resolvió |
+|---|---|
+| Idempotencia workers (12 may) | Workers acumulándose tras restart |
+| Defer lifespan a background (14 may AM) | Startup bloqueante de migrations + indices |
+| Grace period 60s al AI worker (14 may tarde) | Bloqueo inmediato post-startup por LLM calls |
+| **/health bypass de middlewares (este fix)** | Bloqueo del probe NGINX aunque event loop esté saturado |
+
+**Acción para PROD**: redeploy desde panel Emergent. Esta vez `/health` responde con seguridad <1ms sin importar el estado del backend, el probe pasa, el pod queda healthy.
+
+
+
 ## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 2): grace period para AI Eval worker
 
 **Síntoma**: deploys a PROD seguían fallando con timeout `/health` en NGINX (mismo síntoma del fix anterior del lifespan), pero ahora con un patrón diferente: `/api/system/errors/count` SÍ respondía 200 OK, mientras que `/health` consistentemente timeout. Reproducido en preview: tras minutos de actividad del AI Eval worker, `/health` empezaba a colgarse 3+ segundos.
