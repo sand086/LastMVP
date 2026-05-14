@@ -1,6 +1,50 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY: lifespan startup > timeout NGINX
+
+**Síntoma**: deploys a PROD fallaban con NGINX logueando timeouts cada 10s sobre `/health`:
+```
+upstream timed out (110: Connection timed out) while reading response header
+from upstream "http://127.0.0.1:8001/health"
+```
+Esto causa que el pod nunca se marque "ready" → ingress devuelve 520 → deploy falla. Es la **segunda manifestación del mismo síntoma** (la primera fue por workers acumulándose en el event loop, arreglada el 2026-05-12 con idempotencia).
+
+**Root cause** (`/app/backend/server.py` `lifespan`): el bloque de startup ejecutaba **en serie** y **antes de emitir `Application startup complete`**:
+1. `_create_indexes()` — N índices en MongoDB
+2. `_auto_migrate_order_id()` — migración
+3. `_auto_migrate_routal_source()` — migración
+4. `init_encryption(db)` — query DB
+5. `bootstrap_default_clients(db)` — query DB
+6. `acquire_leader(db, role="bg_tasks")` — query DB
+
+Mientras esto corría, **uvicorn no aceptaba conexiones HTTP** (FastAPI lifespan bloquea el startup del servidor). En PROD (Atlas más lento que Mongo local), la suma de operaciones excedía los 10s del probe NGINX → todos los probes timeout → pod nunca pasa readiness check.
+
+**Fix**: separar lifespan en 2 fases:
+
+1. **Lifespan crítico (bloqueante, <100ms)**: solo `init_encryption(db)` (necesario para que las queries con PII funcionen). Spawnea `_deferred_startup` como task y hace `yield` inmediatamente → `Application startup complete` se emite en <1s.
+
+2. **`_deferred_startup` (background task)**: ejecuta en background sin bloquear el servidor:
+   - `_create_indexes()`
+   - `_auto_migrate_order_id()`
+   - `_auto_migrate_routal_source()`
+   - `bootstrap_default_clients(db)`
+   - `acquire_leader(db)` + arranque de workers vía callback
+   - Tolera errores (logger.error pero no crashea el server)
+
+3. **Shutdown del lifespan**: cancela el deferred task si aún corre, luego release_leader + stop workers + close mongo.
+
+**Verificación en preview**:
+- Antes del fix: `Application startup complete` tras ~5-15s (variable, dependía del estado de DB)
+- Después del fix: `Application startup complete` en **<1s** consistente
+- `/health` responde HTTP 200 en **2ms** desde el primer hit
+- 12 muestras consecutivas a 5s de intervalo: todas 200 en 2ms, sin degradación durante AI Eval procesando jobs en paralelo
+- Logs verifican que indices/migrations/leader-election corren en background después del startup complete
+
+**Acción para PROD**: redeploy desde panel Emergent. Esta vez el probe NGINX pasará en <1s, el pod se marcará ready, e ingress enrutará tráfico.
+
+
+
 ## 2026-05-13 — FIX P0: crash al expandir guía (TypeError en getErrorSeverity)
 
 **Síntoma reportado**: en `/journeys/4659459c-5417-47b7-a78c-5b802a14a4a3` (PROD), al hacer click en la guía `Vs7EMusQ9tseeCoB` la app pide "recargar la página". Solo esa guía, en otras del mismo journey no pasa. El operador no puede revisarla.

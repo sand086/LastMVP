@@ -46,6 +46,8 @@ from routes import (
 
 from leader_election import acquire_leader, release_leader, is_leader, worker_id
 
+import asyncio
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -55,52 +57,26 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ─── STARTUP ───
-    await _create_indexes()
-    await _auto_migrate_order_id()
-    await _auto_migrate_routal_source()
-    # R00A.2: initialize encryption (loads or auto-generates ENCRYPTION_KEY)
+    # IMPORTANTE: este bloque corre ANTES de que uvicorn emita "Application
+    # startup complete". Mientras dure, /health y todo el resto NO responde,
+    # y NGINX/k8s probe (timeout 10s) marca el pod unhealthy → 520. Por eso
+    # SOLO hacemos aquí lo crítico para que las requests funcionen:
+    #   1. init_encryption: requerido por casi todas las queries (PII).
+    # Lo demás (indices, migraciones one-shot, bootstrap, leader election,
+    # workers) se difiere a un background task que arranca DESPUÉS del
+    # "startup complete" para no bloquear el probe.
     from utils.encryption import init_encryption
     await init_encryption(db)
 
-    # R00B / SEL01: bootstrap default client_config (Cubbo)
-    try:
-        from services.client_config_service import bootstrap_default_clients
-        await bootstrap_default_clients(db)
-    except Exception as e:
-        logger.warning(f"[client_config] bootstrap failed: {e}")
-
-    # Leader election: when multiple Uvicorn workers run, only ONE spawns
-    # background tasks (ai_eval_worker + kosmo_sync). Others skip.
-    # Single-worker deploys (current preview) always become leader.
-    # NOTA: si NO somos leader inicialmente (lock zombi de pod muerto), el
-    # módulo leader_election agenda un retry en background y nos promueve
-    # cuando el lock expira. El callback abajo se ejecuta tanto en el acquire
-    # inicial como en la promoción via retry, para que los workers arranquen
-    # sin importar cuál fue el camino.
-    from leader_election import register_on_leader_callback
-
-    def _start_bg_tasks():
-        logger.info(f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)")
-        start_periodic_sync(db)
-        start_ai_eval_worker(db)
-        start_selection_scheduler(db)
-        start_routal_sync_worker(db)
-
-    register_on_leader_callback("bg_tasks", _start_bg_tasks)
-
-    elected = await acquire_leader(db, role="bg_tasks")
-    if elected:
-        logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync")
-        _start_bg_tasks()
-    else:
-        logger.info(
-            f"[bg] Worker {worker_id()} is FOLLOWER — bg tasks deferred. "
-            f"Will auto-start when leader lease expires (retry running in background)."
-        )
+    # Spawn deferred initialization without awaiting it. Uvicorn emitirá
+    # "Application startup complete" inmediatamente y los probes pasan.
+    deferred_init_task = asyncio.create_task(_deferred_startup(app))
 
     yield
 
     # ─── SHUTDOWN ───
+    if not deferred_init_task.done():
+        deferred_init_task.cancel()
     if is_leader("bg_tasks"):
         stop_periodic_sync()
         stop_ai_eval_worker()
@@ -109,6 +85,61 @@ async def lifespan(app: FastAPI):
         await release_leader(db, role="bg_tasks")
     await close_http_client()
     mongo_client.close()
+
+
+async def _deferred_startup(app: FastAPI):
+    """Inicialización pesada después del 'Application startup complete'.
+
+    Corre en background para no bloquear el probe HTTP del ingress. Los
+    workers se inician dentro de los callbacks de leader-election, por eso
+    no se llaman directo aquí — solo registramos los callbacks y disparamos
+    acquire_leader.
+    """
+    try:
+        await _create_indexes()
+        await _auto_migrate_order_id()
+        await _auto_migrate_routal_source()
+
+        # R00B / SEL01: bootstrap default client_config (Cubbo)
+        try:
+            from services.client_config_service import bootstrap_default_clients
+            await bootstrap_default_clients(db)
+        except Exception as e:
+            logger.warning(f"[client_config] bootstrap failed: {e}")
+
+        # Leader election: when multiple Uvicorn workers run, only ONE spawns
+        # background tasks (ai_eval_worker + kosmo_sync). Others skip.
+        # Single-worker deploys (current preview) always become leader.
+        # NOTA: si NO somos leader inicialmente (lock zombi de pod muerto), el
+        # módulo leader_election agenda un retry en background y nos promueve
+        # cuando el lock expira. El callback abajo se ejecuta tanto en el acquire
+        # inicial como en la promoción via retry, para que los workers arranquen
+        # sin importar cuál fue el camino.
+        from leader_election import register_on_leader_callback
+
+        def _start_bg_tasks():
+            logger.info(f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)")
+            start_periodic_sync(db)
+            start_ai_eval_worker(db)
+            start_selection_scheduler(db)
+            start_routal_sync_worker(db)
+
+        register_on_leader_callback("bg_tasks", _start_bg_tasks)
+
+        elected = await acquire_leader(db, role="bg_tasks")
+        if elected:
+            logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync")
+            _start_bg_tasks()
+        else:
+            logger.info(
+                f"[bg] Worker {worker_id()} is FOLLOWER — bg tasks deferred. "
+                f"Will auto-start when leader lease expires (retry running in background)."
+            )
+        logger.info("[deferred-startup] complete")
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error(f"[deferred-startup] failed: {e}", exc_info=True)
 
 
 app = FastAPI(title="LastMile OS API", lifespan=lifespan)
