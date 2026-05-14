@@ -310,6 +310,8 @@ async def _recount_and_update_journeys(db, journey_ids_to_recount: set, affected
                 if j_id not in counts:
                     counts[j_id] = {"delivered": 0, "failed": 0}
                 counts[j_id][status] = doc["count"]
+            # Yield antes de armar el batch de updates
+            await asyncio.sleep(0)
 
             # Batch update journeys
             update_ops = []
@@ -422,6 +424,10 @@ async def run_tracking_sync(db: AsyncIOMotorDatabase, journey_ids_filter: list =
 
             await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
             details.append(detail)
+            # Yield al event loop: con concurrency=10 y batches de 250 paquetes
+            # esto evita que el loop quede atascado en un trail de updates DB
+            # secuenciales sin atender /health y otros endpoints.
+            await asyncio.sleep(0)
 
     tasks = [process_package(pkg) for pkg in packages]
     await asyncio.gather(*tasks, return_exceptions=True)

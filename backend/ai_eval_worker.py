@@ -256,6 +256,8 @@ async def _evaluate_batch_with_retry(db, batch: list, job_id: str, timeout_s: in
             {"job_id": job_id, "guias_detail.guia_id": g["guia_id"]},
             {"$set": {"guias_detail.$.status": "Evaluando"}},
         )
+    # Yield al event loop antes de lanzar tareas LLM concurrentes
+    await asyncio.sleep(0)
 
     tasks = [_evaluate_single_guia(db, g["guia_id"], job_id, timeout_s) for g in batch]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -288,6 +290,8 @@ async def _evaluate_batch_with_retry(db, batch: list, job_id: str, timeout_s: in
                 "guias_detail.$.error": result.get("error"),
             }},
         )
+        # Yield entre updates para no monopolizar el event loop si batch es grande
+        await asyncio.sleep(0)
     return normalized
 
 
@@ -364,6 +368,9 @@ async def _process_job(db: AsyncIOMotorDatabase, job: dict):
     total_tokens = 0
 
     for batch_start in range(0, total, batch_size):
+        # Yield al event loop antes de cada batch — evita inanición del loop
+        # durante jobs largos (lo que bloqueaba /health en k8s y disparaba 520).
+        await asyncio.sleep(0)
         # Guard 1: ¿sigue existiendo la ruta? Si fue eliminada (limpieza), abortar
         # para no seguir gastando créditos IA.
         route_exists = await db.journeys.find_one({"id": job["route_id"]}, {"_id": 0, "id": 1})
@@ -469,6 +476,8 @@ async def _kill_active_jobs_due_to_pause(db, reason: str) -> int:
     # Count per-job totals manually (cannot finalize in single update)
     killed = 0
     async for job in db.ai_evaluation_jobs.find({"status": "Evaluando"}, {"_id": 0}):
+        # Yield entre jobs — cada iteración hace 2 updates pesados
+        await asyncio.sleep(0)
         from collections import Counter
         cnt = Counter(g["status"] for g in job.get("guias_detail") or [])
         evaluated = cnt.get("Evaluada", 0)
@@ -602,10 +611,16 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
             }
             # Filtro por journey no-cerrado (resuelto en 1 query previa para evitar $lookup costoso)
             open_journey_ids = []
+            _idx = 0
             async for j in db.journeys.find(
                 {"status": {"$ne": "closed"}}, {"_id": 0, "id": 1}
             ):
                 open_journey_ids.append(j["id"])
+                _idx += 1
+                if _idx % 100 == 0:
+                    # Yield cada 100 docs para no bloquear el event loop con
+                    # cursores largos (PROD tiene >5k journeys).
+                    await asyncio.sleep(0)
             if open_journey_ids:
                 match_filter["journey_id"] = {"$in": open_journey_ids}
             else:
@@ -637,6 +652,8 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
                 logger.info(f"Cron sweep: encontradas {len(routes_to_eval)} rutas con packages pendientes de evaluar")
 
             for route in routes_to_eval:
+                # Yield entre rutas: enqueue_job hace múltiples DB ops
+                await asyncio.sleep(0)
                 # Check if there's already a pending/running job for this route
                 existing = await db.ai_evaluation_jobs.find_one(
                     {"route_id": route["route_id"], "status": {"$in": ["En_Cola", "Evaluando"]}},

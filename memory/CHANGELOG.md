@@ -1,6 +1,32 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 4): yields explícitos en workers
+
+**Síntoma persistente tras capa 3**: aunque `/health` evita los middlewares con bypass, NGINX seguía registrando timeouts cuando los workers procesaban cargas pesadas. Razón: el bypass usa `@app.middleware("http")`, que aún forma parte de la cadena ASGI de Starlette y depende de que el event loop tenga oportunidad de despachar la request entrante. Cuando un task del worker (LLM call de 15-25s, gather de 250 paquetes Kosmo, gather de N journeys Routal) acapara el loop entre awaits significativos, NGINX nunca llega a recibir la respuesta a tiempo.
+
+**Fix (capa 4)**: insertar `await asyncio.sleep(0)` como puntos de cesión explícitos dentro de los bucles principales de los 3 workers. `asyncio.sleep(0)` no duerme; sólo cede control al scheduler una sola tick, permitiendo que la request `/health` pendiente sea servida.
+
+**Ubicaciones modificadas**:
+
+`/app/backend/ai_eval_worker.py`:
+- `_process_job`: yield al inicio de cada batch en el for-loop (`for batch_start in range(...)`).
+- `_evaluate_batch_with_retry`: yield entre marcar guías como Evaluando y lanzar tareas LLM; yield entre updates de progreso por guía.
+- `_cron_sweep`: yield cada 100 docs al iterar el cursor de journeys abiertas; yield entre rutas al encolar jobs.
+- `_kill_active_jobs_due_to_pause`: yield entre jobs en el async-for cursor.
+
+`/app/backend/kosmo_sync.py`:
+- `process_package`: yield después de cada update a `db.packages` para que el gather concurrente no monopolice el loop.
+- `_recount_and_update_journeys`: yield tras agotar el cursor de aggregation y antes de armar batch de updates.
+
+`/app/backend/workers/routal_sync_worker.py`:
+- `_sync_one`: yield antes de la llamada `sync_journey_from_routal` (puede demorar segundos por request HTTP+procesamiento).
+- `_tick`: yield tras materializar el cursor de journeys candidatas.
+
+**Verificación local**: `/health` responde en <5ms tras restart con workers activos (5ms / 0.6ms / 1.1ms consecutivos). Logs muestran los 3 workers arrancando con leader-election idempotente. Listo para validar en deploy de producción.
+
+
+
 ## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 3): /health bypass de middlewares
 
 **Síntoma persistente**: tras el fix de grace period y defer lifespan, el deploy SEGUÍA fallando con NGINX timeout en `/health`. Logs mostraban patrón confuso: `/api/system/errors/count` respondía 200 OK mientras `/health` timeout 10s consistentemente. Esto pasaba aunque pasara el grace period inicial.

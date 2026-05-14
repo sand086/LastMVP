@@ -29,6 +29,8 @@ async def _sync_one(db, journey, api_base, sem):
     """Sync a single journey under semaphore. Errors logged but not re-raised."""
     from services.routal_sync import sync_journey_from_routal
     async with sem:
+        # Yield al event loop antes de la llamada (puede demorar segundos)
+        await asyncio.sleep(0)
         try:
             summary = await sync_journey_from_routal(db, journey["id"], api_base)
             if summary.get("ok"):
@@ -114,6 +116,8 @@ async def _tick(db):
          "packages_total": 1, "packages_delivered": 1, "packages_failed": 1},
     ).sort("date", -1).limit(200)
     journeys = [j async for j in cursor]
+    # Yield antes del filtrado/gather
+    await asyncio.sleep(0)
     # Skip already-stable journeys (all packages resolved)
     candidates = []
     for j in journeys:
