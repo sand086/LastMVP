@@ -1,6 +1,50 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 2): grace period para AI Eval worker
+
+**Síntoma**: deploys a PROD seguían fallando con timeout `/health` en NGINX (mismo síntoma del fix anterior del lifespan), pero ahora con un patrón diferente: `/api/system/errors/count` SÍ respondía 200 OK, mientras que `/health` consistentemente timeout. Reproducido en preview: tras minutos de actividad del AI Eval worker, `/health` empezaba a colgarse 3+ segundos.
+
+**Root cause (capa 2 del bug del lifespan ya arreglado el 2026-05-14)**:
+
+El fix de `_deferred_startup` resolvió el lifespan inicial. Pero inmediatamente después del `Application startup complete`, el AI Eval worker:
+1. Hacía polling y encontraba jobs En_Cola.
+2. Descargaba 3 jobs simultáneamente (`max_routes_concurrent=3`).
+3. Lanzaba 3 LLM calls paralelas (cada una 15-25s con httpx + LiteLLM + descarga de imágenes Routal).
+4. El event loop se saturaba a tal grado que `/health` respondía >10s.
+5. NGINX (timeout 10s) marcaba el pod unhealthy.
+6. Sub-efecto: el `_heartbeat_loop` de leader-election no podía ejecutar en tiempo → leader perdía lease → el retry de otra replica se promovía → ambas replicas arrancaban workers → doble carga → loop infinito.
+
+Validación: en logs reales de preview se observó:
+- `[leader] lost lease for 'bg_tasks' — agendando retry` durante actividad LLM
+- LLM calls tardando 15-25s consistentemente
+- `/health` timeout 3s aún con CPU del pod en 0% (event loop bloqueado, no CPU)
+
+**Fix** (`/app/backend/ai_eval_worker.py`):
+
+Nuevo env var `AI_EVAL_STARTUP_GRACE_SECONDS` (default 60s). Aplicado al inicio de `_worker_loop` y `_cron_sweep`:
+
+```python
+if STARTUP_GRACE_SECONDS > 0:
+    logger.info(f"AI Eval worker grace period: sleeping {STARTUP_GRACE_SECONDS}s")
+    await asyncio.sleep(STARTUP_GRACE_SECONDS)
+    logger.info("AI Eval worker grace period elapsed — starting to poll jobs")
+```
+
+Durante 60s después del arranque, el worker no procesa jobs. El event loop queda libre para responder a probes de NGINX. Tras el grace period, el procesamiento normal arranca.
+
+**Verificación en preview**:
+- `Application startup complete` → inmediato
+- `AI Eval worker grace period: sleeping 60s before processing` ← visible en logs
+- **10/10 health checks consecutivos**: HTTP 200 en **2ms** durante el grace period
+- Tras 60s, workers empezaron a procesar normalmente sin afectar la salud del pod
+
+**Acción para PROD**: redeploy desde panel Emergent. Esta vez el pod arrancará con 60s de grace para pasar los probes, después procesará el backlog.
+
+**Trade-off aceptable**: el primer barrido de evaluación ocurre 60s más tarde que antes. Es invisible para el usuario (el cron normal corre cada 30 min). Ajustable vía `AI_EVAL_STARTUP_GRACE_SECONDS=0` si se quiere desactivar.
+
+
+
 ## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY: lifespan startup > timeout NGINX
 
 **Síntoma**: deploys a PROD fallaban con NGINX logueando timeouts cada 10s sobre `/health`:

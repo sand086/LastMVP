@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 RETRY_BACKOFF_BASE = int(os.environ.get("AI_EVAL_RETRY_BACKOFF_BASE", "1"))
 CRON_INTERVAL_MINUTES = int(os.environ.get("AI_EVAL_CRON_INTERVAL_MINUTES", "30"))
 WORKER_POLL_SECONDS = 10
+# Grace period antes de empezar a procesar jobs. Permite que el pod sea
+# marcado "ready" por k8s y empiece a recibir tráfico antes de saturar el
+# event loop con llamadas LLM concurrentes. Esto evita que NGINX timeout
+# el probe `/health` durante el arranque del pod.
+STARTUP_GRACE_SECONDS = int(os.environ.get("AI_EVAL_STARTUP_GRACE_SECONDS", "60"))
 # Backlog cutoff: el cron sweep SOLO encola packages con delivered_at o
 # created_at >= esta fecha, Y journey.status != "closed". Diseñado para
 # evitar gastar IA en backlog histórico que ya no aporta valor operacional.
@@ -494,6 +499,14 @@ async def _kill_active_jobs_due_to_pause(db, reason: str) -> int:
 async def _worker_loop(db: AsyncIOMotorDatabase):
     """Main worker loop — polls for queued jobs and processes them."""
     global _last_shadow_check_ts
+    # Grace period inicial: deja que el pod sea marcado ready por k8s antes
+    # de empezar a procesar jobs. Sin esto, el primer pollend tomaría 3 jobs
+    # → 3 LLM calls paralelas → event loop saturado → NGINX timeout /health
+    # → pod marcado unhealthy → deploy falla.
+    if STARTUP_GRACE_SECONDS > 0:
+        logger.info(f"AI Eval worker grace period: sleeping {STARTUP_GRACE_SECONDS}s before processing")
+        await asyncio.sleep(STARTUP_GRACE_SECONDS)
+        logger.info("AI Eval worker grace period elapsed — starting to poll jobs")
     ticks_since_recovery = 0
     was_paused = False
     while True:
@@ -566,9 +579,10 @@ async def _cron_sweep(db: AsyncIOMotorDatabase):
     backend el primer barrido ocurre en <1s en vez de esperar 30 min (lo que daba
     impresion de "worker muerto" cuando en realidad simplemente esperaba el sleep).
     """
-    # Pequeño delay inicial para que el bg loop principal y leader_election
-    # se asienten antes de ejecutar la primera consulta pesada.
-    await asyncio.sleep(15)
+    # Grace period: aliñado con _worker_loop. El cron sweep encola jobs;
+    # si arranca antes que el pod esté ready, satura el event loop antes
+    # de que NGINX pueda pasar el primer probe.
+    await asyncio.sleep(max(STARTUP_GRACE_SECONDS, 15))
     while True:
         try:
             # Find journeys with unevaluated terminal packages
