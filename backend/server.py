@@ -533,20 +533,40 @@ else:
     )
 
 
-# ─── CRITICAL: ultra-fast /health bypass (last middleware = outermost) ───
-# Este middleware intercepta /health y /api/health ANTES de cualquier otro
-# middleware (CORS, audit, security, rate-limit). Vital para el probe NGINX
-# de k8s: si el event loop está saturado por LLM calls / bg workers, los
-# probes timeout, el pod se marca unhealthy, deploy falla. Como FastAPI
-# aplica middlewares en orden REVERSO (último registrado = más externo),
-# este debe ser el ÚLTIMO add_middleware/@app.middleware del archivo.
-# Responde sin tocar DB ni event loop pesado.
-@app.middleware("http")
-async def _health_fast_bypass(request, call_next):
-    path = request.url.path
-    if path == "/health" or path == "/api/health":
-        return JSONResponse({"status": "ok"}, status_code=200)
-    return await call_next(request)
+# ─── CRITICAL: ultra-fast /health bypass (RAW ASGI middleware) ───
+# Capa 5 fix (2026-05-15): el @app.middleware("http") anterior usaba
+# BaseHTTPMiddleware internamente, que spawnea un task asyncio interno por
+# request y bufferea la respuesta via anyio MemoryObjectStream. Bajo carga
+# concurrente + HTTP/1.1 keepalive (cómo NGINX hace probes en k8s), esos
+# tasks internos se encolan detrás del event loop saturado por LLM calls,
+# y /health timeoutea. Issue conocido: encode/starlette#1438.
+#
+# Esta es una middleware ASGI RAW (no BaseHTTPMiddleware) que intercepta
+# /health y /api/health en la capa de transporte ASGI, ANTES de que
+# FastAPI/Starlette monten el request, ANTES de cualquier task interno.
+# Latencia sub-millisegundo aunque el event loop esté ocupado.
+class HealthFastBypass:
+    """Raw ASGI middleware — bypasses /health checks before FastAPI machinery."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") in ("/health", "/api/health"):
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"cache-control", b"no-store"),
+                ],
+            })
+            await send({"type": "http.response.body", "body": b'{"status":"ok"}'})
+            return
+        await self.app(scope, receive, send)
+
+
+# Registrado al FINAL = outermost = primer middleware en ejecutar.
+app.add_middleware(HealthFastBypass)
 
 # ==================== STARTUP / SHUTDOWN HELPERS ====================
 

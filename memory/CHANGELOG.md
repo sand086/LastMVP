@@ -1,6 +1,41 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-15 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 5): Raw ASGI middleware para /health
+
+**Síntoma persistente tras capa 4**: aunque los workers ahora ceden el event loop con `await asyncio.sleep(0)`, el deploy a producción seguía fallando con `upstream timed out` desde el NGINX sidecar del pod hacia `127.0.0.1:8001/health`. Observación clave en los logs:
+
+- `/health` HTTP/1.0 (probes de supervisor sin keepalive) → 200 OK consistente.
+- `/health` HTTP/1.1 (probes de NGINX sidecar con keepalive) → timeout cada 10–20s.
+- Resto de la API (`/api/journeys`, `/api/dashboard/...`, WebSockets) → 200 OK rápido durante el mismo intervalo.
+
+**Root cause real**: el `@app.middleware("http")` que usábamos para el bypass es azúcar sintáctico para `BaseHTTPMiddleware`, que internamente **spawnea un task asyncio interno por request** y bufferea la respuesta vía `anyio.MemoryObjectStream`. Bajo carga concurrente con HTTP/1.1 keepalive (cómo NGINX hace probes en k8s), esos tasks internos se encolan detrás del event loop ocupado con LLM calls. Issue conocido de Starlette: encode/starlette#1438. Por eso HTTP/1.0 (sin keepalive, conexión efímera) sí pasaba — cada call abría socket nuevo que iba directo a la accept queue del worker — mientras HTTP/1.1 (conexión persistente) se quedaba esperando que el task interno del middleware fuera schedule-ado.
+
+**Fix** (`/app/backend/server.py`): reemplazar el `@app.middleware("http")` por una clase **raw ASGI** (`HealthFastBypass`) registrada con `app.add_middleware(HealthFastBypass)`. La clase intercepta requests a `/health` y `/api/health` en la capa ASGI ANTES de que FastAPI/Starlette monten el `Request`, ANTES de cualquier task interno. Solo dos `await send()` calls — latencia sub-millisegundo independientemente del estado del event loop.
+
+```python
+class HealthFastBypass:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") in ("/health", "/api/health"):
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"cache-control", b"no-store")]})
+            await send({"type": "http.response.body", "body": b'{"status":"ok"}'})
+            return
+        await self.app(scope, receive, send)
+```
+
+**Verificación local**:
+- HTTP/1.1 con conexión nueva: 0.66–1.0ms.
+- HTTP/1.1 con keepalive (3 requests en misma conexión): 0.77ms cada uno, estables.
+- Workers arrancando limpios con leader-election idempotente + grace period 60s.
+- API normal (`/api/system/errors/count`) sigue respondiendo en 5ms.
+
+
+
 ## 2026-05-14 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 4): yields explícitos en workers
 
 **Síntoma persistente tras capa 3**: aunque `/health` evita los middlewares con bypass, NGINX seguía registrando timeouts cuando los workers procesaban cargas pesadas. Razón: el bypass usa `@app.middleware("http")`, que aún forma parte de la cadena ASGI de Starlette y depende de que el event loop tenga oportunidad de despachar la request entrante. Cuando un task del worker (LLM call de 15-25s, gather de 250 paquetes Kosmo, gather de N journeys Routal) acapara el loop entre awaits significativos, NGINX nunca llega a recibir la respuesta a tiempo.
