@@ -21,6 +21,12 @@ from kosmo_sync import start_periodic_sync, stop_periodic_sync, close_http_clien
 from ai_eval_worker import start_ai_eval_worker, stop_ai_eval_worker
 from workers.routal_selection_worker import start_selection_scheduler, stop_selection_scheduler
 from workers.routal_sync_worker import start_routal_sync_worker, stop_routal_sync_worker
+from workers.subprocess_manager import (
+    start_worker_subprocess,
+    stop_worker_subprocess,
+    is_worker_alive,
+    get_worker_pid,
+)
 from ws_manager import ws_manager
 
 from routes import (
@@ -77,11 +83,17 @@ async def lifespan(app: FastAPI):
     # ─── SHUTDOWN ───
     if not deferred_init_task.done():
         deferred_init_task.cancel()
+    _workers_mode = os.environ.get("WORKERS_MODE", "subprocess").strip().lower()
+    if _workers_mode == "subprocess":
+        # Stop the standalone subprocess (and its monitor).
+        await stop_worker_subprocess(grace_seconds=10)
     if is_leader("bg_tasks"):
-        stop_periodic_sync()
-        stop_ai_eval_worker()
-        stop_selection_scheduler()
-        stop_routal_sync_worker()
+        # Only stop inline workers if they were started inline (legacy mode).
+        if _workers_mode != "subprocess":
+            stop_periodic_sync()
+            stop_ai_eval_worker()
+            stop_selection_scheduler()
+            stop_routal_sync_worker()
         await release_leader(db, role="bg_tasks")
     await close_http_client()
     mongo_client.close()
@@ -107,34 +119,49 @@ async def _deferred_startup(app: FastAPI):
         except Exception as e:
             logger.warning(f"[client_config] bootstrap failed: {e}")
 
-        # Leader election: when multiple Uvicorn workers run, only ONE spawns
-        # background tasks (ai_eval_worker + kosmo_sync). Others skip.
-        # Single-worker deploys (current preview) always become leader.
-        # NOTA: si NO somos leader inicialmente (lock zombi de pod muerto), el
-        # módulo leader_election agenda un retry en background y nos promueve
-        # cuando el lock expira. El callback abajo se ejecuta tanto en el acquire
-        # inicial como en la promoción via retry, para que los workers arranquen
-        # sin importar cuál fue el camino.
-        from leader_election import register_on_leader_callback
-
-        def _start_bg_tasks():
-            logger.info(f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)")
-            start_periodic_sync(db)
-            start_ai_eval_worker(db)
-            start_selection_scheduler(db)
-            start_routal_sync_worker(db)
-
-        register_on_leader_callback("bg_tasks", _start_bg_tasks)
-
-        elected = await acquire_leader(db, role="bg_tasks")
-        if elected:
-            logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync")
-            _start_bg_tasks()
+        # ─── Workers startup ───────────────────────────────────────
+        # WORKERS_MODE=subprocess (default, capa 6): los workers corren en
+        # un proceso Python separado con su propio event loop, eliminando
+        # cualquier contención con el HTTP loop de FastAPI. Esto resuelve
+        # los timeouts de /health bajo carga pesada de LLM/sync.
+        #
+        # WORKERS_MODE=inline (legacy): mantiene el comportamiento previo
+        # de ejecutar los workers en el mismo event loop de uvicorn. Útil
+        # como fallback si el modo subprocess da problemas en producción.
+        _workers_mode = os.environ.get("WORKERS_MODE", "subprocess").strip().lower()
+        if _workers_mode == "subprocess":
+            logger.info("[bg] WORKERS_MODE=subprocess — spawning standalone worker process")
+            # No leader-election aquí: la maneja el propio subprocess.
+            start_worker_subprocess()
         else:
-            logger.info(
-                f"[bg] Worker {worker_id()} is FOLLOWER — bg tasks deferred. "
-                f"Will auto-start when leader lease expires (retry running in background)."
-            )
+            # Leader election: when multiple Uvicorn workers run, only ONE spawns
+            # background tasks (ai_eval_worker + kosmo_sync). Others skip.
+            # Single-worker deploys (current preview) always become leader.
+            # NOTA: si NO somos leader inicialmente (lock zombi de pod muerto), el
+            # módulo leader_election agenda un retry en background y nos promueve
+            # cuando el lock expira. El callback abajo se ejecuta tanto en el acquire
+            # inicial como en la promoción via retry, para que los workers arranquen
+            # sin importar cuál fue el camino.
+            from leader_election import register_on_leader_callback
+
+            def _start_bg_tasks():
+                logger.info(f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)")
+                start_periodic_sync(db)
+                start_ai_eval_worker(db)
+                start_selection_scheduler(db)
+                start_routal_sync_worker(db)
+
+            register_on_leader_callback("bg_tasks", _start_bg_tasks)
+
+            elected = await acquire_leader(db, role="bg_tasks")
+            if elected:
+                logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync (INLINE)")
+                _start_bg_tasks()
+            else:
+                logger.info(
+                    f"[bg] Worker {worker_id()} is FOLLOWER — bg tasks deferred. "
+                    f"Will auto-start when leader lease expires (retry running in background)."
+                )
         logger.info("[deferred-startup] complete")
     except asyncio.CancelledError:
         raise
@@ -484,6 +511,19 @@ async def health_alias():
 @app.get("/api-docs")
 async def redirect_api_docs():
     return RedirectResponse(url="/documentation", status_code=301)
+
+
+# ==================== WORKERS SUBPROCESS DIAGNOSTIC ====================
+@app.get("/api/admin/workers-process-status", include_in_schema=False)
+async def workers_process_status():
+    """Diagnostic endpoint — shows whether the standalone worker subprocess
+    is alive (capa 6 architecture). Returns mode + pid + alive bool."""
+    mode = os.environ.get("WORKERS_MODE", "subprocess").strip().lower()
+    return {
+        "mode": mode,
+        "alive": is_worker_alive() if mode == "subprocess" else None,
+        "pid": get_worker_pid() if mode == "subprocess" else None,
+    }
 
 # ==================== WEBSOCKET ENDPOINT ====================
 

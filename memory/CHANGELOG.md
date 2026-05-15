@@ -1,6 +1,53 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-15 — REFACTOR ARQUITECTÓNICO P0 (CAPA 6): Workers en proceso separado
+
+**Motivación**: tras capas 3 (middleware bypass), 4 (yields explícitos) y 5 (raw ASGI middleware), `/health` ya no timeoutea bajo carga normal. Pero la causa raíz subyacente — **workers compartiendo event loop con FastAPI** — permanecía. Bajo picos extremos (concurrencias altas, ráfagas LLM con timeouts de 30s+, sweeps masivos) las mitigaciones podían no ser suficientes. La solución definitiva es ejecutar los workers en un **proceso OS separado** con su propio event loop.
+
+**Diseño** (compatible con supervisor read-only del entorno Emergent):
+
+```
+┌─ Pod ────────────────────────────────────────────────────────┐
+│                                                              │
+│  ┌─ uvicorn (FastAPI, PID 1707) ─┐  spawn  ┌─ workers proc (PID 1735) ─────┐
+│  │ • HTTP API + WebSocket        │ ──────► │ • event loop dedicado          │
+│  │ • Event loop libre            │  monitor│ • leader-election bg_tasks      │
+│  │ • subprocess_manager monitor  │ ◄────── │ • ai_eval + kosmo + routal      │
+│  └───────────────────────────────┘  respawn│ • SIGTERM-aware                 │
+│                                            │ • PR_SET_PDEATHSIG=SIGTERM      │
+│                                            └─────────────────────────────────┘
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Archivos nuevos**:
+- `/app/backend/workers/standalone_runner.py` — entry point del proceso de workers. Crea su propio `AsyncIOMotorClient`, inicializa `init_encryption`, hace leader-election (`bg_tasks`), arranca `ai_eval_worker` + `kosmo_sync` + `routal_sync_worker` + `routal_selection_worker`, espera SIGTERM. En Linux registra `prctl(PR_SET_PDEATHSIG, SIGTERM)` para que si FastAPI muere por SIGKILL el subproceso muera también (zero zombies).
+- `/app/backend/workers/subprocess_manager.py` — `start_worker_subprocess()` / `stop_worker_subprocess()` / `is_worker_alive()` / `get_worker_pid()`. Spawn + monitor task con backoff exponencial (1s → 60s) ante crashes.
+
+**Archivos modificados**:
+- `/app/backend/server.py`:
+  - Import del `subprocess_manager`.
+  - `_deferred_startup` ahora respeta `WORKERS_MODE` (default: `subprocess`). Cuando es `subprocess`, NO arranca workers en el loop de FastAPI; spawnea el proceso aparte.
+  - Modo legacy `WORKERS_MODE=inline` preservado para fallback.
+  - Shutdown: SIGTERM al subprocess con grace de 10s, SIGKILL fallback.
+  - Nuevo endpoint `GET /api/admin/workers-process-status` → `{mode, alive, pid}`.
+
+**Verificación local**:
+- 2 procesos vivos tras boot: uvicorn (PID 1707, 26MB) + standalone_runner (PID 1735, 82MB).
+- `/health` HTTP/1.1 keepalive: **0.04ms** (sin variación entre 25 requests consecutivas en 5 conexiones distintas) — antes el bypass capa-5 daba 0.77ms, ahora la sobrecarga del BaseHTTPMiddleware ni siquiera aplica porque el subprocess no compite por el loop.
+- **Test de respawn**: `kill -9 $worker_pid` → monitor detecta exit, respawnea en <10s con nuevo PID. `/health` no afectado.
+- Logs del subprocess llevan prefijo `[worker-proc]` para distinguirlos del API.
+- Endpoint diagnóstico devuelve `{"mode":"subprocess","alive":true,"pid":1851}`.
+
+**Implicaciones operativas**:
+- ✅ Podemos volver a subir `AI_EVAL_MAX_ROUTES_CONCURRENT`, `KOSMO_SCRAPE_CONCURRENCY`, `ROUTAL_SYNC_MAX_CONCURRENT` sin riesgo de afectar `/health`.
+- ✅ Si el subprocess crashea (OOM, bug LLM, etc.), FastAPI sigue sirviendo y respawnea workers.
+- ✅ Si uvicorn crashea, los workers mueren con él (PR_SET_PDEATHSIG) — supervisor reinicia ambos.
+- ⚠️ Memoria adicional: ~80MB por el segundo proceso Python. Aceptable.
+- ⚠️ Para volver al modo legacy en producción: setear `WORKERS_MODE=inline` en `.env` del deploy.
+
+
+
 ## 2026-05-15 — FIX P0 BLOQUEADOR DE DEPLOY (CAPA 5): Raw ASGI middleware para /health
 
 **Síntoma persistente tras capa 4**: aunque los workers ahora ceden el event loop con `await asyncio.sleep(0)`, el deploy a producción seguía fallando con `upstream timed out` desde el NGINX sidecar del pod hacia `127.0.0.1:8001/health`. Observación clave en los logs:
