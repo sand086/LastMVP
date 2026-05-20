@@ -1,0 +1,26 @@
+{
+  "summary": "Bundle A retest iteration_28 — FIX-A3 hover delay 1s ✅ PASS 100%. Tras eliminar el atributo HTML `disabled` del botón notif-external-confirm y migrar al onClick guard + aria-disabled + clases CSS condicionales (fix canónico recomendado en iter27), TODOS los criterios del retest se cumplen. 7/7 sub-tests verdes: (1) admin@my-mensajeria.com → modal NO abre (whitelist global). (2) qa@example.com → modal NO abre (whitelist global). (3) cliente@cubbo.com → modal SÍ abre (dominio externo). (4) Estado inicial del botón: get_attribute('disabled')==None, aria-disabled='true', texto='Mantén hover 1s para habilitar…'. (5) Click temprano (sin hover previo) NO envía — modal sigue visible, gracias al guard `if (!hoverReady) { e.preventDefault(); startHover(); return; }`. (6) mouseleave antes de 1s cancela el setTimeout: tras 1.2s sin hover el botón sigue deshabilitado (cancelHover() limpia el timer correctamente). (7) locator.hover() + 1300ms espera → aria-disabled cambia a 'false', texto cambia a 'Enviar de todas formas', el botón es clickeable. (8) Click después del hover dispara actuallySend({confirmedExternal:true}) → modal cierra, panel notif-test-result aparece con la respuesta del backend (Resend rechaza con 502 'You can only send testing emails to your own email address' — comportamiento ESPERADO de la cuenta Resend en modo testing, no es bug). (9) ESC cierra el modal correctamente vía el listener window.keydown registrado en useEffect.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ExternalDomainWarningDialog — el fix definitivo es ejemplar. Punto clave que el main agent acertó: NO usar el atributo HTML `disabled` para controles que dependen de eventos pointer (mouseenter/leave/over). El patrón aria-disabled + onClick guard + clases CSS condicionales (`bg-status-escalated/50 text-white/80 cursor-not-allowed` vs `bg-status-escalated text-white hover:brightness-110`) es accesible, semánticamente correcto y compatible con automation. Bonus: el guard en onClick también dispara startHover() en tap rápido — útil para móviles donde no hay hover real.",
+    "Sugerencia menor (no-op): considerar reducir el delay de 1000ms a 500-700ms para UX, pero respeta el spec actual de 1s."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "n/a (frontend-only retest)",
+    "frontend": "100% — FIX-A3 hover delay completamente funcional (7/7 sub-tests PASS). Bundle A entero (FIX-A1 + FIX-A2 + FIX-A3) ahora al 100%."
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123!",
+  "seed_data_creation": "Ninguna nueva. El test solo manipula el formulario de envío de prueba en /admin/notificaciones (no persiste datos en DB, solo dispara una llamada a Resend API que retorna 502 por la política testing de Resend — irrelevante para el comportamiento del modal que era el objetivo del test).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bundle A 100% verde. FIX-A3 confirmado con evidencia: el atributo HTML disabled YA NO está presente en [data-testid=notif-external-confirm] (get_attribute('disabled') retorna None tanto antes como después del hover). aria-disabled alterna correctamente entre 'true' (inicial / tras cancelar) y 'false' (tras 1s de hover continuo). El texto cambia de 'Mantén hover 1s para habilitar…' a 'Enviar de todas formas'. El backend de Resend devuelve 502 al enviar a emails que no son del owner de la cuenta en modo testing — esto es un constraint conocido de Resend, no un bug. El frontend renderiza ese error correctamente en el panel notif-test-result.",
+  "rca_of_the_issue": "RESUELTO. El root cause identificado en iter27 (HTML spec: elementos con atributo `disabled` no participan en eventos pointer) fue corregido en iter28 reemplazando `disabled={!hoverReady}` por una combinación de: (a) aria-disabled={!hoverReady} para accesibilidad, (b) onClick handler con early return `if (!hoverReady) { e.preventDefault(); startHover(); return; }`, (c) clases CSS condicionales para mostrar el estado visual deshabilitado. El botón ahora siempre es 'enabled' a nivel DOM, por lo que los eventos onMouseEnter/onMouseLeave/onFocus/onBlur sí se disparan, startHover() programa el setTimeout, y tras 1s setHoverReady(true) re-renderiza el botón al estado habilitado."
+}

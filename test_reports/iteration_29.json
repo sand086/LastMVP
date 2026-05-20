@@ -1,0 +1,38 @@
+{
+  "summary": "Bundle B (R50) — Reglas Visibles. Backend pytest 10/10 PASS (proyección ticket R02/R03, proyección reclamo R28, RBAC admin/rules/explain solo root_dev, request-reopen 200/422, cache invalidation). Frontend Playwright 4/4 FIXes PASS (FIX-B1 badge R03, FIX-B2 banner terminal + modal reopen con minlength=10, FIX-B3 banner R28 conciliado, FIX-B4 layout inbox por defecto). 1 BUG CRÍTICO ENCONTRADO Y CORREGIDO en /app/frontend/src/pages/Reclamos.jsx: violación de Rules of Hooks (useRulesContext llamado después de early returns), bloqueaba la compilación del frontend entero con 'Compiled with problems'. Fix aplicado: mover useRulesContext(data?.projection) ANTES de los early returns. Tras el fix, el frontend compila limpio y todos los flujos verifican OK.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bundle_b_rules_projection.py",
+    "/app/test_reports/pytest/bundle_b_results.xml"
+  ],
+  "action_items": [
+    "Considerar añadir en seed/initial_schema un seed determinista de un ticket terminal + un ticket con motivo restricted=true + un reclamo conciliado, para que el flujo de QA manual sea más reproducible sin necesidad de manipular Mongo (hoy hay que insertar a mano).",
+    "Considerar agregar un guard tipo ESLint pre-commit en Reclamos.jsx para evitar regresiones del tipo 'hook after early return' — la regla react-hooks/rules-of-hooks ya estaba activa pero el bug llegó a producción."
+  ],
+  "critical_code_review_comments": [
+    "RuleProjectionService — diseño excelente: catálogo base + evaluators que sólo aportan overrides, composición en orden con first-disabled-wins, cache Mongo TTL adaptativo (3600s terminal, 60s activo). Performance traceada por log.warning >200ms y log.error >500ms. Sólo sugerencia: añadir un test de carga con 100 evaluaciones concurrentes del mismo ticket para validar comportamiento del cache miss simultáneo (thundering herd).",
+    "POST /api/agent/tickets/{id}/request-reopen — correcto el 422 cuando el ticket no es terminal, correcto el audit en timeline_events, correcto el exclude de _id. Sugerencia: idempotencia — si el mismo user ya tiene un reopen_request pendiente para el mismo ticket, podría devolverse el existente en lugar de crear duplicado.",
+    "useRulesContext — bien que NO sea realmente un React hook (no usa useState/useMemo), pero como su nombre empieza por 'use' ESLint aplica Rules of Hooks. El fix en Reclamos.jsx confirma que está bien implementado, sólo que su call site debía ser pre-early-return. En TicketDetail.jsx la llamada estaba antes de los returns correctamente.",
+    "RBAC explain — require_min_role('root_dev') vía middleware/rbac. Confirmado: admin (403), coordinator (403), agent (403), root_dev (200). Cumple política. Bonus: el endpoint bypassea cache, así que es seguro para diagnóstico en producción sin contaminar TTL.",
+    "evaluators/r02.py — TERMINAL_TICKET_STATUSES es un set, lookup O(1). TICKET_TERMINAL_TOOLTIPS i18n-ready. Sugerencia menor: extraer el catálogo de blocked_actions a constante de módulo para facilitar testing aislado."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Reclamos.jsx (FIX: Rules of Hooks — useRulesContext movido antes de early returns)",
+    "/app/backend/tests/test_bundle_b_rules_projection.py (CREATED — 10 tests Bundle B)"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 pytest)",
+    "frontend": "100% (FIX-B1 + FIX-B2 + FIX-B3 + FIX-B4 verificados con Playwright)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! · root@myexcellence.local / Admin123! · agent@myexcellence.local / Admin123!",
+  "seed_data_creation": "Tickets creados via Mongo direct upsert (idempotente, prefijo TEST_B_): (1) TEST_B_terminal_ticket_0001 status=delivered is_terminal=true → para R02/FIX-B2. (2) TEST_B_restricted_ticket_0002 status=in_progress motivo_id=db62ac91... (Detenido por autoridad, restricted=true) → para R03/FIX-B1. (3) TEST_B_cache_ticket_0003 status=in_progress motivo non-restricted → exclusivo para test de cache invalidation, evita pollute restricted_ticket_0002. El reclamo conciliado (id=a91334ca-bb0c-4502-b913-e80df617ea13) ya existía en seed previo.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bundle B 100% verde tras el fix de Rules of Hooks. El fix fue mínimo: mover una línea (useRulesContext) por encima de los early returns en Reclamos.jsx (línea 343 → línea 340 aprox). El frontend ahora compila limpio. Tests de regresión Bundle B en /app/backend/tests/test_bundle_b_rules_projection.py — re-ejecutar con `pytest /app/backend/tests/test_bundle_b_rules_projection.py -v`. Los tickets seed TEST_B_* son idempotentes — pueden re-ejecutarse sin limpiar. Para QA manual: login admin → /agente/TEST_B_terminal_ticket_0001 (banner+modal) y /agente/TEST_B_restricted_ticket_0002 (badge R03) y /reclamos/a91334ca-bb0c-4502-b913-e80df617ea13 (banner R28). Bundle A (iter28) sigue verde — no se tocó código de A.",
+  "rca_of_the_issue": "BUG ROOT CAUSE: /app/frontend/src/pages/Reclamos.jsx llamaba `useRulesContext(projection)` después de dos early returns (`if (error) return …; if (!data) return …;`). React Hooks deben llamarse en el mismo orden en cada render — si en un render el componente sale temprano por `!data` (loading), el hook nunca corre; en el siguiente render con data sí. ESLint react-hooks/rules-of-hooks lo detecta y CRA lo escala a compile-error, bloqueando TODA la app (incluyendo /login y /agente, que ni siquiera importan ese componente, porque webpack falla la build). FIX APLICADO: mover la llamada al hook ANTES de los early returns y consumir `data?.projection` (que es undefined inicialmente — useRulesContext lo maneja bien con `projection?.allowed_actions || []`). Tras el fix, el frontend compila, el badge R03 aparece, el banner R28 aparece, y todo el flujo funciona."
+}

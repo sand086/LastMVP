@@ -1,0 +1,35 @@
+{
+  "summary": "Bundle A retest iteration_27. FIX-A2 (descartar borrador) → PASS 100%: banner aparece con draft pre-poblado, click 'Descartar' abre confirmación inline con dos botones (data-testid=expediente-draft-discard-confirm + expediente-draft-discard-cancel), los botones originales [Continuar][Descartar] desaparecen durante confirm, click en 'Cancelar' vuelve al estado original con [Continuar][Descartar] visibles, click en 'Sí, descartar' (a) borra la clave de localStorage mye_reclamo_draft_{tenant}_{claim}_{user}, (b) oculta el banner, (c) resetea TODOS los inputs (monto, tipo_dano, declaración, evidencia) a los valores originales del servidor (12500/dano_total/declaración seed/vacío). FIX-A3 (hover delay 1s) → SIGUE FALLANDO: tras hover real de 1.3s sobre data-testid=notif-external-confirm el botón permanece disabled=true y el texto sigue siendo 'Mantén hover 1s para habilitar…'. La cancelación temprana del timer (mouseleave antes de 1s) SÍ funciona correctamente. Root cause identificado: el botón nace con disabled={!hoverReady} → como hoverReady arranca en false el atributo disabled del DOM es 'true' → Chromium NO dispara onMouseEnter/onMouseLeave en botones disabled. La migración useState→useRef no resuelve el problema porque los eventos nunca llegan al handler.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ExternalDomainWarningDialog (AdminNotifications.jsx:401-488)",
+        "issue": "BUG persistente tras iter26+iter27: hover delay 1s NUNCA habilita el botón 'Enviar de todas formas'. Verificado con locator.hover() y page.mouse.move() (1.3s y 1.5s de espera) — disabled siempre true, texto siempre 'Mantén hover 1s para habilitar…'. Root cause real (NO es el useState vs useRef): el botón se renderiza con el atributo HTML disabled={!hoverReady}. Como hoverReady inicia en false, el botón nace con disabled=true. En Chromium (y la mayoría de navegadores), un botón <button disabled> NO dispara los eventos pointer/mouse — incluidos onMouseEnter, onMouseLeave, onMouseOver. Por lo tanto startHover() jamás se ejecuta, el setTimeout jamás se programa, y hoverReady jamás cambia. Es una trampa circular. CANCEL del timer sí funciona porque ese path no requiere que el handler se haya disparado (devuelve disabled=true que es el estado correcto inicial — coincidencia). Fix recomendado: NO usar el atributo `disabled` para el gating del anti-click. Renderizar el botón siempre 'enabled' a nivel DOM (sin atributo disabled), aplicar estilo visual deshabilitado vía clases CSS (opacity-50, cursor-not-allowed) y hacer guard en el onClick handler: `onClick={() => { if (!hoverReady) return; onConfirm(); }}`. Alternativa: envolver el botón en un <span> con onMouseEnter/onMouseLeave (el span nunca está disabled). Mantener aria-disabled={!hoverReady} para accesibilidad.",
+        "selector": "[data-testid=notif-external-confirm]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "FIX-A3 v2: reescribir ExternalDomainWarningDialog para NO usar atributo `disabled` del botón. Opciones: (A) onClick guard con check de hoverReady + estilo CSS aparente deshabilitado, o (B) wrapper <span onMouseEnter/onMouseLeave> alrededor del button. Mantener data-testid actual y los textos. Test de validación: locator.hover() sobre el botón por 1.2s debe cambiar texto a 'Enviar de todas formas' y permitir click."
+  ],
+  "critical_code_review_comments": [
+    "ExternalDomainWarningDialog — la lógica useRef es correcta pero IRRELEVANTE: los handlers onMouseEnter/onMouseLeave nunca se invocan porque el botón está disabled en el DOM. Este es un sutile gotcha de HTML que debe documentarse. Fix recomendado prioriza onClick guard (más simple y accesible).",
+    "ExpedienteEditor.discardDraft — implementación impecable: clearDraft + reset de 4 inputs a los valores initial* capturados del claim + setDiscardConfirm(false). La confirmación inline en lugar de window.confirm es ideal para automation (Playwright no bloquea con dialogs nativos). Buen uso del useMemo para draftScope y del useState lazy initializer para pendingDraft."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "n/a (frontend-only retest)",
+    "frontend": "FIX-A2 100% PASS · FIX-A3 ~33% (cancel timer OK, hover enable BUG persiste)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! (tenant 88633ddb-cd75-4f96-95aa-dfad4eb4cd15, user_id a1282eac-a02c-4449-ab72-cfa2a63bf941)",
+  "seed_data_creation": "Ninguna nueva. Reusé reclamo 1a25a9ec-0f0a-4a03-b401-4770ff7e2cb7 (estado expediente_en_armado) y pre-poblé localStorage con clave mye_reclamo_draft_88633ddb...cd15_1a25a9ec...4770ff7e2cb7_a1282eac...3bf941.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Solo queda FIX-A3 por arreglar. La pista real para la corrección: cuando un <button> tiene atributo disabled, los eventos pointer (mouseenter/leave/over/out/move) NO se disparan en Chrome/Edge/Firefox. Por eso ningún hover (sintético via Playwright o real con mouse) puede iniciar el timer. Reproducción 100% determinística: ir a /admin/notificaciones, escribir cliente@gmail.com, click Enviar prueba, hacer locator.hover() sobre [data-testid=notif-external-confirm] por 1500ms, leer is_disabled() y inner_text() — siempre disabled=true y texto 'Mantén hover 1s…'. Quitar el atributo disabled del DOM y hacer el guard en el onClick handler es la corrección canónica.",
+  "rca_of_the_issue": "BUG FIX-A3: el HTML spec define que elementos form-control con atributo `disabled` no participan en eventos de entrada del usuario. Concretamente WHATWG HTML §8.1 'Disabled form controls do not generate or fire events related to user interaction including pointer events.' React respeta esto: cuando `disabled={true}`, React renderiza `disabled` en el DOM y el browser swallow-ea mouseenter/leave. Como ExternalDomainWarningDialog usa disabled={!hoverReady} y hoverReady comienza en false, el botón está disabled en el DOM desde el mount → onMouseEnter jamás dispara → startHover() jamás se llama → setTimeout jamás se programa → hoverReady jamás vuelve true → el botón está atrapado en disabled para siempre. Fix definitivo: eliminar atributo `disabled`, dejar el botón siempre clickable en el DOM, hacer el guard en el handler onClick (return early si !hoverReady), mostrar el estado visual con clases CSS condicionales (`className={hoverReady ? 'bg-status-escalated text-white' : 'bg-status-escalated/50 text-white/70 cursor-not-allowed'}`), y agregar `aria-disabled={!hoverReady}` para tecnologías asistivas."
+}

@@ -1,0 +1,44 @@
+{
+  "summary": "PROMPT 11.6 (Captura de evidencia con Leaflet/OpenStreetMap) validated end-to-end. 8/8 unit tests in test_evidences.py pass + 1 new cross-tenant isolation test added and passing. Live API e2e against the public ingress confirms upload/list/serve/delete + RBAC + bad-mime rejection. Frontend Playwright walkthrough on the seeded ticket exercises the full flow: EvidenceCard render -> modal open -> Leaflet map init (8 OSM tiles, NO 'already initialized' StrictMode error) -> click drops pin -> file input + image preview -> upload -> thumbnail via authenticated fetch -> admin delete. Zero console/page errors observed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_evidences.py",
+    "/app/tests/test_evidences_cross_tenant.py",
+    "/app/test_reports/pytest/iteration5_evidences.xml",
+    "/app/test_reports/pytest/iteration5_evidences_xtenant.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "models/evidence.py: EvidenceMeta XOR rule (ticket_id ^ claim_id) + lat/lng range validation done declaratively via Pydantic model_validator — clean and centralized. ALLOWED_MIME whitelist + MAX_BYTES=10MB enforced at the route level.",
+    "repositories/evidences.py: atomic write (tmp + rename) + per-tenant directory layout {EVIDENCE_ROOT}/{tenant}/{kind}/{owner}/{id}.{ext} is correct; safe_ext() guards against path traversal and exotic extensions; insert_one drops _id before returning.",
+    "routes/evidences.py: tenant scoping is done correctly via repo(tenant_id=user.tenant_id). Cross-tenant isolation verified — list returns 0 items, /file returns 404, DELETE returns 404 for non-owner tenant. file_path is always stripped before serializing to clients (verified on both upload response and list response).",
+    "routes/evidences.py L153: ROLE_RANK comparison for admin+ delete bypass works as expected — uploader OR role>=admin can delete.",
+    "routes/evidences.py L157-163: expediente.evidencia_ids guard prevents accidental deletion of evidence currently attached to an active claim — returns 409 TERMINAL_STATE (verified).",
+    "EvidenceCard.jsx: imperative L.map() pattern with mapRef guard (`if (!containerRef.current || mapRef.current) return;`) plus cleanup via m.remove() correctly survives React 18 StrictMode double-mount — confirmed live in the preview, no 'Map container is already initialized' runtime errors. Tile loading from tile.openstreetmap.org works (8 tiles loaded in viewport).",
+    "EvidenceCard.jsx: thumbnails are loaded with authenticated fetch + URL.createObjectURL pattern — correct for a Bearer-protected /file endpoint. Object URLs are revoked on unmount.",
+    "EvidenceCard.jsx: disabled=true correctly hides both 'Agregar evidencia' button (L114) and per-item 'Borrar' (L197), implementing the terminal-state UX rule. RBAC for admin-vs-uploader delete is enforced server-side; UI shows the trash icon to everyone, which is fine because the API is the source of truth.",
+    "Minor (cosmetic): EvidenceCard.jsx EvidenceItem useEffect cleanup uses `if (src) URL.revokeObjectURL(src)` referencing a stale closure of `src` — works in practice because state setter triggers re-run, but a ref-based cleanup would be slightly more robust. Not a functional bug.",
+    "Minor (informational): upload endpoint returns `tenant_id` in the public response; not strictly a leak (caller already knows their own tenant) but consider stripping it like file_path for symmetry."
+  ],
+  "updated_files": [
+    "/app/tests/test_evidences_cross_tenant.py (new — explicit cross-tenant isolation regression test)"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 test_evidences.py + 1/1 test_evidences_cross_tenant.py + live ingress upload/list/serve/delete/422-bad-mime/401-no-auth all green)",
+    "frontend": "100% (EvidenceCard renders in TicketDetail; modal Leaflet map initializes with OSM tiles; pin-drop, file preview, upload, thumbnail, admin delete all functional; zero console/page errors)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! — used for both API and Playwright. Seeded ticket id=02140f8e-4745-4809-a3df-1e0668b6a96c was used as the upload anchor.",
+  "seed_data_creation": "None persisted. All Playwright-uploaded evidences were deleted at the end of the test. Unit test fixtures use ephemeral tenants and monkeypatch EVIDENCE_ROOT to tmp_path.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "PROMPT 11.6 fully green. The new /app/tests/test_evidences_cross_tenant.py is a regression harness — keep it, it validates that tenant B sees neither list/items, nor /file (404), nor DELETE (404) for tenant A's evidence. Live ingress is healthy; uploads land at /app/data/evidences/{tenant}/ticket|claim/{id}/{eid}.{ext}. The Leaflet imperative pattern in EvidenceCard.jsx is StrictMode-proof (verified live, 0 'already initialized' errors). MIME whitelist + 10 MB size guard enforced server-side. Future testing agents can reuse the seeded ticket 02140f8e... or call test_evidences.py::ev_setup pattern.",
+  "rca of the issue": "N/A — no bugs surfaced. PROMPT 11.6 implementation matches spec on all 14 acceptance items in the request."
+}

@@ -1,0 +1,37 @@
+{
+  "summary": "Bundle E (Onboarding Admin Wizard + SaaSHierarchyBreadcrumb + Tour fix) fully validated. Backend: 12 ASGI tests + 11 new E2E public-URL tests all PASS. Frontend: breadcrumb visible on all 7 admin pages, wizard opens via __myeOpenOnboarding(), non-blocking confirmed (pointer-events:auto, no fullscreen backdrop), close button works with R51 confirmation, tour fix verified (no target:'body' in code).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin/cae", "issues": ["React hydration warning in console: '<span> cannot be a child of <option>' — minor, doesn't affect functionality. Likely a <span> nested inside a <select><option> somewhere on AdminCAEHome."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_iter33_bundle_e_onboarding.py",
+    "/app/tests/test_iter34_bundle_e_e2e_public.py",
+    "/app/test_reports/pytest/iter34_e2e_public.xml"
+  ],
+  "action_items": [
+    "(Optional) Fix the hydration warning on /admin/cae: locate <option> containing <span> child and flatten to plain text."
+  ],
+  "critical_code_review_comments": [
+    "admin_onboarding.py uses get_db() inside helpers but the repo also uses tenant_id from request.state.user — looks clean, multi-tenant isolation enforced at repo + collection level.",
+    "OnboardingWizard.handleClose uses native window.confirm() — works for E2E but consider replacing with shadcn AlertDialog for consistency with rest of UI.",
+    "tours.js comments correctly reference the old anti-pattern (target: 'body'); current implementation uses data-tour-target attributes — verified clean."
+  ],
+  "updated_files": [
+    "/app/tests/test_iter34_bundle_e_e2e_public.py (new — 11 E2E tests against public URL)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "100% (all flows verified)"},
+  "test_credentials": "admin@myexcellence.local / Admin123! (admin); superadmin@myexcellence.local / Admin123!; root@myexcellence.local / Admin123!; agent@myexcellence.local / Admin123! — all confirmed working via /api/auth/login",
+  "seed_data_creation": "Test fixtures create ephemeral tenants/users via direct DB inserts for ASGI tests. E2E tests use existing seeded users (no extra seed data). Catalog seed via /api/admin/onboarding/seed-mx-catalog on tenant 'myexcellence' (already populated from previous runs, idempotent).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bundle E is solid. The wizard persists progress per user×tenant — admin & superadmin users in the seeded 'myexcellence' tenant already have advanced state (paso 6 de 6) from earlier smoke tests. To test step 5 (catalog mandatory banner) fresh, use POST /api/admin/onboarding/complete to reset OR delete admin_onboarding_progress doc for that user OR create a fresh tenant. Backend tenant_age_days is 30+ for 'myexcellence' so should_auto_open will be false in production sessions; use window.__myeOpenOnboarding() to force-open. Pytest config in /app/pytest.ini.",
+  "rca_of_the_issue": "N/A — no bugs found. Initial confusion: clicking close button when wizard at step>1 triggers window.confirm; Playwright must register a dialog handler to auto-accept (page.on('dialog', lambda d: d.accept())). This is correct R51 'guarded close' behavior, not a bug."
+}

@@ -1,0 +1,66 @@
+{
+  "summary": "PROMPT 13 (Módulo Reclamos) tested end-to-end. 64/64 pytest tests pass (9 nuevos en tests/test_claims.py + 55 previos sin regresiones). 8/8 e2e públicos via REACT_APP_BACKEND_URL pasan. Flujo completo manual via curl: promote → expediente patch (auto-advance) → invalid transition (409) → admin ticket detail con active_claim → desistir (terminal R28) → re-promote permitido tras terminal (R32). Frontend /reclamos: empty state, filtros (todos/promovido/expediente_en_armado/.../desistido), refresh, lista con rows clickeables, todo verde. Frontend /reclamos/{id}: state-machine strip de 9 estados, expediente editor (monto/tipo_dano/declaracion/evidencia_ids), eventos append-only visibles, botones de acción (transición + desistido). Frontend /admin/tickets/{id}: bloque 'Reclamo' muestra 'Hay un reclamo activo asociado' + id/estado/monto + 'Ver reclamo' cuando hay claim activo (verificado con coordinator). RBAC OK: agent puede listar/crear/transicionar reclamos; sólo coordinator+ puede /conciliar. R29 partial-unique-index funciona (segunda promoción mientras hay activo → 409 TERMINAL_STATE). R28 silencia mutaciones a terminal. R31 matriz bloquea saltos (promovido → conciliado → 409). R35 expediente incompleto → 422 con código INCOMPLETE_FILE. Webhook /api/reclamos/ingest/dictamen es público (no 401) y valida HMAC + payload. No se encontraron bugs bloqueantes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/reclamos/ingest/dictamen",
+        "issue": "Para mapear tracking_id → claim, el handler hace una primera lookup heurística sobre tickets con sort por created_at antes de la lookup correcta por guia. Esa primera consulta es código muerto (su resultado se sobrescribe inmediatamente). No afecta funcionalidad pero confunde y podría ocultar bugs futuros. Sugerencia: eliminar las líneas 247-250 de routes/claims.py."
+      },
+      {
+        "endpoint": "/api/reclamos/ingest/dictamen",
+        "issue": "Cuando el cliente no existe, devuelve AUTH_REQUIRED en lugar de RESOURCE_NOT_FOUND/VALIDATION_FAILED. Es intencional (R18) para no leakear existencia, pero es confuso para integración. Documentar en OpenAPI."
+      },
+      {
+        "endpoint": "/api/reclamos/{id}/enviar-carrier",
+        "issue": "Sólo es mock (sólo loguea y avanza el estado). El llamado HTTP real al carrier está diferido a PROMPT 20 — confirmado en el contexto del agente. Está claramente etiquetado en el código (`claim_sent_to_carrier_mock`). No es un bug, pero retest_needed para PROMPT 20."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/reclamos/{id} state-machine-strip",
+        "issues": ["No incluye visualmente la rama 'rechazado_carrier' ni 'desistido' en el flujo lineal (sólo muestra el camino feliz: promovido → expediente → enviado → dictamen → aprobado → en_conciliacion → conciliado). Es aceptable para MVP (los estados rechazo/desistido se ven en eventos), pero un usuario nuevo podría no entender que existen ramas alternativas. Sugerencia post-MVP: agregar pequeñas 'salidas' de la barra para rechazado/desistido."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_claims.py",
+    "/app/tests/test_claims_public.py",
+    "/app/test_reports/pytest/iteration2_all.xml",
+    "/app/test_reports/pytest/iteration2_claims.xml",
+    "/app/test_reports/pytest/iteration2_public.xml"
+  ],
+  "action_items": [
+    "(menor) Limpiar código muerto en routes/claims.py:247-250 (lookup `ticket = ...` antes del lookup por guia que se sobrescribe inmediatamente).",
+    "(rate-limit pendiente del iteration 1) Hacer rate-limiter ingress-aware con X-Forwarded-For — sigue sin aplicarse.",
+    "(post-MVP) state-machine-strip en /reclamos/{id} no muestra ramas rechazado_carrier/desistido — considerar visualización alternativa."
+  ],
+  "critical_code_review_comments": [
+    "R29 partial unique index sobre (tenant_id, ticket_id) where is_terminal=false: bien implementado en repositories/claims.py ensure_claim_indexes. Verificado en pytest test_promote_twice_blocked_by_unique_active.",
+    "R28 terminal protection: tanto en update_expediente como en transition_claim — refresca el claim después de cualquier mutación y revisa is_terminal. Coverage real verificado.",
+    "R31 ALLOWED_TRANSITIONS está hardcoded como source-of-truth en models/claim.py — bien centralizado. Auto-advance desde promovido → expediente_en_armado en update_expediente captura InvalidTransitionException silenciosamente lo cual es seguro pero podría ocultar regresiones; considerar log.warning.",
+    "R30 append-only de claim_events: ClaimEventRepository.record nunca hace update — verificado.",
+    "Standard envelope {success, data, meta, errors} consistente en todas las rutas, incluyendo en webhook ingest. Códigos HTTP correctos (201/200/202/404/409/422).",
+    "Promote dispara timeline_events 'promoted_to_claim' en el ticket origen — duplicación necesaria por R36 (timeline ticket es source-of-truth). Bien hecho.",
+    "Frontend Reclamos.jsx (562 líneas): estructurado en sub-componentes (StateMachineStrip, ExpedienteEditor, ConciliateForm). Mantiene <700 líneas pero está cerca del umbral; si crece más, conviene split en archivos separados.",
+    "Frontend usa fetch directo con Authorization Bearer manualmente armado en cada request en lugar de un cliente API centralizado. Si hay rotación de token o refresh en el futuro, será molesto. No bloqueante.",
+    "Auth: agent no puede listar /api/admin/tickets (correcto, RBAC). Cuando el frontend de PromoteClaimModal abre desde /admin/tickets/{id}, sólo coordinator+ verá la página. Verificar que el flujo de 'Promover a reclamo' del prompt original esté pensado para coordinator y no agent."
+  ],
+  "updated_files": [
+    "/app/tests/test_claims_public.py (nuevo — 8 tests e2e via REACT_APP_BACKEND_URL)"
+  ],
+  "success_rate": {
+    "backend": "100% (64/64 pytest + 8/8 e2e public + curl flow promote→patch→transition→desist→re-promote→admin-ticket-detail todo OK)",
+    "frontend": "100% (Reclamos lista/empty/filtros/refresh, detalle con state-machine/expediente/eventos/acciones, AdminTickets active_claim block con 'Ver reclamo')"
+  },
+  "test_credentials": "agent@myexcellence.local / Admin123! (agent), coord@myexcellence.local / Admin123! (coordinator) — ambos verificados",
+  "seed_data_creation": "Creé y limpié temporalmente 1 ticket TEST_RECLAMOS_* + 2 claims + 2 timeline events para el flow e2e en producción. Todo limpiado al finalizar — la BD queda como estaba.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend testids del módulo Reclamos: reclamos-page, reclamos-empty, reclamos-filter-{estado|all}, reclamos-refresh, reclamos-row-{id}, reclamo-detail-page, reclamo-estado, reclamo-ticket-link, reclamo-indemnization, reclamo-eventos, reclamo-action-error, reclamo-send-carrier, reclamo-transition-{target}, state-machine-strip, expediente-form, exp-monto, exp-tipo-dano, exp-declaracion, exp-evidencia, exp-error, exp-save, conciliate-form, conc-monto, conc-notas, conc-submit. Para testear E2E: insertar ticket en mongo (status=resolved), POST /api/tickets/{id}/promote-to-claim como agent, luego operar reclamo. AdminTickets bloquea agent (403) — hay que usar coordinator+ para ver el bloque 'active_claim' y el botón 'Promover a reclamo'/'Ver reclamo'. enviar-carrier sólo loguea (mock); HTTP real diferido a PROMPT 20. POST /api/admin/ingest/pull NO crea webhook events; usar /api/guias/ingest/webhook con HMAC para crear tickets de verdad.",
+  "rca of the issue": "Sin issues reproducibles en este iteration. Todos los flujos de PROMPT 13 funcionan según especificación."
+}

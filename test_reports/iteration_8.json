@@ -1,0 +1,51 @@
+{
+  "summary": "PROMPT 26 V2 — AI Configuration module validated end-to-end. Backend: 17/17 AI tests pass (TestPIIMasking 8/8, TestAICostCap 3/3, TestAIOptOut 2/2, TestAIOptInExplicit 2/2, TestR42Draft 2/2). Regression suites individually green (multi_tenant_isolation 4/4, terminal_state, workflow_and_cae, claims, sprint_a_claims). API endpoints validated against public ingress: features/brackets/client-config/consumption/invocation-log all return correct codes, RBAC enforced (admin POST features → 403, superadmin → 422 dup), R39 opt-in 422 sin firma, cliente inexistente 404. R38 grep retorna VACÍO (sin imports LLM fuera de services/ai/). Frontend /admin/ai 4 tabs presentes con data-testid; 3 features + 4 brackets renderizadas; ai-features-create oculto para admin, visible para superadmin (RBAC UI ok); diálogo Configurar abre con bracket-select, features-checkboxes y checkbox is_active funcionales.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "tests/test_sprint_a_claims.py::test_promote_pushes_inbox_to_coordinator", "issue": "Flaky — Mongo AutoReconnect cuando se corre en bulk con otras suites (>30 tests). Pasa 100% en ejecución individual. Pre-existing por single-mongo localhost — documented in agent_to_agent_context_note."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AdminAI ClientConfigDialog", "issue": "El input para opt_in_signature no tiene data-testid='ai-client-opt-in-signature' y el <select> de bracket no tiene data-testid='ai-client-bracket-select'. Los campos funcionan visualmente pero los testids esperados por la review request no están presentes (sólo ai-client-is-active está). Bloquea automatización del flow opt-in/opt-out por testid.", "selector": "[data-testid='ai-client-opt-in-signature'], [data-testid='ai-client-bracket-select']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AdminAI Brackets tab", "issues": ["React hydration warning: <span> dentro de <option> en el bracket-select del diálogo (proviene de la instrumentación x-source-var de E1, no del código del developer). Cosmético, no rompe funcionalidad."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_ai_v2.py",
+    "/app/test_reports/pytest/iteration8_ai_v2.xml",
+    "/app/test_reports/pytest/iteration8_regressions.xml"
+  ],
+  "action_items": [
+    "(Opcional / nice-to-have) Agregar data-testid='ai-client-opt-in-signature' al input de firma y data-testid='ai-client-bracket-select' al <select> de bracket dentro de ClientConfigDialog para habilitar pruebas E2E del flow opt-in/opt-out por testid (los campos ya funcionan, sólo falta el atributo).",
+    "(Opcional) Reemplazar el bracket <select> nativo por un componente que no envuelva <span> dentro de <option> — o eliminar la instrumentación x-source-var en options para silenciar el hydration warning."
+  ],
+  "critical_code_review_comments": [
+    "services/ai/gateway.py L209-262 _check_ready_to_invoke: lógica R39+R40 limpia, validación pre-call evita gasto API cuando consumo+avg supera cap. R40 también respeta monthly_cap_override_usd cuando es ≤ bracket cap (L244-246).",
+    "services/ai/gateway.py L411-412: R42 — destinatario in (client_final, both) → draft=true. Correcto.",
+    "services/ai/gateway.py L367-377: unmask SOLO se aplica si destinatario=='agent_internal'. client_final mantiene tokens (para que el agent no copie/pegue PII al draft sin revisar). Correcto.",
+    "services/ai/pii_masker.py: orden de regex correcto (CARD antes que PHONE para no comer 16 dígitos contiguos; ADDR antes que PHONE para no comer números de calle). RX_CARD usa lookbehind (?<!\\+) para evitar matches de teléfonos +5215512345678. test_email_phone_address_basic verifica esto y pasa.",
+    "routes/ai.py L229-237: PUT client-config valida is_active=true sin opt_in_signature → 422 con field='opt_in_signature'. Correcto.",
+    "routes/ai.py L220-226: valida que el cliente exista en el tenant antes de upsertear → 404 si no. Cumple P0.6.",
+    "routes/ai.py L100: _SUPER_RBAC=require_role('root_dev','superadmin') aplicado a POST/PATCH/DELETE de features y POST/PATCH brackets → admin recibe 403. Verificado contra public ingress.",
+    "routes/ai.py L262-274: opt-out endpoint ESCRIBE en ai_invocation_log con status='opt_out_executed'. Cumple P0.10.",
+    "seeds/ai_catalog.py: idempotente — confirmado por presencia consistente de 3 features + 4 brackets sembrados, ordenados por monthly_fee_usd asc en el endpoint.",
+    "Verificación manual de R38 grep: `grep -rn 'from emergentintegrations|from anthropic|from openai' /app/backend/ --include='*.py' | grep -v 'services/ai/'` → VACÍO. Sólo gateway.py:111 importa LlmChat. Cumple R38.",
+    "Verificación manual R41 (gateway.py:_build_prompt L153-205): cada uno de los 3 features tiene instrucción explícita 'No infieras género/edad/raza/nacionalidad/atributos demográficos'. La rama genérica también incluye 'No infieras atributos discriminatorios'. Cumple R41."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (17/17 AI tests + 4/4 multi-tenant + workflow/claims/sprint-a green individualmente; 1 flaky en bulk documentado)",
+    "frontend": "90% (4/4 tabs presentes, 3 features + 4 brackets visibles, RBAC UI correcto admin vs superadmin; 2 testids faltantes en el diálogo de opt-in bloquean E2E completo del flow)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! (admin) · superadmin@myexcellence.local / Admin123! (superadmin) · root@myexcellence.local / Admin123! (root_dev)",
+  "seed_data_creation": "Ninguno. seeds/ai_catalog.py se ejecuta en startup y es idempotente — no se creó data adicional desde testing.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Los 17 tests de tests/test_ai_v2.py corren en 1.32s con DB local. Para evitar flakiness Mongo AutoReconnect, NO correr tests/test_ai_v2.py junto a 30+ otros tests en bulk — usar pytest tests/test_ai_v2.py aislado o por clase. R38 grep y R41 inspección de gateway.py son validaciones manuales — no hay test automatizado para ellas todavía (oportunidad: agregar test_ai_grep_no_external_imports.py). Frontend Playwright: el diálogo ClientConfigDialog rinde un <select> nativo para bracket (tiene hydration warning cosmético), checkbox 'Activar IA' (data-testid='ai-client-is-active'), pero falta data-testid en el input de firma y en el select de bracket — automatización E2E del flow opt-in completo está bloqueada hasta agregar esos testids.",
+  "rca_of_the_issue": "N/A — no se encontró ningún bug funcional. El único hallazgo accionable es ausencia de 2 data-testid en ClientConfigDialog (cosmético/testabilidad)."
+}

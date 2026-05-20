@@ -1,0 +1,51 @@
+{
+  "summary": "Iter26 Bundle A — Backend 13/13 pytest verde (test_iter26_bundle_a_bulk_undo.py 7/7 + test_iter26_bundle_a_notif_external_domain.py 6/6). Regresión completa: 464 passed, 2 skipped en /app/tests (excluyendo live smoke + ai_load). FRONTEND: FIX-A1 PASS al 100% — modal bulk-typed-confirm-dialog abre con >=10 selecciones, submit deshabilitado sin texto y con 'cerrar' lowercase (case-sensitive OK), ESC cancela, click outside NO cierra, submit habilita con 'CERRAR', toast 'Deshacer' aparece tras confirmar (13 tickets cerrados visibles). FIX-A2 PARCIAL — autosave funciona perfecto (clave correcta `mye_reclamo_draft_{tenant}_{claim}_{user}` con 3 segmentos UUID, contenido persiste con saved_at ISO), banner aparece en reload, Continuar carga valores correctamente. PERO 'Descartar' NO limpia banner ni localStorage (BUG). FIX-A3 PARCIAL — whitelist correcto (example.com, my-mensajeria.com NO disparan modal), modal externo abre para gmail.com con anti-click visible y ESC cancela, PERO el hover delay de 1s NO se activa: tras 1200ms de hover real el botón sigue disabled con texto 'Mantén hover 1s para habilitar…' (BUG). Backend smoke directo OK: POST /api/admin/tickets/bulk sin typed_confirmation con 10 ids retorna 422 con field=typed_confirmation; POST /bulk-undo con tx_id inválido retorna 404 RESOURCE_NOT_FOUND.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ExternalDomainWarningDialog (AdminNotifications.jsx:401-419)",
+        "issue": "Anti-click-reflejo de 1 segundo NO funciona. Tras hover real de >1.2s sobre el botón 'Enviar de todas formas' permanece disabled y el texto sigue siendo 'Mantén hover 1s para habilitar…'. Probado con btn.hover() y con mouse.move() — mismo resultado. Probable causa: stale closure en setHoverTimer/hoverTimer state, o que startHover se re-llama tras cada re-render abortando el timer. La función `startHover` usa `setHoverTimer(t)` que causa re-render → el siguiente render no re-llama startHover (mouse aún hovering, no es un nuevo mouseenter) → el setTimeout original sí debería disparar. Sospecha: el useState de hoverTimer puede estar cancelándose por el React strict mode (doble mount en dev) o el handler está limpiando por accidente. Recomendado: usar useRef en lugar de useState para hoverTimer, y verificar que el flag hoverReady efectivamente se setea con setTimeout sin depender del state previo.",
+        "selector": "[data-testid=notif-external-confirm]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "ExpedienteEditor Descartar (Reclamos.jsx ~line 689)",
+        "issue": "Click en 'Descartar' (data-testid=expediente-draft-discard) NO hace desaparecer el banner ni limpia la clave de localStorage. Tras click, el banner sigue visible y la key `mye_reclamo_draft_{tenant}_{claim}_{user}` permanece. Sospecha: el handler de Descartar no llama setShowBanner(false) o el useReclamoDraft debounce (5s) re-escribe inmediatamente el draft con el value actual del form. Recomendado: en discard handler, además de clearDraft(), resetear el form al estado vacío inicial (o al servidor) y/o pausar el autosave durante un tick para que no se reescriba.",
+        "selector": "[data-testid=expediente-draft-discard]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_iter26_bundle_a_bulk_undo.py",
+    "/app/tests/test_iter26_bundle_a_notif_external_domain.py",
+    "/app/test_reports/pytest/iteration26.xml"
+  ],
+  "action_items": [
+    "FIX-A3: corregir hover delay 1s en ExternalDomainWarningDialog — migrar hoverTimer a useRef y validar que setHoverReady(true) se dispara después de 1000ms de hover continuo. Test manual: abrir modal con email externo y mantener mouse sobre 'Enviar de todas formas' por >1s; debe habilitarse y cambiar texto.",
+    "FIX-A2: corregir handler de 'Descartar' — debe limpiar localStorage Y resetear los inputs del form Y ocultar el banner. Verificar que el debounce de useReclamoDraft no re-escriba el draft inmediatamente después del discard (posible solución: marcar `enabled=false` temporalmente o resetear value a estado inicial)."
+  ],
+  "critical_code_review_comments": [
+    "useReclamoDraft.js — Diseño sólido: clave incluye tenant_id+claim_id+user_id (evita cross-tenant leak), TTL 24h con cleanup silencioso, debounce 5s con clearTimeout en cleanup. Pero el hook solo ofrece `flush()` y no `discard()`, dejando al consumidor la responsabilidad de coordinar clearDraft + reset de form + pausar autosave. Recomendado exponer un `discard()` que: (1) clearDraft, (2) setea un flag interno paused=true por 100ms para evitar que el próximo cambio de value re-persista. Esto haría idempotente la operación.",
+    "ExternalDomainWarningDialog — hoverTimer en useState es un anti-patrón para timers en React; debe ser useRef. Además startHover lee `hoverReady` del closure (snapshot del render) que puede estar stale tras re-render. La regla de oro: timers en refs, no en state.",
+    "BulkTypedConfirmDialog — implementación correcta: keyword 'CERRAR' case-sensitive verificado, click-outside ignorado (no onClick en overlay), ESC cancela vía useEffect/keydown. El toast usa sonner con action.label='Deshacer' duration=30000 (R02 OK).",
+    "Backend: routes/heatmap_bulk.py — typed_confirmation guard solo activo para count>=10 (correcto). bulk-undo respeta ownership (403 si user_id != txn.user_id) y R02 (skip si is_terminal=True tras el close). Transacción append-only en bulk_close_transactions con undo_window_end=now+30s, previous_states[] para revert exacto. Pytest confirma todos los casos edge."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (13/13 Bundle A + 464/464 regresión completa)",
+    "frontend": "FIX-A1 100% · FIX-A2 ~75% (autosave + banner + Continuar OK; Descartar BUG) · FIX-A3 ~70% (whitelist + modal + ESC OK; hover delay 1s BUG)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! (tenant 88633ddb-cd75-4f96-95aa-dfad4eb4cd15)",
+  "seed_data_creation": "Insertados 12 tickets in_progress en el tenant del admin para poder probar bulk-close >=10 (insertados directo en mongodb collection tickets con tracking_number TEST-BULK-NNN). Reclamo usado para FIX-A2: 1a25a9ec-0f0a-4a03-b401-4770ff7e2cb7 (estado expediente_en_armado, no-terminal).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bundle A · 2 bugs frontend pendientes (hover delay en notif-external-confirm + discard de borrador en Reclamos). El backend Bundle A está completo: 7 pytest bulk-undo + 6 pytest notif-external = 13/13 verde. FIX-A1 frontend es perfecto y puede usarse como referencia. Para retest FIX-A2: usar reclamo 1a25a9ec-0f0a-4a03-b401-4770ff7e2cb7. Para retest FIX-A3 hover: probar btn.hover() o page.mouse.move(box.x+w/2, box.y+h/2) por >1.2s — esperar disabled=false. La whitelist GET /api/admin/test-domains devuelve global_domains=['my-mensajeria.com','thinkme.com.mx','test','example.com','localhost'] (verificar timing de carga antes de probar modal externo, hay race condition si la página renderiza submit antes del fetch). Tickets de prueba bulk-close ya están todos closed=true tras tests, queda transacción de bulk_close_transactions con undone_at=null (su ventana de 30s ya expiró).",
+  "rca_of_the_issue": "BUG1 (hover delay): useState para timers en React es propenso a stale closures + el componente se re-renderiza al setHoverTimer, lo que puede provocar que React reuse el componente sin re-mount, dejando el setTimeout original colgado pero el state 'hoverTimer' apuntando a un valor stale; en producción con StrictMode, el efecto se monta dos veces y el primer setTimeout puede ser limpiado por la limpieza del primer mount. Fix: usar useRef para hoverTimer y solo usar hoverReady como state. BUG2 (discard): el handler de Descartar probablemente llama clearDraft() pero deja el form con los valores cargados; el useEffect debounce de useReclamoDraft dispara setTimeout(persist, 5000) y persiste el value otra vez (no inmediato, pero el banner sí debería ocultarse en la UI; debe haber otra causa para que el banner persista — quizás el state showBanner no se está reseteando). Necesita revisión del handler exacto."
+}

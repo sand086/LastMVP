@@ -1,0 +1,57 @@
+{
+  "summary": "PROMPT 11 (Notificaciones reales — Resend email + WhatsApp deeplink) validado end-to-end. 87/87 pytest pasan: 82 internos (incl. los 10 nuevos en tests/test_notifications.py) + 5 nuevos e2e públicos vía REACT_APP_BACKEND_URL en tests/test_notifications_public.py. Verificado envío REAL a Resend: POST /api/admin/notifications/test con to=jair.vargas.9108@gmail.com → ok=true id=d3ca65e6-3d3d-4df5-a3eb-5db6656d0176 (no mock). Verificado fallo claro de Resend en testing mode con destinatario no-owner → 502 con result.reason expuesto. RBAC OK: agent recibe 403 en /api/admin/notifications/{config,test}. WhatsApp deeplink valida E.164 + URL-encodes ampersand y guion largo correctamente. Frontend /admin/notificaciones: configuración, formulario de email, y constructor de deeplink WA todos operativos; agent es redirigido fuera de la ruta. AutomationService bloquea cuando no hay permission/motivo restricted/no solucion, y registra timeline_events 'automation_executed' al ejecutar.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/admin/notifications/test",
+        "issue": "Cuando Resend rechaza (testing mode → non-owner email), el backend devuelve HTTP 502 con el envelope estándar incluyendo data.result.reason. El comportamiento es correcto, pero documentar en OpenAPI que el 502 trae la razón en data.result.reason (no en errors[]) ayudaría a integraciones."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Enviar email de prueba a destinatario no-owner",
+        "issue": "Cuando la API devuelve 502, axios rechaza y el catch lee e.response.data.errors[0].message, pero el reason real de Resend vive en e.response.data.data.result.reason. El usuario ve 'Request failed with status code 502' en vez del mensaje claro de Resend (ej. 'You can only send testing emails to your own email address'). Funcionalmente operativo (se ve que falló) pero pierde el detalle útil para diagnosticar.",
+        "affected_selectors": ["[data-testid='notif-test-result']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_notifications.py",
+    "/app/tests/test_notifications_public.py",
+    "/app/test_reports/pytest/iteration3_notifications.xml",
+    "/app/test_reports/pytest/iteration3_notifications_public.xml",
+    "/app/test_reports/pytest/iteration3_all.xml"
+  ],
+  "action_items": [
+    "(menor UX) En AdminNotifications.jsx sendTest catch: leer también e.response?.data?.data?.result?.reason para mostrar el mensaje real de Resend cuando llega 502, en lugar del genérico 'Request failed with status code 502'. Sugerencia: setResult(e.response?.data?.data || { result: { ok:false, reason: e.message } }) y dejar que el bloque 'else' renderice result.result.reason como hoy.",
+    "(documentación) Anotar en OpenAPI/README que /api/admin/notifications/test devuelve 502 + data.result.reason cuando Resend falla (no en errors[])."
+  ],
+  "critical_code_review_comments": [
+    "notification_service.send_email: lee la API key con os.environ.get en cada llamada (`_key()`), permitiendo que tests con monkeypatch fuercen el modo mock. Buen diseño. Mockea con id 'mock_<timestamp>' y mock=True; el código que consume el resultado puede distinguir.",
+    "automation_service.AutomationService: separación limpia entre R03 (can_automate) y ejecución, single source of truth respetada. Registra timeline_events con payload neutro (no expone secrets). Buena cobertura para los reasons: no_solucion, missing_ops_contact_email, missing_ops_contact_wa, invalid_phone:..., resend_error:...",
+    "core/whatsapp.build_wa_deeplink: regex E.164 simplificado válido (^\\+?[1-9]\\d{6,14}$). URL-encode con quote(text, safe='') que escapa también el ampersand. Verificado en pytest y en UI live.",
+    "routes/admin_notifications.py: status_code=502 cuando Resend falla es semánticamente correcto (Bad Gateway = upstream). El cuerpo mantiene el envelope estándar, pero el reason real queda en data.result.reason (NO en errors[]) — esto hace que clientes que solo lean errors[] (como el actual AdminNotifications.jsx) pierdan la razón clara.",
+    "RBAC: require_min_role('admin') aplicado a ambos endpoints /config y /test. Verificado que agent recibe 403 tanto en API como en frontend (redirige fuera de /admin/notificaciones).",
+    "AdminNotifications.jsx (247 líneas): mantiene tamaño razonable, sub-componente Card extraído. data-testid bien aplicados a todos los interactivos. La validación E.164 client-side (^[1-9]\\d{6,14}$) coincide con el backend.",
+    "Resend SDK v2 envuelto en asyncio.to_thread — correcto para evitar bloquear el event loop con I/O síncrono.",
+    "RESEND_API_KEY está en .env (filesystem) — aceptable para MVP; producción debería migrar a Secret Manager. SENDER_EMAIL=onboarding@resend.dev es transitorio (testing mode); para producir a cualquier destinatario hay que verificar dominio en Resend."
+  ],
+  "updated_files": [
+    "/app/tests/test_notifications_public.py (nuevo — 5 tests e2e via REACT_APP_BACKEND_URL incluyendo envío real a owner)"
+  ],
+  "success_rate": {
+    "backend": "100% (82/82 pytest internos + 5/5 e2e públicos; 1 envío REAL confirmado a Resend con id real)",
+    "frontend": "100% (página carga, config visible, envío real exitoso, envío a non-owner muestra error, deeplink WA construido + URL-encoding correcto, validación phone inválido funciona, RBAC redirige al agent fuera de la ruta)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! (admin), agent@myexcellence.local / Admin123! (agent) — ambos verificados. RESEND owner para envío real: jair.vargas.9108@gmail.com.",
+  "seed_data_creation": "Ningún dato persistente creado en producción. El test e2e de envío real disparó 1 email transaccional REAL al owner (jair.vargas.9108@gmail.com) con id d3ca65e6-3d3d-4df5-a3eb-5db6656d0176 — esperado por el contexto del review_request.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "PROMPT 11 frontend testids confirmados funcionando: admin-notifications-page, notif-config, notif-reload-config, notif-test-to, notif-test-submit, notif-test-result, notif-wa-phone, notif-wa-msg, notif-wa-submit, notif-wa-url, notif-wa-open, notif-wa-err, notif-logout. El login devuelve access_token (NO 'token') en data.access_token — cualquier test e2e nuevo debe usar esa key. Resend está en testing mode: envíos a cualquier email distinto de jair.vargas.9108@gmail.com retornarán 502. Para validar /api/agent/tickets/{id}/automate end-to-end existe el patrón notif_setup en /app/tests/test_notifications.py que crea ticket+solucion+permission directo en mongo.",
+  "rca of the issue": "Sin issues bloqueantes. Único hallazgo (frontend) es de diagnóstico: en el caso 502 el componente sustituye el reason de Resend por el mensaje genérico de axios. Reproducción: login admin → /admin/notificaciones → Para=demo@example.com → Enviar → bloque rojo dice 'Request failed with status code 502'. Mitigación sugerida (1 línea): en sendTest catch, hacer setResult(e.response?.data?.data || { result: { ok:false, reason: e.message } }). El backend ya manda el reason correcto en data.result.reason; sólo falta consumirlo."
+}

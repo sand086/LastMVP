@@ -1,0 +1,36 @@
+{
+  "summary": "Iter25 — Plataforma carriers + 3-tier resolver (client > tenant > platform) + whitelist por tenant. Pytest 19/19 verde en /app/tests/test_iter25_platform_carriers.py (TestPlatformRepo 4 · TestResolverHierarchy 7 · TestRESTEndpoints 6 · TestCancelWithResolver 2). Regresion enfocada (iter22+23+24+25): 72/72 verde. Smoke live en preview /api/platform/carriers (nuevo /app/tests/test_iter25_live_smoke.py): 6/6 verde — sin auth 401, admin 403, root_dev list devuelve 2 carriers (routal, dhl), GET /routal devuelve api_key_set=true sin leak de secretos, extra=forbid rechaza project_ids con 422, grant on unknown carrier 404. Frontend smoke con root_dev en /admin/platform/carriers: tabla renderiza Routal + DHL con badges 'cifrada · activa', billing_mode 'platform_pays', whitelist 'abierto a todos' y boton Editar. Modal CarrierConfigDialog abre con API KEY 'ya configurado' (write-only), project_ids · 0 configurados (no required), Base URL, Integracion activa. Admin role redirected a /admin/jerarquia (RBAC frontend OK).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_iter25_platform_carriers.py",
+    "/app/tests/test_iter25_live_smoke.py",
+    "/app/test_reports/pytest/iteration25.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "platform_carriers.py repo — upsert correctamente preserva existing dict y solo encripta cuando 'api_key'/'client_secret' estan en patch (verificado por test_partial_update_preserves_secrets). Defaults aplicados con setdefault (tenant_access={}, enabled=True, billing_mode='platform_pays'). public_view excluye _id y *_ref + agrega *_set bools — wire format correcto.",
+    "carrier_config_resolver.py — 3 niveles bien aislados. La condicion `if access_map: whitelist mode else open access` implementa la regla 'tenant_access vacio = herencia universal' tal como se especifico. project_ids correctamente filtrados por tenant_id evitando data leak cross-tenant. default_project_id calculado solo si la lista no es vacia.",
+    "Tenant carrier path (lvl 2) — usa `await get_db().carriers.find_one(...)` directo en lugar del CarrierRepository; razonable porque el repo es tenant-scoped y aqui necesitamos el doc crudo, pero podria envolverse en un metodo helper si crece la complejidad. decrypt envuelto en try/except con `api_key = None` fallback — defensivo.",
+    "routes/platform_carriers.py — Pydantic models con `extra='forbid'` previenen filtracion de campos no permitidos. Field validators sanitizan project_ids (dedup + strip). RBAC via `require_role('root_dev', 'superadmin')` consistente en los 7 endpoints. /test endpoint pasa client_secret kwarg solo si esta presente — compatible con DHL (que lo ignora) y FedEx (que lo necesita).",
+    "tenant_id Path params validados con min/max length 36 — asume UUID v4; si hubiera otros formatos de tenant_id en el futuro (ej. slugs), habria que aflojar. Por ahora OK porque todos los tenants tienen UUID v4.",
+    "Idempotencia: revoke_access usa $unset que es idempotente; multiples DELETE consecutivos devuelven modified_count=0 (revoked=false) la segunda vez — comportamiento esperado pero podria documentarse en el OpenAPI."
+  ],
+  "updated_files": [
+    "/app/tests/test_iter25_live_smoke.py (new — 6 live preview smoke tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 iter25 + 6/6 live smoke + 72/72 iter22+23+24+25 combined)",
+    "frontend": "100% on critical /admin/platform/carriers flow (root_dev sees table with 2 carriers + edit dialog; admin role redirected away)"
+  },
+  "test_credentials": "root@myexcellence.local / Admin123! (root_dev) — usado para frontend smoke. admin@myexcellence.local / Admin123! (admin — verificado 403 backend + redirect frontend a /admin/jerarquia).",
+  "seed_data_creation": "El test live no creo data persistente nueva; aprovecho los carriers routal+dhl ya seeded en el preview (api_keys 'PLATFORM-LEVEL-KEY'/'DHL-PLATFORM-K' invalidas — esperado). Pytest local usa fixture env que cleanup platform_carrier_configs antes de cada test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter25 cerrada: jerarquia client>tenant>platform con whitelist por tenant funciona end-to-end. Selectors clave para futuro: pagina /admin/platform/carriers renderiza tabla nativa (no shadcn DataTable), 'Agregar carrier...' es un <select> nativo (no boton), badges 'abierto a todos' en columna TENANTS WHITELIST son clickables y abren TenantAccessDialog. Modal de edicion reutiliza data-testid='carrier-cfg-dialog' (mismo que iter23) pero con apiBase='/platform/carriers' — el frontend filtra project_ids/default_project_id/account_number del PUT body (Pydantic extra='forbid' los rechazaria sino). Live smoke (/app/tests/test_iter25_live_smoke.py) es regression-ready para futuras iteraciones; usa env REACT_APP_BACKEND_URL. resolver pinned: para (cubbo_tenant, cubbo_client, 'routal') gana client (config_source='client'); con client sin override gana platform (open access porque tenant_access esta vacio en preview).",
+  "rca_of_the_issue": "N/A — sin bugs encontrados. Iter25 entrega la base SaaS-grade pedida (resolver jerarquico con auditoria + whitelist per-tenant) y respeta el contrato Pydantic platform (extra=forbid valida que el frontend NO mande project_ids/default_project_id/account_number — verificado en live smoke con 422)."
+}

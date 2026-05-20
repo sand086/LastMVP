@@ -1,0 +1,44 @@
+{
+  "summary": "Sprint A — InboxBell (PROMPT 13 P1.2) and Dashboard claims KPI (P1.3) validated end-to-end. Backend: 23/23 internal pytest pass (tests/test_sprint_a_claims.py + tests/test_claims.py) + 8/8 NEW public-ingress regression tests pass (tests/test_inbox_public.py). Frontend: InboxBell renders on /dashboard, /reclamos, /admin/jerarquia, /admin/catalogo, /admin/cae, /agente, /torre (7/7 pages spot-checked). Bell click opens inbox-bell-panel; empty state correctly shows 'Sin notificaciones' (data-testid='inbox-bell-empty'). Dashboard reclamos KPI section (data-testid='dashboard-claims-section') visible with all 5 mini-KPIs. End-to-end coord promote flow could not be UI-exercised because no closed/resolved tickets exist in the seeded DB, but the equivalent path is covered by test_promote_pushes_inbox_to_coordinator in pytest at the data layer.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_inbox_public.py",
+    "/app/tests/test_sprint_a_claims.py",
+    "/app/tests/test_claims.py",
+    "/app/test_reports/pytest/iteration7_sprint_a.xml",
+    "/app/test_reports/pytest/iteration7_inbox_public.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "InboxBell.jsx: polling at 30s + close-on-outside-click + force-refresh on toggle is a clean pattern. badge cap '99+' avoids layout overflow.",
+    "InboxBell.jsx: refreshList only fires on open (lazy) — good for bandwidth. After mark-read of a single item, refreshCount() runs but the local `items` array is NOT refreshed, so the dot indicator on the clicked item stays until the panel is reopened. Minor UX nit, not a bug.",
+    "InboxBell.jsx: empty-catch on api errors silences network failures — user just sees stale unread count. Consider surfacing a small error icon next to the bell when refreshCount throws repeatedly.",
+    "repositories/inbox.py: push_to_role queries users by {role, status:'active'} — correct multi-tenant scoping via tenant_id on the BaseRepository, but the .find() limit=500 is hardcoded. Fine for MVP but noteworthy if a tenant ever has >500 coordinators.",
+    "routes/inbox.py: mark_read returns 404 on cross-user attempts (because filter includes recipient_user_id) — good, prevents enumeration.",
+    "routes/claims.py L82-91: push_to_role for promotion uses link='/reclamos/{id}' — matches frontend route. body includes monto and tipo_dano which are useful inline previews.",
+    "routes/dashboard.py /claims-open: count_documents on backlog_cutoff string-comparison works because ISO-8601 collates lexicographically — correct.",
+    "Minor: InboxBell.jsx never debounces handleToggle; rapid clicks could fire concurrent /api/inbox GETs. Low priority.",
+    "Sprint A backend Pydantic envelope is consistent: every inbox/claims endpoint returns ok({...}) → {success:true, data:...}. Validated by test_inbox_public.py."
+  ],
+  "updated_files": [
+    "/app/tests/test_inbox_public.py (NEW — 8 public-ingress regression tests for /api/inbox/*, /api/dashboard/claims-open, /api/reclamos/.../notificar-cliente)"
+  ],
+  "success_rate": {
+    "backend": "100% (23/23 internal pytest + 8/8 public ingress = 31/31)",
+    "frontend": "100% (InboxBell present on 7/7 pages tested; panel open + empty state + dashboard-claims-section all rendering; 0 console errors during navigation)"
+  },
+  "test_credentials": "coord@myexcellence.local / Admin123!  (dashboard + reclamos coord visibility)\nadmin@myexcellence.local / Admin123!  (admin pages)\nsupervisor@myexcellence.local / Admin123!  (/torre)\nagent@myexcellence.local / Admin123!  (/agente + RBAC negative test)",
+  "seed_data_creation": "None. Test_inbox_public.py is read-only on the public ingress except for /api/inbox/read-all which is idempotent and only affects the coord user's own notifications (none exist in seeded DB).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Sprint A is fully green at backend + frontend layer. /app/tests/test_inbox_public.py is a regression suite — keep it for future iterations. The seeded DB contains 0 closed/resolved tickets, which is why the full e2e admin→promote→coord-sees-badge flow could not be exercised through the UI; the same scenario IS validated at the data layer in tests/test_sprint_a_claims.py::test_promote_pushes_inbox_to_coordinator (pytest passing). To exercise the UI end-to-end in a future run, first run the webhook-ingest test_api_e2e.py to seed a real ticket, then close it via PATCH /api/agent/tickets/{id}/status, then promote-to-claim via admin token. After Sprint A, Sprint B (README/CI/Docker) is the next work item — that is documentation/infra work and is not in scope for this testing iteration.",
+  "rca of the issue": "N/A — no bugs surfaced. PROMPT 13 P1.2 (Inbox bell) + P1.3 (claims KPI) are correctly implemented and integrated."
+}

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="37" time="10.656" timestamp="2026-05-09T05:17:01.752221+00:00" hostname="agent-env-4a74385b-fd5d-45cd-8b60-247b221bda81"><testcase classname="tests.test_multi_tenant_isolation" name="test_repository_cannot_read_other_tenant" time="0.026" /><testcase classname="tests.test_multi_tenant_isolation" name="test_repository_cannot_update_other_tenant" time="0.022" /><testcase classname="tests.test_multi_tenant_isolation" name="test_repository_cannot_delete_other_tenant" time="0.024" /><testcase classname="tests.test_multi_tenant_isolation" name="test_zero_crosses_recorded" time="0.021" /><testcase classname="tests.test_terminal_state" name="test_update_status_rejects_terminal" time="0.021" /><testcase classname="tests.test_terminal_state" name="test_update_status_promotes_to_terminal" time="0.021" /><testcase classname="tests.test_workflow_and_cae" name="test_adapter_mock_returns_known_raw_code" time="0.001" /><testcase classname="tests.test_workflow_and_cae" name="test_normalizer_hits_catalog" time="0.070" /><testcase classname="tests.test_workflow_and_cae" name="test_normalizer_miss_registers_unmapped" time="0.077" /><testcase classname="tests.test_workflow_and_cae" name="test_ingest_with_incident_creates_assigned_ticket" time="0.106" /><testcase classname="tests.test_workflow_and_cae" name="test_ingest_then_delivered_resolves_open_ticket" time="0.110" /><testcase classname="tests.test_workflow_and_cae" name="test_sandbox_hit_and_miss" time="0.082" /><testcase classname="tests.test_workflow_and_cae" name="test_promote_unmapped_creates_catalog_row_and_drops_unmapped" time="0.090" /><testcase classname="tests.test_workflow_and_cae" name="test_admin_tickets_list_and_detail" time="0.106" /><testcase classname="tests.test_claims" name="test_promote_ticket_to_claim_creates_claim_and_timeline" time="0.158" /><testcase classname="tests.test_claims" name="test_promote_rejects_non_terminal_ticket" time="0.137" /><testcase classname="tests.test_claims" name="test_promote_twice_blocked_by_unique_active" time="0.169" /><testcase classname="tests.test_claims" name="test_promote_cross_tenant_returns_404" time="0.141" /><testcase classname="tests.test_claims" name="test_transition_matrix_blocks_skipping_steps" time="0.161" /><testcase classname="tests.test_claims" name="test_expediente_autoadvances_then_send_requires_full_kit" time="0.162" /><testcase classname="tests.test_claims" name="test_terminal_claim_silently_ignores_updates" time="0.157" /><testcase classname="tests.test_claims" name="test_list_and_detail_endpoints" time="0.167" /><testcase classname="tests.test_claims" name="test_ticket_detail_includes_active_claim" time="0.157" /><testcase classname="tests.test_sprint_a_claims" name="test_notify_client_sends_to_cxc_contact" time="0.183" /><testcase classname="tests.test_sprint_a_claims" name="test_notify_client_falls_back_to_ops_email" time="0.189" /><testcase classname="tests.test_sprint_a_claims" name="test_notify_client_blocked_when_no_email" time="0.185" /><testcase classname="tests.test_sprint_a_claims" name="test_notify_client_blocked_in_terminal_state" time="0.192" /><testcase classname="tests.test_sprint_a_claims" name="test_enviar_carrier_motivo_restricted_does_not_apply_to_claim_flow" time="0.215" /><testcase classname="tests.test_sprint_a_claims" name="test_enviar_carrier_blocked_without_automation_permission" time="0.217" /><testcase classname="tests.test_sprint_a_claims" name="test_enviar_carrier_proceeds_with_full_kit_and_permission" time="0.226" /><testcase classname="tests.test_sprint_a_claims" name="test_scan_claim_sla_detects_aged_promovido" time="0.214" /><testcase classname="tests.test_sprint_a_claims" name="test_scan_claim_sla_respects_sla_config_override" time="0.219" /><testcase classname="tests.test_sprint_a_claims" name="test_admin_cron_run_claim_sla_endpoint" time="0.203" /><testcase classname="tests.test_sprint_a_claims" name="test_promote_pushes_inbox_to_coordinator" time="5.282"><error message="failed on setup with &quot;pymongo.errors.AutoReconnect: localhost:27017: connection closed&quot;">/root/.venv/lib/python3.11/site-packages/pymongo/pool.py:932: in command
+    return command(
+/root/.venv/lib/python3.11/site-packages/pymongo/network.py:181: in command
+    reply = receive_message(conn, request_id)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/network.py:247: in receive_message
+    length, _, response_to, op_code = _UNPACK_HEADER(_receive_data_on_socket(conn, 16, deadline))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/network.py:336: in _receive_data_on_socket
+    raise OSError("connection closed")
+E   OSError: connection closed
+
+The above exception was the direct cause of the following exception:
+../tests/test_sprint_a_claims.py:102: in sprint_setup
+    await seed_cae()
+seeds/cae_catalog.py:26: in run
+    res = await db.carrier_status_catalog.update_one(
+/usr/local/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/collection.py:1088: in update_one
+    self._update_retryable(
+/root/.venv/lib/python3.11/site-packages/pymongo/collection.py:883: in _update_retryable
+    return self.__database.client._retryable_write(
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:1568: in _retryable_write
+    return self._retry_with_session(retryable, func, s, None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:1413: in _retry_with_session
+    return self._retry_internal(retryable, func, session, bulk)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/_csot.py:108: in csot_wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/mongo_client.py:1460: in _retry_internal
+    return func(session, conn, retryable)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/collection.py:864: in _update
+    return self._update(
+/root/.venv/lib/python3.11/site-packages/pymongo/collection.py:818: in _update
+    result = conn.command(
+/root/.venv/lib/python3.11/site-packages/pymongo/helpers.py:315: in inner
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pymongo/pool.py:960: in command
+    self._raise_connection_failure(error)
+/root/.venv/lib/python3.11/site-packages/pymongo/pool.py:1134: in _raise_connection_failure
+    _raise_connection_failure(self.address, error)
+/root/.venv/lib/python3.11/site-packages/pymongo/pool.py:406: in _raise_connection_failure
+    raise AutoReconnect(msg) from error
+E   pymongo.errors.AutoReconnect: localhost:27017: connection closed</error></testcase><testcase classname="tests.test_sprint_a_claims" name="test_inbox_mark_read" time="0.213" /><testcase classname="tests.test_sprint_a_claims" name="test_dashboard_claims_open_kpis" time="0.198" /><testcase classname="tests.test_sprint_a_claims" name="test_dashboard_report_must_have_includes_claims_section" time="0.190" /></testsuite></testsuites>

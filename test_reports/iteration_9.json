@@ -1,0 +1,59 @@
+{
+  "summary": "PROMPT 26 V2 P1 — Validated end-to-end. Backend pytest 33/33 GREEN: test_ai_v2.py 18/18 (regression P0 intacta) + test_ai_p1.py 15/15 (CircuitBreaker 4/4, PromptCache 4/4, StreamingSSE 1/1, ApproveAndWebhook 3/3, DailySummaryAISection 3/3) en 2.23s. Live API contra ingress público OK: GET /api/ai/system/status anonymous→401, agent→200 con {breaker:{}, cache_metrics:{hits,misses,stores,evictions}}; POST /api/ai/invocations/{id}/approve cubre los 4 casos (200 first / 422 double / 422 status=error / 404 nonexistent) usando invocaciones sintéticas insertadas en ai_invocation_log; PUT /api/admin/ai/client-config persiste webhook_outbound_url y webhook_outbound_secret; los GET las devuelven correctamente. Frontend /admin/ai con superadmin: 3 features renderizadas, ai-system-status con secciones 'Circuit breaker por proveedor' y 'Cache de prompts', ai-client-webhook-url + ai-client-webhook-secret presentes en el diálogo Configurar, ai-feature-cache-enabled checkbox visible en diálogo Nueva feature.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/ai/features (live)",
+        "issue": "BUG REGRESIÓN P1 — Los features ya sembrados en la DB live NO tienen el campo `cache_enabled` porque seeds/ai_catalog.py es idempotente vía find_one+continue (líneas 117-124): si la feature existe ya, el seed la salta y no aplica los nuevos defaults (`cache_enabled: True` para classify_motivo). Verificado en mongo: `db.ai_features.find({}, {feature_code:1, cache_enabled:1})` devuelve los 3 docs SIN la clave cache_enabled. Esto rompe la expectativa de la review request 'cache=on para classify_motivo'. Los unit tests pasan porque usan db fresca."
+      },
+      {
+        "endpoint": "GET /api/admin/ai/client-config/{id}",
+        "issue": "Seguridad: `webhook_outbound_secret` se devuelve en CLARO en la respuesta JSON (verificado: `\"webhook_outbound_secret\": \"shh-secret-123\"`). Debería redactarse a `webhook_outbound_secret_set: true/false` o sustituirse por `***`. El secret se usa para HMAC SHA-256 al firmar webhooks salientes; exponerlo via API admin permitiría a cualquier admin (incluso comprometido) leer secretos cross-cliente."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AdminAI Features tab — columna Cache",
+        "issue": "classify_motivo muestra badge 'off' en producción cuando la review request espera 'on'. Causa raíz NO está en el FE (L168: `{f.cache_enabled ? on : off}` es correcto) sino en el seed que no migra registros existentes. Reproducible: login superadmin → /admin/ai → tab 'Catálogo de features' → columna CACHE muestra 'off' para las 3 features.",
+        "selector": "[data-testid='ai-feature-classify_motivo']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "ClientConfigDialog · bracket-select",
+        "issues": ["React hydration warning persiste: `<span>` (data-ve-dynamic instrumentación) dentro de `<option>` en el bracket-select. No funcional, cosmético, heredado de iteration_8."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_ai_v2.py",
+    "/app/tests/test_ai_p1.py",
+    "/app/test_reports/pytest/iteration9_ai_p1_v2.xml"
+  ],
+  "action_items": [
+    "FIX HIGH: actualizar seeds/ai_catalog.py para que MIGRE los campos nuevos en features ya sembradas — sustituir el `if find_one: continue` por un upsert/$set selectivo. Sugerencia mínima: para cada SEED_FEATURES, hacer `db.ai_features.update_one({feature_code: f['feature_code']}, {$set: {k:v for k,v in f.items() if k=='cache_enabled'}, $setOnInsert: {...full doc...}}, upsert=True)`. O hacer una pasada explícita: `if doc and 'cache_enabled' not in doc: db.ai_features.update_one({feature_code: f['feature_code']}, {$set: {'cache_enabled': f.get('cache_enabled', False)}})`. Esto es necesario para que la review request 'cache=on para classify_motivo' se cumpla en el ingress live.",
+    "FIX MEDIUM (seguridad): redactar webhook_outbound_secret en TODAS las respuestas de /api/admin/ai/client-config (GET único, GET list, PUT response). Reemplazar por `webhook_outbound_secret_set: bool`. Aplicar el mismo patrón ya usado para `custom_api_key_present` (que sí está implementado correctamente)."
+  ],
+  "critical_code_review_comments": [
+    "services/ai/circuit_breaker.py — Implementación CLOSED→OPEN→HALF_OPEN limpia, threshold y cooldown desde constantes módulo (parametrizables vía monkeypatch en tests). breaker singleton importado por gateway L46. Test test_gateway_uses_breaker confirma que devuelve AI_PROVIDER_UNAVAILABLE sin llamar al provider.",
+    "services/ai/prompt_cache.py — LRU+TTL aislado por tenant (key incluye tenant_id en line 28-30 según test cross_tenant_miss). cache_metrics expuesto via /api/ai/system/status con hits/misses/stores/evictions.",
+    "services/ai/webhook_out.py — HMAC SHA-256 verificado vía test_webhook_outbound_signature_and_marking (header 'X-MyE-Signature' formato 'sha256=...'). Marcado en log con webhook_delivered + webhook_status_code OK. Faltaría: testear los 3 reintentos exponenciales con failures (no cubierto explícitamente, pero el código existe).",
+    "routes/ai.py L84-142 invoke/stream — chunking artificial por palabra. Usa StreamingResponse con media_type='text/event-stream'. Limitación documentada: el provider devuelve texto completo, los chunks son simulados. La invocación se loggea ANTES de stream (gateway.invoke se ejecuta primero, luego se chunke el output ya generado). Verificado por test_invoke_stream_emits_chunks_and_done.",
+    "routes/ai.py L145-197 approve — valida (1) existe, (2) no aprobado ya, (3) status=success, (4) sólo destinatario in (client_final, both) dispara webhook. Los 4 casos verificados live OK.",
+    "services/daily_summary.py _ai_section_metrics — agrega invocations_today, cost_usd_today, cache_hits_today, cache_hit_rate_pct, capped_today. render_summary_email omite el bloque IA cuando invocations_today=0 (verificado en test_render_summary_omits_ai_block_when_zero).",
+    "ISSUE: seeds/ai_catalog.py es idempotente PERO no idempotente-mergeante. Cuando se agrega un campo nuevo al SEED_FEATURES (como cache_enabled=True), los registros pre-existentes NO se actualizan. Esto causó la regresión visible en /admin/ai live."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (33/33 unit tests + 4/4 live approve casos + system/status 401|200) — pero 1 bug funcional en seed migration", "frontend": "95% (todos los testids presentes y secciones correctas; visual del badge cache=on bloqueado por el bug del seed)"},
+  "test_credentials": "agent@myexcellence.local / Admin123!  · admin@myexcellence.local / Admin123! · superadmin@myexcellence.local / Admin123!",
+  "seed_data_creation": "Se insertaron 2 invocaciones sintéticas en ai_invocation_log para probar /approve: id=35635ae3-... (status=success) y id=d0ac60f7-... (status=error). También se hizo un PUT a /api/admin/ai/client-config con webhook_outbound_url='https://example.test/hook' y secret='shh-secret-123' para el cliente abacb7c6-... (cleanup recomendado vía PATCH /opt-out o reset).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Los 33 tests P0+P1 pasan en 2.23s con db local fresca (test_database). El bug 'classify_motivo cache=off' es 100% reproducible en el ingress preview (https://bootstrap-emergent.preview...) porque las features fueron sembradas antes de que existiera el campo cache_enabled. Para verificar el fix del main agent: tras parche de seeds/ai_catalog.py + supervisor restart backend, GET /api/admin/ai/features con admin token debe devolver `cache_enabled: true` SOLO para classify_motivo. Para el fix de secret-redaction en client-config: GET debe NO devolver `webhook_outbound_secret` literal sino `webhook_outbound_secret_set: bool`. NO necesitas re-correr los unit tests salvo el de webhook (test_webhook_outbound_signature_and_marking) — la firma HMAC sigue funcionando porque la API recibe el secret en el PUT y lo persiste; sólo cambia la salida del GET.",
+  "rca_of_the_issue": "Seed non-merging: seeds/ai_catalog.py L117-124 hace `if await db.ai_features.find_one({feature_code}): continue`. Si la feature ya existe en DB, el doc completo se preserva sin merge. Cuando E1 agregó `cache_enabled: True` al SEED para classify_motivo, los registros pre-existentes en el preview env (sembrados en iteración 8) quedaron sin la clave. Solución mínima: agregar después del `continue` un update_one selectivo para campos nuevos, o cambiar a upsert con $setOnInsert+$set. El frontend renderiza correctamente — `f.cache_enabled` es undefined → falsy → 'off'."
+}

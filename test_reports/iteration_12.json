@@ -1,0 +1,41 @@
+{
+  "summary": "PROMPT_27 — Rol RBAC `client_auditor` + cierre de gaps UI de PROMPT_02 (jerarquía: search+edit) y PROMPT_03 (catálogo: search+edit) — VERDE END-TO-END. Pytest 55/55 PASS en 4.65s (test_client_auditor 16/16 + test_admin_hierarchy 7/7 + test_catalog_and_automation 5/5 + test_ai_v2 18/18 + test_ai_p2 9/9). Live ingress checks contra https://bootstrap-emergent.preview.emergentagent.com: (1) login auditor@myexcellence.local devuelve role=client_auditor + redirect_to=/auditor + access_token; (2) GET /api/admin/ai/audit/preview → 200 con signature='sha256=2d53e7…' y rows=3; (3) GET /api/admin/ai/audit/export.csv → 200 text/csv con headers X-MyE-Audit-Signature y X-MyE-Audit-Rows=3; (4) GET /api/admin/ai/invocation-log → 200; (5) GET /api/admin/ai/consumption → 200; (6) DENY: GET /api/admin/projects, /api/admin/motivos, /api/admin/tickets, /api/agent/queue → 403; (7) DENY: POST /api/admin/ai/features, POST /api/ai/invoke → 403. Frontend Playwright (auditor role): /auditor renderiza header con badge `client_auditor`, 3 tabs (auditor-tab-audit/log/consumption), botón auditor-preview-btn pinta `auditor-signature` (sha256=…) + `auditor-preview` (3 filas, 1215 bytes), botón auditor-download-btn visible. RBAC bloquea /admin/jerarquia, /admin/catalogo, /admin/cae, /admin/ai → redirige a /auditor. Frontend Playwright (admin role): /admin/jerarquia tab Proyectos tiene `projects-panel-search` (filtro a 0 con texto inexistente OK), `projects-panel-edit-{id}` abre modal 'Editar · Proyectos' con botón 'Actualizar'. Tab Carriers (`hierarchy-tab-carriers`): `carriers-panel-search` OK, `carrier-edit-{code}` abre `carriers-panel-dialog`. /admin/catalogo Motivos: `motivos-panel-search` (filtro→0 OK), `motivos-edit-{id}` abre modal con campo 'Código (UPPER_SNAKE)' DISABLED=true (correcto: PK no editable). Tab Soluciones (`catalog-tab-soluciones`): `soluciones-panel-search` visible OK; soluciones-edit-* count=0 porque la colección de soluciones del tenant está vacía en seed (no es bug, el panel renderiza correctamente).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Auditor panel /auditor (Auditoría externa)",
+        "issues": ["Inputs DESDE/HASTA usan el browser-native date picker (mm/dd/yyyy) en lugar de un componente shadcn Calendar — consistente con observación previa en AuditPanel/Heatmap; consistencia menor de UI."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_client_auditor.py",
+    "/app/test_reports/pytest/iteration12_p27.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "middleware/rbac.py — `client_auditor` añadido al ROLE_RANK con rank=1 (igual que client_viewer) y default_landing='/auditor'. Correcto: no escala privilegios sobre client_viewer y los gates de require_min_role('agent'/'admin') lo rechazan automáticamente.",
+    "routes/ai.py — _AUDIT_READ_RBAC y _AUDIT_EXPORT_RBAC bien aislados. Los endpoints de escritura (features, client-config, benchmark, invoke) NO heredan el rol auditor, garantizado por el require_min_role('admin') o ('agent') de cada uno. Live test confirma 403 en los 6 endpoints sensibles.",
+    "seeds/initial_schema.py — auditor@myexcellence.local incluido en EXTRA_SEED_USERS con role=client_auditor. La idempotencia del seeder (re-sync de password) sigue intacta para todos los roles.",
+    "frontend/src/pages/AuditorPanel.jsx — bien aislado en su propia ruta /auditor con allow=[client_auditor, root_dev, superadmin] desde App.js. Los 3 tabs se renderizan correctamente y el botón Vista previa hace fetch a /api/admin/ai/audit/preview con el bearer del usuario. La descarga del CSV usa link directo al export.csv (estrategia correcta para mantener headers de auditoría).",
+    "frontend/src/pages/AdminHierarchy.jsx — CrudPanel extendido con searchKeys+editPath. ProjectsPanel/CarriersPanel renderizan `projects-panel-search` / `carriers-panel-search` y los botones edit-{id}/edit-{code} abren modal pre-llenado con datos. Modal en modo Edit muestra 'Actualizar' (no 'Crear'), confirmado visualmente.",
+    "frontend/src/pages/AdminCatalog.jsx — MotivosPanel correctamente deshabilita el campo `code` (UPPER_SNAKE) en modo Edit (PK inmutable, R03). SolucionesPanel: testids correctos pero la colección está vacía en el seed actual del tenant, por lo que no se renderizan filas. Sugerencia opcional para iter futura: seedear 1-2 soluciones de ejemplo para que el QA visual cubra también el flujo de edición."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (55/55 pytest + 11/11 live ingress checks: 1 login + 4 reads OK + 6 denies)",
+    "frontend": "100% sobre testids verificables (auditor 7/7, RBAC redirect 4/4, projects search+edit 3/3, carriers search+edit 3/3, motivos search+edit con code disabled 4/4; soluciones-edit no testeable por falta de seed pero search/panel/testids OK)"
+  },
+  "test_credentials": "auditor@myexcellence.local / Admin123! (rol client_auditor) · admin@myexcellence.local / Admin123! (rol admin) · ambos verificados live",
+  "seed_data_creation": "Ningún seed adicional creado durante el test. El test_client_auditor.py pytest crea su propio tenant temporal in-memory (mongomock vía conftest). Los curls live solo lectura.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "PROMPT_27 totalmente verde: RBAC client_auditor (login+lectura+denies), panel /auditor (3 tabs + signature + download), RBAC frontend bloqueando /admin/* a auditor, y los gaps UI de PROMPTS 02/03 (search+edit en projects/carriers/motivos/soluciones) confirmados en producción preview. test_credentials.md ya incluye la fila de client_auditor (línea 16). Los testids canónicos para próximas iteraciones: auditor-page, auditor-tab-{audit,log,consumption}, auditor-preview-btn, auditor-download-btn, auditor-signature, auditor-preview; hierarchy-tab-{projects,carriers,...}, projects-panel-search, projects-panel-edit-{id}, carriers-panel-search, carrier-edit-{code}; catalog-tab-{motivos,soluciones}, motivos-panel-search, motivos-edit-{id}, soluciones-panel-search, soluciones-edit-{id}. Sugerencia opcional para próxima iter: agregar 1-2 soluciones al seed inicial para que el QA visual cubra también el flujo de edición de soluciones; y migrar los date pickers nativos a shadcn Calendar para consistencia visual.",
+  "rca_of_the_issue": "N/A — sin issues encontrados en scope PROMPT_27. Todas las pruebas pasan."
+}

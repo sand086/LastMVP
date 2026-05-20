@@ -1,0 +1,49 @@
+{
+  "summary": "Iter18 — Admin Users CRUD bajo /admin/jerarquia tab 'Usuarios'. Backend 22/22 pytest GREEN (RBAC, list+filters, tenant isolation, create+temp_pwd, validations, patch+guardrails, reset, soft-delete + last-superadmin/root_dev/self-delete guardrails). Suite total 369 passed / 2 skipped en 80.89s — sin regresiones. Frontend E2E con root_dev (live preview ingress): gating verificado para admin (NO ve Usuarios), superadmin (sí Usuarios, NO Tenants) y root_dev (Usuarios + Tenants). Flujo completo CREATE→EDIT→RESET→DELETE corrió: temp_pwd 12 chars en create, banner + copy + close OK, modal edit pre-poblado y rename persiste, reset emite nueva temp_pwd 12 chars distinta, delete soft mostró status=Eliminado y sonner toast 'Usuario marcado como eliminado'. Buttons opacity-40 confirmados en fila root_dev (edit/reset/delete deshabilitados visualmente).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AdminHierarchy tabs filter",
+        "issue": "BUG (fixed by tester) — La función `visible` en AdminHierarchy.jsx L29 solo evaluaba `requiresRole` (singular) e ignoraba `requiresAnyRole` (array). Resultado: el tab 'Usuarios' (que usa `requiresAnyRole: ['root_dev','superadmin']`) se mostraba a CUALQUIER rol incluido admin/agent. Aunque el cuerpo del tab estaba gateado en L106 (`['root_dev','superadmin'].includes(user?.role)`), el TAB visible violaba la spec. Fix aplicado: filtro extendido para honrar ambos campos.",
+        "selector": "[data-testid=\"hierarchy-tab-users\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Copy-to-clipboard temp password",
+        "issue": "BUG (fixed by tester) — El handler de [users-temp-password-copy] llamaba `navigator.clipboard?.writeText(...)` sin await ni catch. En entornos sin permiso de clipboard (preview/headless) la Promise rechazaba sin captura y disparaba el webpack-dev-server overlay 'Uncaught runtime errors: NotAllowedError', bloqueando todos los clicks subsiguientes (incluye [users-temp-password-close]). Fix aplicado: async/try-catch con toast.error de fallback.",
+        "selector": "[data-testid=\"users-temp-password-copy\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_iter18_admin_users.py",
+    "/app/test_reports/pytest/iteration18.xml"
+  ],
+  "action_items": [
+    "Revisar otros menús/rutas que usen `requiresAnyRole` para asegurar que el filtro genérico de pestañas/links los honra (regression risk a futuro).",
+    "Considerar agregar un fallback visible (input select-all + 'Ctrl+C' hint) para entornos sin clipboard API — el catch ya muestra toast.error pero el usuario puede beneficiarse de un comportamiento más explícito."
+  ],
+  "critical_code_review_comments": [
+    "routes/admin_users.py — Implementación sólida: tenant-scoped queries en todos los endpoints, password_hash excluido del select, _id excluido (no leak ObjectId), Literal types para role/status (pydantic rechaza root_dev como esperado), uniqueness via find_one con $ne en update, last-superadmin guardrail con count_documents (no carga docs en memoria). 252 líneas, bien estructurado, lint clean.",
+    "AdminHierarchy.jsx (1309 líneas) — Archivo crece a casi el doble del techo recomendado (700). Sub-paneles (UsersPanel + UserModal + ProjectsPanel + ClientsPanel + SubclientsPanel + CarriersPanel + TenantsPanel + GenericPanel) deberían extraerse a /pages/hierarchy/*. La estructura actual mezcla 7 dominios y dificulta el RCA (como demuestra el bug L29 que pasó desapercibido en review).",
+    "AdminHierarchy.jsx L106-107 — Double-gating (tab visible + panel render) es defensivo y correcto, pero hace silencioso el bug L29 (clicking el tab no rompe nada, simplemente no renderiza el cuerpo). Considerar un único punto de gating o un assert en dev.",
+    "AdminHierarchy.jsx L1017 (copy handler) — El patrón `navigator.clipboard?.writeText()` sin manejo de promise es una landmine clásica. Vale la pena auditar el resto del codebase por usos similares."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/AdminHierarchy.jsx"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 iter18 + 369/369 suite total)",
+    "frontend": "100% post-fixes (gating + clipboard); 2 bugs detectados y corregidos por el tester durante el run"
+  },
+  "test_credentials": "root@myexcellence.local / Admin123!, superadmin@myexcellence.local / Admin123!, admin@myexcellence.local / Admin123! (tenant myexcellence)",
+  "seed_data_creation": "3 usuarios creados vía UI en el tenant myexcellence: test_iter18_e2e_<ts>@myexcellence.local (status=deleted al final), test_iter18_ui_<ts1>@myexcellence.local (active), test_iter18_ui_<ts2>@myexcellence.local (active). Pueden purgarse con db.users.delete_many({email:/^test_iter18/}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter18 completo y verde. Backend regression file: /app/tests/test_iter18_admin_users.py. Frontend selectors live: hierarchy-tab-users, users-panel, users-search, users-filter-role, users-filter-status, users-refresh, users-create-btn, users-row-<id>, users-edit-<id>, users-reset-<id>, users-delete-<id>, users-modal-create / users-modal-edit con sufijos -email/-name/-role/-client/-status/-submit/-error, users-temp-password-banner/value/copy/close. El gating del tab ya considera requiresAnyRole (fix aplicado en este run). El bug del clipboard ya está manejado con try/catch. Filas de root_dev mantienen edit/reset/delete con opacity-40 y disabled=true.",
+  "rca_of_the_issue": "Bug 1 (gating): el helper `TABS.filter((t) => !t.requiresRole || user?.role === t.requiresRole)` solo verificaba la prop `requiresRole`, pero el tab 'users' fue declarado con `requiresAnyRole: ['root_dev','superadmin']`. Como `requiresRole` era undefined, `!undefined === true` → el filtro siempre lo dejaba pasar. Fix: extender el filter a `(!requiresRole || role===requiresRole) && (!requiresAnyRole || requiresAnyRole.includes(role))`. Bug 2 (clipboard): `navigator.clipboard?.writeText()` retorna una Promise que rechaza con NotAllowedError en navegadores sin permiso de clipboard. Sin await/.catch, la rejection llega como unhandledrejection y dispara webpack-dev-server overlay bloqueando el DOM. Fix: envolver en async/try-catch + toast.error de fallback."
+}

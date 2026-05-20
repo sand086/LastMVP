@@ -1,0 +1,50 @@
+{
+  "summary": "Bootstrap PROMPT_01 reviewed end-to-end. 24/24 pytest tests pass (7 unit + 17 e2e via REACT_APP_BACKEND_URL). All 8 frontend flows work (login success/failure, redirect to /admin/cae, stat cards rendering 0, refresh persistence, logout, ProtectedRoute → /login?next=, /maintenance public, /default for authenticated user). Standard JSON envelope present on every response (success/data/meta/errors with request_id+timestamp). RBAC, multi-tenant isolation, terminal-state protection and CAE admin endpoints behave per spec. Found ONE real backend issue: in-memory rate-limiter keys on request.client.host which through the Cloudflare/ingress proxy varies per request, so brute-force lockout (R09) does NOT trigger on the public URL — works correctly when hitting localhost:8001 directly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "Brute-force lockout (LOGIN_MAX_ATTEMPTS=5 / 429 RATE_LIMITED) does not fire when traffic comes through the ingress because `request.client.host` is the proxy hop and rotates per request. Works fine on localhost (5x401 then 429). Fix: start uvicorn with --proxy-headers and/or read X-Forwarded-For (first hop) inside core/rate_limit when building the identifier."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_api_e2e.py",
+    "/app/tests/test_health.py",
+    "/app/tests/test_multi_tenant_isolation.py",
+    "/app/tests/test_terminal_state.py",
+    "/app/test_reports/pytest/all_results.xml"
+  ],
+  "action_items": [
+    "Make brute-force rate-limiter ingress-aware: run uvicorn with --proxy-headers (or set FORWARDED_ALLOW_IPS='*') and use request.headers['x-forwarded-for'].split(',')[0].strip() (fallback to request.client.host) as the IP component of the rate-limit identifier in routes/auth.py. Without this fix R09 (anti brute-force) is effectively disabled in production-style deployments.",
+    "Test-id naming consistency (non-blocking): the spec listed login-email/login-password/login-submit but actual JSX uses login-email-input / login-password-input / login-submit-button. Either is fine, but please align spec ↔ implementation so future testing agents don't trip on it."
+  ],
+  "critical_code_review_comments": [
+    "core/rate_limit.py + routes/auth.py: rate-limit identifier is `f\"{ip}:{email}\"` where ip = request.client.host. Behind any reverse proxy this is effectively useless. Add a small helper get_client_ip(request) that prefers X-Forwarded-For, else request.client.host.",
+    "routes/auth.py login(): `if not allowed: lockout(...)` is inside the `not user` branch (line 51-52) and gated on `not allowed` which at that point is always True (the early-return at line 41 already covered the False case) — dead code. Remove or move outside the user-existence check.",
+    "Login.jsx prefills the seed credentials in placeholders/CUENTA SEED block (visible 'root@myexcellence.local · Admin123!'). Fine for development; gate this behind APP_ENV !== 'production' before any real deploy.",
+    "Stateless JWT: /api/auth/logout only deletes the cookie, but Bearer tokens remain valid until expiry. This is acknowledged in the request, but consider a short-lived JWT + refresh token, or a denylist, for V1.",
+    "core/security.py uses bcrypt cost 12 ✓ (R05). Verified hashes start with $2b$.",
+    "Standard envelope (success/data/meta{request_id,timestamp}/errors) is consistently applied — including on FastAPI validation errors (422) — good.",
+    "Multi-tenant: repositories/base.py _scope() correctly forces tenant_id and short-circuits cross-tenant queries to no-match (P0.12 covered)."
+  ],
+  "updated_files": [
+    "/app/tests/test_api_e2e.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 pytest, including localhost rate-limit verification)",
+    "frontend": "100% (16/16 UI assertions; bad creds, good login, stat cards, refresh persistence, logout, protected redirect, /maintenance, /default)"
+  },
+  "test_credentials": "root@myexcellence.local / Admin123! (root_dev) and superadmin@myexcellence.local / Admin123! — both work",
+  "seed_data_creation": "None (used existing seed from seeds/initial_schema.py).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend testids in use: login-page, login-email-input, login-password-input, login-submit-button, login-error, login-session-expired, admin-cae-home, cae-logout-button, cae-stats-cards, stat-catalog-count, stat-unmapped-count, stat-audit-count, maintenance-page, default-page, default-go-cae, default-logout. localStorage token key is 'mye_access_token'. End-to-end pytest file at /app/tests/test_api_e2e.py runs against REACT_APP_BACKEND_URL — use it as regression. The brute-force test inside intentionally hits localhost:8001 because the public ingress rotates client IPs (see action_items).",
+  "rca of the issue": "Reproduction (brute-force on public URL): for i in $(seq 1 7); do curl -s -o /dev/null -w '%{http_code} ' -X POST $REACT_APP_BACKEND_URL/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"x@y.z\",\"password\":\"x\"}'; done → 401 401 401 401 401 401 401 (no 429). Same loop against http://localhost:8001 → 401 401 401 401 401 429 429. Root cause: routes/auth.py uses `ip = request.client.host` (hop IP), and uvicorn is started without --proxy-headers in supervisor (`uvicorn server:app --host 0.0.0.0 --port 8001 --workers 1 --reload`), so XFF is ignored. Mitigation: add `--proxy-headers` to the supervisor command OR read X-Forwarded-For manually inside the login route / a get_client_ip helper. Both are low-risk one-line fixes."
+}

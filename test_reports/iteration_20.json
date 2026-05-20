@@ -1,0 +1,35 @@
+{
+  "summary": "Iter21 — First-time-login Onboarding Tour (react-joyride v3.1.0, Spanish locale). Backend 11/11 pytest GREEN: GET/POST complete/POST reset across 5 roles (agent, admin, root_dev, client_viewer, client_auditor), auth 401, idempotence, per-user isolation, suggested_tour mapping all correct. Frontend E2E with agent@myexcellence.local on /agente: replay button [data-testid=agent-replay-tour] with Sparkles icon renders next to InboxBell; window.__myeReplayTour is exposed globally; clicking it (or calling the global fn) POSTs /api/users/me/onboarding/reset then starts Joyride. Joyride .react-joyride__overlay + .react-joyride__tooltip render, with Spanish strings 'Bienvenido al panel de Agente / En 2 minutos te muestro... / Siguiente' confirmed in screenshot. After hard reload the overlay does NOT auto-open (banner is shown only because the agent never completed the tour — expected fallback UX). AgentPanel regression: agent-layout-switch and agent-shortcuts-trigger still present and clickable. react-joyride v3.1.0 named export confirmed (`Object.keys(require('react-joyride'))` returns ['ACTIONS','EVENTS','Joyride','LIFECYCLE','ORIGIN','PORTAL_ELEMENT_ID','STATUS','defaultLocale','defaultOptions','useJoyride']; no default export — the named import fix in OnboardingProvider.jsx is correct).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Onboarding tour (Joyride)", "issues": ["First welcome step (placement='center', target='body') does NOT render the 'Saltar tour' skip button — only 'Siguiente'. This is standard react-joyride v3 behavior for centered steps with disableBeacon. Skip button appears from step 2 onward. Not a bug, just a UX note: if the agent wants to dismiss immediately on the welcome card they need to click the X (top-right) or press Esc. Consider adding `showSkipButton` enforcement or document this."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_iter21_users_onboarding.py",
+    "/app/test_reports/pytest/iteration21.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "backend/routes/users_onboarding.py — Clean 73 lines: 3 endpoints under /api/users/me/onboarding, all async, `_suggested_tour` is a pure fn with explicit role mapping (root_dev/superadmin→root_dev, admin/coordinator→admin, agent/supervisor→agent, others→agent fallback). $unset of onboarding_completed_at on reset is correct. Excludes _id from find. Idempotent.",
+    "OnboardingProvider.jsx — Uses NAMED import { Joyride } from 'react-joyride' which is correct for v3.1.0 (no default export exists). fetchedRef guards single fetch per session. window.__myeReplayTour cleanup in useEffect return. handleCallback drives navigate() via pageHint with a 500ms pause to let DOM settle — sensible. markCompleted swallows errors silently (acceptable — best-effort persistence).",
+    "tours.js — 3 presets with disableBeacon on first step, pageHint navigation for cross-route tours (admin/root_dev). Selectors use existing data-testids that resolve in the current UI (verified agent-layout-switch, agent-shortcuts-trigger live).",
+    "App.js wiring — OnboardingProvider mounted inside <AuthProvider> inside <BrowserRouter>, right after <Toaster>. Order is correct: needs both useAuth() and useNavigate()/useLocation(). No double Toaster mount.",
+    "AgentPanel.jsx L454-459 — Replay button uses inline onClick `() => window.__myeReplayTour && window.__myeReplayTour()` — defensive guard is good. Sparkles icon, data-testid='agent-replay-tour', title='Volver a hacer el tour'. Sits between InboxBell and agent-shortcuts-trigger.",
+    "Minor: OnboardingProvider's useEffect at line 96 binds window.__myeReplayTour with empty deps `[]` — at that point `setRunning`/`setStepIndex` are captured from first render but React setState is stable so this is fine. Banner uses fixed `top-16 right-4 z-40` which may overlap with admin header on smaller viewports — minor, not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (11/11 iter21 pytest)",
+    "frontend": "100% on critical onboarding flows (mount, replay button, overlay/tooltip render, Spanish locale, persistence, regression)"
+  },
+  "test_credentials": "agent@myexcellence.local / Admin123! (used for live e2e). admin@ and root@ available but not re-tested here — backend coverage already validates their suggested_tour mapping.",
+  "seed_data_creation": "None. Each pytest run uses isolated ephemeral tenants via fixture. Live preview: agent user's onboarding_completed remains false after this run (we triggered reset + started tour but never reached a skip/finish action because the welcome step has no skip button).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Onboarding tour is fully wired and stable. Replay button live selector: [data-testid='agent-replay-tour']. Global JS API: window.__myeReplayTour() resets server + starts tour. Joyride overlay class: .react-joyride__overlay; tooltip class: .react-joyride__tooltip. Spanish locale strings: 'Siguiente','Anterior','Saltar tour','Listo','Cerrar'. Backend regression file: /app/tests/test_iter21_users_onboarding.py (11 tests, 1.5s). Note: 'Saltar tour' button is hidden on the first centered welcome step — to test skip flow programmatically, click 'Siguiente' once first then 'Saltar tour'. To verify the auto-open-on-first-login UX: ensure user.onboarding_completed=false, log in, banner [data-testid='onboarding-banner'] should appear top-right; clicking [data-testid='onboarding-banner-start'] starts the tour.",
+  "rca_of_the_issue": "N/A — no bugs found. The skip-button-missing-on-first-step observation is intentional react-joyride v3 behavior for centered welcome steps with `disableBeacon: true` and `placement: 'center'`. Confirmed by visual inspection of screenshot and by Joyride source — skip is rendered for non-centered steps only when there is meaningful spotlight context."
+}

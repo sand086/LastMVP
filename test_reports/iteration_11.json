@@ -1,0 +1,49 @@
+{
+  "summary": "PROMPT 21 (Zenvia WhatsApp) + PROMPT 22 (Heatmap geo) + PROMPT 23 (Bulk + PDF) — VALIDADO END-TO-END. Pytest tests/test_prompts_21_22_23.py 21/21 PASS en 1.92s. Regresión P0/P1/P2 IA (test_ai_v2 + test_ai_p1 + test_ai_p2) 42/42 PASS, sin regresión. Live ingress checks contra https://bootstrap-emergent.preview.emergentagent.com con admin@myexcellence.local: (1) GET /api/dashboard/heatmap?grid_decimals=2 → 200 con {items, count}, filtros motivo_codigo+carrier_code aceptados; (2) POST /api/webhooks/zenvia/inbound sin firma → 401 (HMAC enforced); (3) POST /api/admin/whatsapp/send → 200 outbound persisted (NOTA: la API key real está seteada en .env, por lo que el live test mostró mocked=false → mensaje real fue encolado en Zenvia. Tests unitarios usan monkeypatch.delenv para forzar mock como recomienda el main agent. NO repetí más sends live para no incurrir en costos); (4) GET /api/admin/tickets/{id}/export.pdf → 200 application/pdf, body inicia con %PDF-1.7, 17026 bytes; cross-tenant fake id → 404; (5) POST /api/admin/tickets/bulk action=add_comment → affected=1, skipped=0; action=export_pdf → 200 application/zip con N entries 'ticket-{id}.pdf'; action=close con id de otro tenant → skipped_ids contiene el id falso; (6) GET /api/tickets/{id}/whatsapp → 200. Frontend Playwright (admin role): /heatmap renderiza Leaflet OSM correctamente con todos los testids (mapa, date_from, date_to, motivo, carrier, apply); /admin/tickets BulkBar aparece tras select-all con los 6 testids (close, assign-toggle, status-toggle, comment-toggle, export-pdf, clear) y al click 'Comentar' se muestra textarea + botón Agregar; /admin/tickets/{id} muestra ticket-export-pdf que descarga PDF (17107 bytes verificado download.path()), WhatsAppPanel con whatsapp-panel/text/to/send/thread todos presentes. ÚNICO GAP TESTABILIDAD ENCONTRADO Y CORREGIDO: el <select> de grid_decimals en Heatmap.jsx no tenía data-testid='heatmap-grid-decimals' — lo agregué (cambio mínimo de testabilidad permitido por scope).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Heatmap /heatmap",
+        "issues": ["Inputs date_from/date_to usan el browser-native date picker (mm/dd/yyyy) en vez de un componente shadcn Calendar — consistente con observación de iter 10 en AuditPanel; consistencia de UI menor."]
+      },
+      {
+        "screen": "AdminTickets /admin/tickets BulkBar",
+        "issues": ["Cuando se hace click en 'Comentar' (bulk-comment-toggle) el textarea no tiene data-testid (e.g. 'bulk-comment-text' / 'bulk-comment-submit') — accesible por selector genérico pero menos robusto para automatización futura."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_prompts_21_22_23.py",
+    "/app/test_reports/pytest/iteration11_p21_p22_p23.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/zenvia.py — verify_signature usa hmac.compare_digest (timing-safe) con secret fallback ZENVIA_WEBHOOK_SECRET → ZENVIA_API_KEY OK. send_text valida E.164 con regex y persiste en whatsapp_messages incluso en modo mocked: ambos flujos (mocked / live) producen el mismo shape y son indistinguibles para el frontend, lo cual facilita testing.",
+    "services/geocoding.py — geocode_address consulta cache (geocode_cache collection) por hash de address antes de llamar Nominatim; respeta rate limit de OSM (1 req/s con _LAST_CALL global). heatmap_buckets prioriza coords de evidences (lat/lng explícitos) sobre geocoding del address del client, lo cual es correcto operacionalmente (evidence > inferencia). Severity = count/max_count está bien normalizado.",
+    "services/pdf_export.py — render_ticket_pdf usa WeasyPrint con HTML template; render_bulk_zip itera tickets y produce ZIP en memoria con filenames 'ticket-{id}.pdf'. Live test confirmó PDF válido %PDF-1.7 + ZIP con entries correctos.",
+    "routes/heatmap_bulk.py — bulk endpoint respeta R02 (no tocar terminales en close/change_status), valida agent_id pertenezca al mismo tenant para assign (422 si inválido), y devuelve siempre {affected, skipped_count, skipped_ids}. Cross-tenant 404 verificado en single PDF.",
+    "middleware/stack.py — PUBLIC_PREFIXES correctamente incluye /api/webhooks/zenvia/ para que el inbound sin Bearer pueda procesarse; firma HMAC reemplaza la auth.",
+    "frontend/src/pages/Heatmap.jsx — Leaflet imperativo OK; el data-testid faltante en grid_decimals lo agregué (línea 174). Map renderiza tiles OSM correctamente.",
+    "frontend/src/components/WhatsAppPanel.jsx — todos los testids presentes; integración con /api/admin/whatsapp/send y /api/tickets/{id}/whatsapp confirmada visualmente.",
+    "frontend/src/pages/AdminTickets.jsx — BulkBar con los 6 testids esperados; checkbox select-all funciona; al click cada toggle se renderiza el formulario inline (comment, assign, status). Sugerencia: agregar data-testid a los inputs/buttons internos del comment/assign/status form para automatización end-to-end más robusta."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Heatmap.jsx (added data-testid=heatmap-grid-decimals al <select>)"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 pytest P21+P22+P23 + 42/42 regresión P0/P1/P2 + 7/7 live ingress checks)",
+    "frontend": "100% (heatmap testids 7/7, bulk-bar testids 7/7, whatsapp-panel testids 6/6, ticket-export-pdf download verified)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! (rol admin), agent@myexcellence.local / Admin123! (rol agent)",
+  "seed_data_creation": "Bulk add_comment live agregó 1 ticket_event en el ticket 02140f8e-4745-4809-a3df-1e0668b6a96c con texto 'TEST iter11 review'. WhatsApp send live insertó 1 outbound message en whatsapp_messages para el cliente +5215512345678 (mocked=false → enviado real a Zenvia). Cleanup recomendado opcional: db.ticket_events.deleteMany({description:/TEST iter11 review/}) y db.whatsapp_messages.deleteMany({text:'test ingress', user_id:'a1282eac-a02c-4449-ab72-cfa2a63bf941'}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Estado iter 11: P21/P22/P23 TODO VERDE pytest+live+frontend. Regresión P0/P1/P2 IA intacta. Único cambio aplicado: data-testid='heatmap-grid-decimals' agregado en Heatmap.jsx línea 174. ALERTA Zenvia LIVE: la ZENVIA_API_KEY está activa en backend/.env, así que cualquier POST /api/admin/whatsapp/send vía live ingress envía mensaje real (mocked=false). Para tests futuros usar siempre monkeypatch.delenv('ZENVIA_API_KEY') o testear vía pytest unitarios. Inbound webhook sí es seguro de testear con secret personalizado (set ZENVIA_WEBHOOK_SECRET en test). Sugerencia menor para próxima iter: agregar data-testid a los inputs internos del BulkBar (bulk-comment-text, bulk-comment-submit, bulk-assign-select, bulk-status-select) para tests E2E más robustos.",
+  "rca_of_the_issue": "N/A — no issues encontrados en scope P21/P22/P23. El gap menor de testabilidad (heatmap-grid-decimals) fue corregido in-line por estar en Fix Scope."
+}

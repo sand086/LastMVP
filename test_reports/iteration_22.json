@@ -1,0 +1,33 @@
+{
+  "summary": "Iter22 — Routal multi-project SaaS refactor (1 ApiKey → N project_ids for ingest, 1:1 for send_instruction). 19/19 iter22 pytest GREEN + 58/58 regression tests (test_carriers_health, test_workflow_and_cae, test_scheduler, test_ingest, test_admin_hierarchy, test_p2_features) GREEN. Real ingress smoke (admin@myexcellence.local): GET/PUT/DELETE/POST-test on /api/admin/clients/{id}/carriers/routal all functional via https://bootstrap-emergent.preview.emergentagent.com. PUT response correctly returns api_key_set:true and never the raw key; api_key_ref persists Fernet-encrypted (gAAAA…). RBAC verified live: agent token → 403 on PUT/DELETE/test. Test endpoint with fake key returns pingable:false (expected). Frontend smoke (admin login → /admin/jerarquia → Clientes tab): Routal column shows '3 proyectos' chip for Cubbo Test (configured) and 'Configurar' button for Demo Cliente Reclamos (unconfigured). Clicking 'Configurar' opens [data-testid='routal-cfg-dialog'] with the complete modal (API KEY input, project_ids chip area with Agregar, BASE URL https://api.routal.com, Integración activa toggle, Probar conexión / Cerrar / Guardar). 4 inputs in dialog as expected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_iter22_routal_multiproject.py",
+    "/app/test_reports/pytest/iteration22.xml",
+    "/app/test_reports/pytest/iteration22_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routal.py — Clean constructor: env fallback preserved for transversal /admin/carriers/{code}/health probes via RoutalAdapter() without args. project_ids filter `[p for p in project_ids if p]` is defensive (dedupes empty strings). default_project_id is a property derived from project_ids[0]; nice no-state separation. send_instruction respects payload.project_id and only falls back to default when omitted — correct 1:1 semantics for the Cubbo case.",
+    "admin_client_carriers.py — 4 endpoints under one router (73 lines), all admin+, tenant-isolated through ClientRepository(tenant_id=request.state.user.tenant_id). _resolve_client raises 404 on cross-tenant — verified live and in pytest. POST /test path correctly uses get_carrier_config (decrypted) to instantiate adapter, not get_carrier_config_public. Good separation.",
+    "Encryption — set_carrier_config encrypts api_key with Fernet (`gAAAA` prefix verified in pytest assertion `ref.startswith('gAAAA')` and confirmed via DB inspect in test_set_and_get_encrypts_api_key). Partial update preserves existing api_key when payload omits it (test_partial_update_preserves_key passes). Disabled config returns None from get_carrier_config (defensive guard so scheduler skips it).",
+    "Scheduler — _pull_routal iterates adapter.project_ids in order; metrics dict returns the list. carrier_meta.routal_project_id persisted per guía via ingest_service kwarg propagation. Test_pull_iterates_all_projects validates both north & south stops landed with correct project_id tag and `is_terminal=True` for the completed stop.",
+    "Frontend — RoutalConfigDialog.jsx renders with data-testid='routal-cfg-dialog' visible after click; ClientsPanel uses controlled routalDialogClient state. Table chip switches between 'N proyectos' and 'Configurar' driven by api_key_set in the public GET response. UI is clean and self-explanatory (Spanish labels: 'Integración por cliente / Routal · {client name}', '1:N para ingesta / 1:1 para updates' explainer text)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (19/19 iter22 + 58/58 regression = 77/77)",
+    "frontend": "100% on critical Routal modal flow (open dialog, render all fields, RBAC table chip display)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123! (used for live ingress smoke), agent@myexcellence.local / Admin123! (used for RBAC 403 verification)",
+  "seed_data_creation": "Live preview side-effect: Cubbo Test client on tenant myexcellence has carrier routal cfg with project_ids ['north','south','cdmx'], default 'north', api_key_set=true (api_key='TEST_FAKE_KEY' was PUT during smoke; encrypted at rest). Demo Cliente Reclamos remains unconfigured. Pytest tests use isolated ephemeral tenants via fixture — no persistent side-effects in production data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Routal multi-project SaaS endpoints are stable. Key selectors: [data-testid='routal-cfg-dialog'] (modal), tab 'Clientes' on /admin/jerarquia, button text 'Configurar' (unconfigured) or 'N proyectos' (configured) in ROUTAL column. REST endpoints: GET/PUT/DELETE /api/admin/clients/{client_id}/carriers/{code} + POST /api/admin/clients/{client_id}/carriers/{code}/test (body: {tracking_id?, project_id?}). Encryption: api_key persists as carriers.{code}.api_key_ref (Fernet token 'gAAAA…'); public view never leaks it (returns api_key_set:bool). Multi-project pull iterates adapter.project_ids in order; per-guía carrier_meta.routal_project_id is set. send_instruction uses payload.project_id (1:1) and only falls back to default_project_id when omitted. RBAC: admin+ required (agent=403). Cross-tenant access on another tenant's client_id → 404 (verified). Pytest file: /app/tests/test_iter22_routal_multiproject.py. Live Routal API connectivity is N/A in preview pod (no real key) — pingable:false is expected. Regression suites I ran clean: test_carriers_health, test_workflow_and_cae, test_scheduler, test_ingest, test_admin_hierarchy, test_p2_features (58/58 GREEN).",
+  "rca_of_the_issue": "N/A — no bugs found. Implementation matches the 7-subtask plan exactly. Encryption, RBAC, cross-tenant isolation, multi-project pull, and 1:1 send_instruction routing all behave as specified. Frontend modal wiring is correct with data-testid coverage."
+}

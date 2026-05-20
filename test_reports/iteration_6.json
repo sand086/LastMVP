@@ -1,0 +1,49 @@
+{
+  "summary": "PROMPT 20 (parcial) — Routal real adapter validated end-to-end. 9/9 unit tests pass + 8/8 NEW live ingress tests pass against the real Routal API at https://api.routal.com. Real tracking_id 16lfgtGFKg2XxT7B confirmed completed→delivered (terminal, confidence=100). 10 real plans returned from project 636aaed54235630d2258fa6d. Frontend /admin/cae/routal renders all 4 health KPIs (api_key/project_id/configured/pingable=200 OK), top-10 real plans table, and track form with raw payload (lat/lng/address/phone/email). RBAC blocks agent (403) on all 3 admin/cae/routal endpoints. cae_status_catalog (collection: carrier_status_catalog) has all 4 routal codes seeded alongside 5 anchor mock carriers (99min, dhl, estafeta, fedex, paqex).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_routal.py",
+    "/app/tests/test_routal_live.py",
+    "/app/test_reports/pytest/iteration6_routal.xml",
+    "/app/test_reports/pytest/iteration6_routal_live.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "RoutalAdapter: NATIVE_CODES (4 codes) match the spec exactly: pending→in_transit, incomplete→exception(failed,requires_action), completed→delivered(terminal), canceled→cancelled(terminal). Confidence values 95/92/100/100 are reasonable.",
+    "RoutalAdapter._search_stop_by_external_id: uses POST /v2/stops/search with predicate {field: external_id, op: eq} — correct; supports both list and {docs:[...]} response shapes. Returns None on non-200 (and logs) instead of raising — good defensive style.",
+    "RoutalAdapter.get_raw_status: when stop not found, returns RawCarrierEvent with raw_code='unknown' and found=False so the normalizer creates an entry in cae_unmapped_codes — clean fallback that keeps the ticket in seguimiento rather than blowing up.",
+    "RoutalAdapter._require_creds: raises VALIDATION_FAILED (not generic exception) so the API surfaces a 400-class error — correct domain error.",
+    "Adapter registration in anchor_stubs.py uses lazy import (_register_routal) to avoid breaking imports if httpx is missing in unrelated environments — sensible.",
+    "admin_routal.py: RBAC via require_min_role('admin') applied at router level via Depends — verified agent receives 403 on health/plans/track. tenant_id read from request.state.user passed to StatusNormalizer (multi-tenant correct).",
+    "admin_routal.py /plans: projects only safe public fields (id, label, status, total_stops, completed_stops, pending_stops, execution_date) — no leakage of private_key/internal IDs.",
+    "admin_routal.py /track: returns both raw and normalized payloads — useful for debugging/visualization. event_at serialized to isoformat string.",
+    "Frontend AdminRoutal.jsx: all required testids present (routal-health-card, routal-reload, routal-track-card, routal-track-input, routal-track-submit, routal-track-result, routal-plans-card, routal-plan-{id}). State machine handles loading/error/result correctly.",
+    "Frontend: Health card shows ALL 4 KPIs in a single 4-col grid (api_key/project/configured/pingable) — matches spec.",
+    "Frontend: Plans table renders 10 rows with #/Plan/Estado/Stops/Pendientes/Completados/Ejecución columns; pendientes vs completados color-coded (status-active/status-resolved) — clean viz.",
+    "Minor: routal.py._stop_to_event uses datetime.fromisoformat with Z→+00:00 swap — works for Routal's ISO-Z timestamps but bare; if Routal ever sends non-Z offsets it will still parse correctly since Python 3.11+ fromisoformat is lenient.",
+    "Minor: admin_routal.py imports RESEND_API_KEY from core.config purely as a side-effect to ensure env loaded — works but a more explicit `from dotenv import load_dotenv; load_dotenv()` at app boot would be clearer (this is presumably done in core.config already).",
+    "Minor: AdminRoutal.jsx Promise.all swallows /plans error with an empty list fallback (.catch) but health failure isn't caught — if /health 500s the entire page would stay in 'Cargando…' state. Consider a try/catch per-call to surface partial state.",
+    "Minor: RoutalAdapter.send_instruction is implemented but not wired into any callable endpoint yet — fine for this iteration, will be needed when the cancel-from-MyExcellence flow is built."
+  ],
+  "updated_files": [
+    "/app/tests/test_routal_live.py (NEW — 8 live ingress tests against real Routal API + RBAC + auth)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 unit + 8/8 live ingress; pingable=true; real plans returned; real tracking_id resolves to delivered/terminal/100; agent 403 on all 3 endpoints; unauthenticated 401/403)",
+    "frontend": "100% (admin/cae/routal renders all 4 health KPIs + 10 real plans + track flow with raw payload; 0 page/console errors)"
+  },
+  "test_credentials": "admin@myexcellence.local / Admin123!  (admin endpoints + UI)\nagent@myexcellence.local / Admin123!  (RBAC negative tests)\nReal Routal tracking_id: 16lfgtGFKg2XxT7B (status=completed)\nROUTAL_API_KEY/ROUTAL_PROJECT_ID live in /app/backend/.env",
+  "seed_data_creation": "None persisted by tests. All test data (tenants/users) inside test_routal.py are ephemeral fixtures in the test DB. carrier_status_catalog has the expected 4 routal rows (canceled, completed, incomplete, pending) seeded by seeds/cae_catalog.py at boot.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "PROMPT 20 (parcial) is fully green. The new /app/tests/test_routal_live.py is a regression suite that hits the public ingress + real Routal API — keep it; it will catch any breakage of the real integration. Note the seed collection name is `carrier_status_catalog` (not `cae_status_catalog` as the request statement said) — that's the correct internal name used everywhere in the codebase. Routal returns ALL stops on GET /v2/plan/{id}/stops and POST /v2/stops/search supports predicate-based lookups by external_id (which is how MyExcellence stores tracking_id). The cron pulling job is NOT yet wired to consume Routal automatically (TODO acknowledged by main agent). Other 5 carriers (FedEx/DHL/Estafeta/99Min/Paqex) remain MOCKED — only Routal is real.",
+  "rca of the issue": "N/A — no bugs surfaced. PROMPT 20 (parcial) implementation is correct and matches spec on all 11 acceptance items in the request."
+}

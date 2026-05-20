@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ────────────────────────────────────────────────────────────────
+   MyExcellence — Paleta de marca · MYEXCELLENCE.md sec 2.3
+   No tocar sin actualizar la guía.
+   ──────────────────────────────────────────────────────────────── */
+
+@layer base {
+  :root {
+    /* Brand */
+    --mye-primary: 215 51% 25%;          /* #1F3A5F  Azul corporativo */
+    --mye-primary-soft: 215 35% 92%;
+    --mye-accent: 19 86% 41%;            /* #C2410C  Terracota — único acento */
+    --mye-accent-soft: 24 91% 95%;       /* #FEF3EC */
+    --mye-bg-app: 220 12% 96%;           /* #F4F5F7 */
+    --mye-bg-surface: 0 0% 100%;         /* #FFFFFF */
+    --mye-sidebar: 222 22% 14%;          /* #1A1F2E */
+    --mye-ink: 222 22% 14%;
+    --mye-ink-muted: 220 10% 38%;
+    --mye-border: 220 13% 88%;
+
+    /* Status semaphores */
+    --status-pending: 240 71% 67%;       /* #6366F1 */
+    --status-active: 191 91% 36%;        /* #0891B2 */
+    --status-waiting: 43 92% 41%;        /* #CA8A04 */
+    --status-escalated: 0 75% 51%;       /* #DC2626 */
+    --status-resolved: 142 71% 31%;      /* #15803D */
+    --status-closed: 220 9% 46%;         /* #6B7280 */
+    --status-claim: 263 70% 56%;         /* #7C3AED */
+
+    /* shadcn neutrals re-pointed at MyE */
+    --background: var(--mye-bg-app);
+    --foreground: var(--mye-ink);
+    --card: var(--mye-bg-surface);
+    --card-foreground: var(--mye-ink);
+    --popover: var(--mye-bg-surface);
+    --popover-foreground: var(--mye-ink);
+    --primary: var(--mye-primary);
+    --primary-foreground: 0 0% 100%;
+    --secondary: var(--mye-primary-soft);
+    --secondary-foreground: var(--mye-primary);
+    --muted: var(--mye-primary-soft);
+    --muted-foreground: var(--mye-ink-muted);
+    --accent: var(--mye-accent);
+    --accent-foreground: 0 0% 100%;
+    --destructive: var(--status-escalated);
+    --destructive-foreground: 0 0% 100%;
+    --border: var(--mye-border);
+    --input: var(--mye-border);
+    --ring: var(--mye-accent);
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  html, body, #root, .App {
+    min-height: 100vh;
+  }
+  body {
+    margin: 0;
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    background: hsl(var(--mye-bg-app));
+    color: hsl(var(--mye-ink));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  code, .mono, [data-mono="true"] {
+    font-family: 'IBM Plex Mono', Menlo, Monaco, Consolas, monospace;
+    font-feature-settings: 'zero', 'ss02';
+  }
+  ::selection {
+    background: hsl(var(--mye-accent) / 0.25);
+    color: hsl(var(--mye-ink));
+  }
+  * {
+    border-color: hsl(var(--border));
+  }
+}
+
+/* Backwards-compat with shadcn templates */
+@layer base {
+  [data-debug-wrapper="true"] { display: contents !important; }
+}

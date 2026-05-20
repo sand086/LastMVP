@@ -1,0 +1,37 @@
+{
+  "summary": "ITERATION 15 — verification of 6 batch features: AUDIT_SIGNING_SECRET rotation, demo claims seed, reclamos bulk UI + per-row PDF + seed-demo button, drag&drop evidencias, email templates UI/backend with variable preview, and cost-per-feature trend dashboard. Backend pytest: 11/11 PASS on /app/tests/test_iter15_email_templates_costtrend_seed.py in 1.15s. Live API smoke (https://bootstrap-emergent.preview.emergentagent.com): AUDIT_SIGNING_SECRET now reports severity='pass' (Configurado, 64 chars) — no longer WARN. POST /api/admin/seed/demo-claims with root_dev: created=0/skipped=3 confirming idempotency on second call; admin role → 403; seeded 3 claims with estados conciliado/en_dictamen_carrier/expediente_en_armado all present in GET /api/reclamos. GET /api/admin/ai/cost-trend?days=30 → grand_total_usd=0.002, features_count=1, series_len=1 (real data). GET /api/admin/email-templates count=1 with supported_keys=[incident_notice, test_email]; agent role → 403. Frontend Playwright (admin + root_dev): /reclamos shows reclamos-select-all, 3 per-row reclamos-pdf-<id> buttons; select-all click reveals reclamos-bulkbar with reclamos-bulk-export-zip; seed-demo button correctly absent (claims exist). Reclamo detail (non-terminal aee3ab1f): reclamo-download-pdf, evidence-dropzone, evidence-bulk-file-input all render. On terminal/conciliado reclamo (a91334ca) dropzone is hidden — INTENTIONAL gating by inmutable state (R28). /admin/notificaciones renders notif-templates-card with both tabs (incident_notice, test_email), subject/html/text inputs, save/preview buttons, 8 variable chips, and preview-pane updates after click showing 'María García' substitution. /admin/ai shows ai-tab-cost_trend; clicking renders ai-cost-trend-panel with day filters (7/14/30/60/90), client filter, 4 summary cards ($0.0020, 1 feature, 30d, 1 día con tráfico), daily bars chart, and per-feature breakdown listing draft_response_to_client. Regression: /admin/security renders with AUDIT_SIGNING_SECRET row and 'Listo para producción' panel; /admin/webhooks loads with all 6 tabs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_iter15_email_templates_costtrend_seed.py",
+    "/app/test_reports/pytest/iteration15.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/admin_seed.py — Idempotent seed via seed_marker='demo_claim_v1' verified live (second POST returns created=0/skipped=3). RBAC root_dev+superadmin correctly enforced (admin role → 403). Good practice using a stable marker for idempotency rather than relying on counts.",
+    "routes/admin_email_templates.py + services/email_templates.py — PUT/GET/DELETE + preview endpoints implemented with proper VALIDATION_FAILED → 422 for invalid keys. Agent role correctly receives 403. Variable substitution with {{var}} regex works as expected (María García, retraso substituted correctly in preview test). Worth double-checking that subject is also rendered, not just html/text — test_preview_substitutes_variables asserts 'María García' in d['subject'] which confirms it.",
+    "routes/ai.py L424-540 (cost-trend) — Mongo aggregation pipeline correctly excludes status='error' and other tenants (verified by test_aggregates_invocation_log: 0.035 instead of 0.035+99+50). client_id filter narrows to single client. Response shape {series, totals_by_day, grand_total_usd, features_count} is consistent and well-typed.",
+    "frontend/src/pages/Reclamos.jsx — Bulk UI well-implemented: checkbox per row, select-all toggle that switches between all/none, conditional bulkbar with count and 'Exportar PDFs (ZIP)' button. Per-row PDF download button visible on every row. Seed-demo button shown only when list is empty — solid UX touch.",
+    "frontend/src/components/EvidenceCard.jsx — Drag&drop dropzone correctly rendered ONLY when reclamo is not in terminal state (R28 inmutability respected). Bulk file input accepts multiple files. The 'JPG · PNG · WebP · HEIC · PDF · máx 10 MB cada uno' hint and 'Arrastra varios archivos aquí o selecciona desde tu equipo' label are clear.",
+    "frontend/src/pages/AdminNotifications.jsx (EmailTemplatesSection) — Excellent: 2 tabs, 3 editable fields (subject/html/text), 8 variable chips ({{recipient_name}}, {{ticket_id}}, {{tracking_id}}, {{message}}, {{cta_url}}, {{cta_label}}, {{tenant_name}}, {{now_utc}}), preview pane with rendered subject + html + text demo. 'Restablecer default' button cleanly maps to DELETE endpoint.",
+    "frontend/src/pages/AdminAI.jsx CostTrendPanel — Day filter chips (7/14/30/60/90), client filter dropdown, 4 summary cards, daily bars chart and per-feature breakdown with percentage of spend. Refresh button is well-placed. Chart renders even with 1-day-of-data (single bar) without breaking layout."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (11/11 pytest on iter15, plus 6 live curl probes on production ingress all green)",
+    "frontend": "100% (all required data-testids present and behave as specified across /reclamos, /reclamos/<id>, /admin/notificaciones, /admin/ai cost-trend tab; regressions on /admin/security and /admin/webhooks confirmed)"
+  },
+  "test_credentials": "root@myexcellence.local / Admin123! (root_dev), admin@myexcellence.local / Admin123! (admin), agent@myexcellence.local / Admin123! (agent) — live on preview ingress.",
+  "seed_data_creation": "3 demo claims already seeded in tenant myexcellence (estados conciliado/en_dictamen_carrier/expediente_en_armado). No additional seed required for /reclamos and /reclamos/<id> testing. Email template 'incident_notice' override remains (was set during earlier curl-based testing).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 6 features of iter15 are GREEN end-to-end. Backend regression suite: /app/tests/test_iter15_email_templates_costtrend_seed.py (11/11). Test selectors verified live: reclamos-select-all, reclamos-bulkbar, reclamos-bulk-export-zip, reclamos-pdf-<id>, reclamos-seed-demo (empty-state only), reclamo-download-pdf, evidence-dropzone (only on non-terminal estados), evidence-bulk-file-input, notif-templates-card, notif-template-tab-incident_notice, notif-template-tab-test_email, notif-template-subject/html/text, notif-template-save/preview, notif-template-var-*, notif-template-preview-pane, ai-tab-cost_trend, ai-cost-trend-panel, cost-trend-days-30, cost-trend-client-filter. Drag&drop dropzone IS gated by R28 inmutability — non-terminal estados (promovido, expediente_en_armado, enviado_carrier, en_dictamen_carrier, aprobado_carrier, en_conciliacion) render dropzone; terminal estados (conciliado, desistido, rechazado_carrier) hide it. This is the correct domain behavior. No further action items for main agent.",
+  "rca_of_the_issue": "N/A — no issues found in this iteration. AUDIT_SIGNING_SECRET WARN from iter14 has been resolved (secret rotated to 64 chars). Saved-filters UI gap from iter14 not retested in this iteration as it's outside the iter15 batch scope but worth checking in a future regression pass."
+}

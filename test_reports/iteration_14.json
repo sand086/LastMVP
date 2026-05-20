@@ -1,0 +1,56 @@
+{
+  "summary": "ITERATION 14 — verification of last batch of features (Security Audit, Saved Filters, Claims PDF/bulk ZIP, Webhook circuit reset, frontend smoke). Backend 14/14 PASS in 4.4s on /app/tests/test_iter14_security_savedfilters_claimspdf.py (2 skipped because tenant has 0 claims persisted, see context). Live ingress (https://bootstrap-emergent.preview.emergentagent.com): (1) GET /api/admin/security/audit returns 13 checks · 11 pass · 2 warn · 0 fail · ready_for_prod=true with admin/agent/anonymous correctly receiving 403; (2) Saved filters CRUD: POST/LIST/DELETE for agent works; admin cannot see agent's filter (per-user isolation OK); admin DELETE on agent's filter → 404 (ownership enforced); client_auditor → 403; (3) Claims PDF: GET /api/admin/claims/<id>/export.pdf with unknown id → 404, agent role → 403; bulk-export.zip with all-invalid ids → 404, agent → 403; (4) /api/admin/webhooks/subscriptions/<id>/reset-circuit: agent → 403, unknown id (admin) → 404; OpenAPI smoke replaced by hitting /api/admin/webhooks/events (5 events present) due to spec not being exposed via ingress. Frontend Playwright (admin/agent/auditor/supervisor/coordinator/root_dev): /admin/security renders perfect dashboard with checks table, severity PASS/WARN/FAIL badges, summary cards (TOTAL=13 PASS=11 WARN=2 FAIL=0) and 'Listo para producción' panel. /admin/webhooks shows 6 tabs (Dashboard/Suscripciones/Catálogo/Entregas/DLQ/Health); Dashboard tab clearly contains 'Top 5 endpoints frágiles (24h)' widget with summary metrics (intentos, success rate, avg latencia, DLQ, suscripciones 1/1). /agente has layout-table and layout-cards toggles — clicking 'Tarjetas' renders ticket as a card layout (kanban-like). /reclamos renders correctly but tenant has 0 claims (no PDF buttons rendered because list is empty). /admin/jerarquia, /admin/catalogo, /admin/tickets, /admin/ai, /auditor, /torre, /dashboard all render without error boundary. /admin/cae redirects admin role to /admin/jerarquia (expected RBAC: /admin/cae is root_dev only).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AgentPanel.jsx (/agente)",
+        "issue": "Saved-filters UI is NOT wired in AgentPanel even though backend /api/saved-filters CRUD is fully functional and tests pass (per-user isolation verified). Only 9 data-testids found on /agente: layout-table and layout-cards exist for view toggle, but there is no save-filter / load-filter / delete-filter dropdown. The task explicitly required: 'saved filters dropdown allows save/load/delete'.",
+        "selector": "expected something like agent-saved-filters-dropdown / agent-saved-filter-save / agent-saved-filter-item-{id}",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Reclamos PDF download (single + bulk)",
+        "issue": "Tenant has 0 claims persisted (GET /api/reclamos → items=[]) so the PDF/Exportar buttons cannot be visually exercised end-to-end on /reclamos. Backend route exists and returns 404 correctly when claim is unknown; agent role correctly receives 403. Need at least 1 seed claim to verify the full UI flow (button click → download stream).",
+        "affected_selectors": ["[data-testid*='pdf']", "[data-testid*='export']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_iter14_security_savedfilters_claimspdf.py",
+    "/app/test_reports/pytest/iteration14.xml"
+  ],
+  "action_items": [
+    "Wire saved-filters UI in /app/frontend/src/pages/AgentPanel.jsx: add a dropdown/popover with save-current-filters, list of user filters loadable on click, and delete-per-row. Backend API /api/saved-filters is ready (tested); only the React state + UI component is missing.",
+    "Seed at least 1 reclamo (claim) in the myexcellence tenant so the QA can visually verify the PDF download and bulk-export flow end-to-end on /reclamos. Currently the page renders 'Sin reclamos. Promueve uno desde Tickets.'",
+    "Optional: rotate AUDIT_SIGNING_SECRET to remove the 'rotate-quarterly' default — currently the security audit reports it as WARN."
+  ],
+  "critical_code_review_comments": [
+    "routes/security.py — Excellent coverage of pre-go-live gates (JWT length, Fernet, AUDIT_SIGNING_SECRET, BCRYPT_COST, CORS HTTPS-only, anti-SSRF flag, webhook test secret, cron, append-only repos heuristic, critical indexes presence). _RBAC_SUPER = require_role('root_dev','superadmin') correctly excludes admin/agent/auditor — verified live (admin → 403). Reflexive append-only check via `dir(cls)` is a clean way to enforce the architectural rule without invasive instrumentation.",
+    "routes/saved_filters.py — Per-user isolation enforced at repository layer via list_for_user(user.id) and delete(filter_id, user.id) requiring ownership. _RBAC = require_min_role('agent') — client_auditor (rank=1) is correctly below agent (rank>=2) and receives 403. The DELETE endpoint correctly returns 404 (not 403) when a different user attempts to delete, which is acceptable RFC-wise (don't disclose existence). All CRUD verified live.",
+    "routes/heatmap_bulk.py L162-207 — export_claim_pdf catches ValueError → 404, returns Response with application/pdf MIME and Content-Disposition; bulk-export filters claim_ids by tenant_id before render, correctly returning 404 when no valid_ids remain (cross-tenant claim_ids implicitly stripped). X-MyE-Bulk-Count header is a nice observability touch. _ADMIN_RBAC = require_min_role('admin') correctly blocks agent → 403.",
+    "frontend/src/pages/AdminSecurity.jsx — Renders cleanly with full checks table, severity badges (PASS green / WARN amber / FAIL red), 4 summary cards, 'Listo para producción' panel and 'Re-auditar' refresh button. Route correctly gated to root_dev|superadmin in App.js routing.",
+    "frontend/src/pages/AdminWebhooks.jsx — 6 tabs visible (Dashboard, Suscripciones, Catálogo, Entregas, DLQ, Health). Dashboard tab implements the requested 'Top 5 endpoints frágiles (24h)' widget with windowed metrics and per-evento aggregation. Health tab shows per-subscription cards. No regressions vs iter13.",
+    "frontend/src/pages/AgentPanel.jsx — Saved-filters UI gap: backend ready, frontend missing. layout-table/layout-cards toggle working; cards layout renders well as a kanban-equivalent. Recommend a small <Popover> with input+save button + list of filters with click-to-load and trash-to-delete.",
+    "frontend/src/pages/Reclamos.jsx — Page renders correctly but contains no PDF or bulk-export UI affordances at all in the current state (tenant=0 claims). Verify that when claims exist, each row exposes a button [data-testid='claim-pdf-{id}'] and there is a bulk select + 'Exportar ZIP' control. Without seed data this cannot be visually verified."
+  ],
+  "updated_files": [
+    "/app/tests/test_iter14_security_savedfilters_claimspdf.py (new — 16 tests, 14 pass, 2 skipped)"
+  ],
+  "success_rate": {
+    "backend": "100% executed (14/14 PASS, 2 skipped due to 0 claims in tenant — RBAC, 404 negative paths, response shape, headers all verified)",
+    "frontend": "95% — security audit dashboard, webhooks dashboard with top-5 fragile widget, kanban toggle, all admin/auditor/supervisor/dashboard pages render correctly. Only gap: saved-filters UI on /agente is missing, and /reclamos PDF buttons cannot be visually exercised due to empty claims dataset."
+  },
+  "test_credentials": "root@myexcellence.local / Admin123! (root_dev), admin@myexcellence.local / Admin123! (admin), agent@myexcellence.local / Admin123! (agent), auditor@myexcellence.local / Admin123! (client_auditor), supervisor@myexcellence.local / Admin123! (supervisor), coord@myexcellence.local / Admin123! (coordinator) — all live on preview ingress.",
+  "seed_data_creation": "TEST_iter14_agentfilter saved filter created during the agent CRUD flow and deleted within the same test (clean teardown). No persistent data left behind.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All backend endpoints for the last batch (security audit, saved filters CRUD, claims PDF + bulk ZIP, webhook circuit reset) are GREEN. Backend regression file: /app/tests/test_iter14_security_savedfilters_claimspdf.py (16 tests). Test files in /app/tests/test_webhooks_outbound.py (34) and /app/tests/test_security_and_savedfilters_and_claimspdf.py (12) are claimed green per iter13/main-agent and were not re-run here. Two GAPS to surface to main agent: (a) AgentPanel.jsx is MISSING the saved-filters dropdown UI even though /api/saved-filters works perfectly; (b) tenant has 0 claims so the /reclamos PDF UI cannot be visually verified — recommend seeding 1 claim. Frontend testids canónicos verified live: /admin/security renders with severity table; webhooks-tab-dashboard has 'Top 5 endpoints frágiles (24h)' widget; layout-table / layout-cards on /agente switches view. /admin/cae correctly redirects admin role away (root_dev only).",
+  "rca_of_the_issue": "AgentPanel saved-filters UI gap: routes/saved_filters.py and repositories/saved_filters.py are fully functional (verified by 7/7 backend assertions on CRUD + isolation + RBAC). The frontend file /app/frontend/src/pages/AgentPanel.jsx renders only 9 testids on /agente, none of them filter-related (only layout-table, layout-cards, and basic queue controls). Suggested fix: add a small UI block above the queue table — useState for current filter object, useEffect to GET /api/saved-filters on mount, button 'Guardar filtro' opening an input modal that POSTs name+filters, dropdown listing items[] with onClick → setFilters(item.filters), trash icon per item → DELETE /api/saved-filters/{id} then refresh."
+}

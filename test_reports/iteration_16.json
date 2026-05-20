@@ -1,0 +1,53 @@
+{
+  "summary": "ITERATION 17 — verified full UX upgrade of Agent Panel (/agente) across the 3 phases. Backend: created /app/tests/test_iter17_agent_panel.py with 18 tests, ALL PASS (3.55s) covering GET /api/agent/tickets/{id} shape + 404, POST /comment (internal→event_type=action, external→event_type=comm, body min/max validation→422, persistence via GET re-read), POST /bulk-take (empty 422, not_found, success), POST /bulk-status (empty 422, not_found, success_owner), plus regressions on /queue, /reclamos, /admin/security/checklist, /admin/ai/cost-trend. Live preview ingress used. Frontend Playwright (agent role on https://bootstrap-emergent.preview.emergentagent.com): /agente bandeja renders [layout-inbox|layout-table|layout-cards] with localStorage persistence (key 'mye:agent:layout' confirmed = 'inbox' default, 'cards' after switch + reload). Inbox view renders [agent-inbox-list] with [inbox-row-<id>], [inbox-row-select-<id>], [inbox-sla-<id>] (SLA badge '-17h 21m' with risk color). Header shows [agent-sla-risk-count] '1 SLA en riesgo' + '1 asignados · 0 en pool'. Keyboard shortcuts WORK: '/' focuses [agent-filter-search] (verified focused testid), '?' opens [agent-shortcuts-help] modal (verified WHEN no input has focus), 'j'/'k' navigates, 'Enter' opens detail (URL → /agente/<id>), 'Esc' returns to /agente. Bulk-bar: clicking [inbox-row-select-<id>] reveals [agent-bulkbar] with all 4 buttons [bulk-take|bulk-resolve|bulk-waiting-client|bulk-clear]; clicking bulk-take produced sonner toast + bulkbar cleared. Deep-link /agente/:ticketId: 3-pane layout fully wired — [agent-inbox-list] + [back-to-bandeja] on left, [agent-ticket-detail] + [ticket-state-machine] + [ticket-timeline] (24 events rendered with color dots distinguishing action/comm/sla_breach) + [ticket-composer] in center, [agent-context-panel] + 4 tabs [context-tab-shipment|client|evidence|sla] on right. Composer: tabs [composer-tab-internal|external], 4 CTA cards [composer-cta-evidence_request|tracking_request|apology_refund|patience_carrier] each prefills [composer-body] (verified body length 181 chars after evidence_request click), [composer-send] POSTs and shows sonner toast. [detail-status-select] present; [detail-fullview] href=/admin/tickets/<id> ✓; [detail-take-btn] correctly HIDDEN since ticket is already assigned (count=0); [state-machine-claim-branch] correctly HIDDEN since no active_claim (count=0). 'back-to-bandeja' navigates back to /agente. State-machine bar shows Nuevo → En curso (current) → Esperando → Resuelto with status pill.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AgentPanel keyboard shortcuts",
+        "issue": "After '/' shortcut focuses [agent-filter-search], pressing 'Esc' does NOT blur the input. Consequently subsequent '?' press is captured by the search input (filters tickets) instead of opening the help modal. The shortcut handler intentionally skips when target is an input (correct UX), but Esc should also blur the focused input to restore the global shortcut context.",
+        "selector": "[data-testid='agent-filter-search'], [data-testid='agent-shortcuts-help']",
+        "priority": "LOW"
+      },
+      {
+        "component": "Layout switcher visual active state",
+        "issue": "After reload, localStorage correctly restores 'cards' layout, but the layout button [data-testid='layout-cards'] has no aria-pressed/data-active attribute to indicate it is the current layout. Visual styling likely applied via Tailwind class but a11y/testability would benefit from aria-pressed='true'.",
+        "selector": "[data-testid='layout-cards']",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_iter17_agent_panel.py",
+    "/app/test_reports/pytest/iteration17.xml"
+  ],
+  "action_items": [
+    "(Optional, low-prio) On Escape inside agent shortcut handler, also call document.activeElement?.blur() when target is the search input — so the next '?' press opens the help modal even after focusing search.",
+    "(Optional) Add aria-pressed='true' to the currently-selected layout button so the active state is testable/discoverable."
+  ],
+  "critical_code_review_comments": [
+    "routes/agent.py L168-209 (ticket_detail) — Clean tenant-scoped aggregation: filters {tenant_id, ticket_id} on timeline_events, guias, claims, evidences, and clients. Properly excludes '_id' field. Active claim filter is_terminal:false is correct. Evidence count uses count_documents (efficient). All 18 backend tests green.",
+    "routes/agent.py L212-238 (add_comment) — Append-only correct: event_type='comm' when external else 'action'; description prefix differentiates 'Nota interna' vs 'Comunicación al cliente'. Pydantic min_length=1 / max_length=5000 properly returns 422. event['_id'] popped before return (✓ MongoDB ObjectId not serialized). Persistence verified via GET re-read.",
+    "routes/agent.py L241-263 (bulk_take) — Per-ticket idempotency: skips with reason in {not_found, already_assigned}. Pydantic min_length=1 ensures empty list → 422. ✓",
+    "routes/agent.py L266-288 (bulk_status) — RBAC nuance correct: agent can only target owned or unassigned tickets; admin+ may force (ROLE_RANK check). Reason field max_length=500. ✓",
+    "frontend AgentPanel.jsx (565 lines) — Approaching the recommended 700-line ceiling but still maintainable since most logic delegated to /agent/* subcomponents. Sub-componentization is excellent (InboxList, TicketDetail, ContextPanel, Composer, Timeline, StateMachine, KeyboardShortcutsHelp). If file grows further, consider extracting the bandeja header + bulk-bar into a separate file.",
+    "shortcuts.js — Clean useEffect with proper deps. Minor: handler returns early when editable target detected, but does not provide a way to blur on Esc. Adding `if (e.key === 'Escape' && editable) e.target.blur()` before the editable return would solve the bug found in this run.",
+    "Composer flow E2E verified: CTA injection (composer-body length 181 after evidence_request click) → POST /comment → 200 → sonner toast → timeline re-rendered with new 'action' event in correct chronological position. Toaster correctly globally wired via App.js."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (18/18 pytest)",
+    "frontend": "~95% (all required data-testids present and behave correctly; 2 LOW-priority UX nits identified, no functional blockers)"
+  },
+  "test_credentials": "agent@myexcellence.local / Admin123! (tenant myexcellence, 1 ticket in mine — 02140f8e-4745-4809-a3df-1e0668b6a96c, in_progress, damage).",
+  "seed_data_creation": "None. Used existing 1 ticket in agent queue. Test comments tagged TEST_iter17_playwright / TEST_internal note from pytest iter17 / TEST_external message from pytest iter17 / TEST_persistence_check were appended to the timeline (now 26 events). Idempotent.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter17 backend (4 new endpoints) + frontend (bandeja 3-layout, Inbox dense rows with priority stripes + SLA bars, keyboard shortcuts, bulk-bar, 3-pane detail layout, state-machine, timeline, composer with 4 CTA cards, context panel with 4 tabs, deep-link /agente/:ticketId) ALL GREEN. Pytest regression file: /app/tests/test_iter17_agent_panel.py. Selectors confirmed live: layout-inbox/table/cards, agent-inbox-list, inbox-row-<id>, inbox-row-select-<id>, inbox-sla-<id>, agent-sla-risk-count, agent-bulkbar, bulk-take/resolve/waiting-client/clear, agent-shortcuts-help, agent-filter-search, agent-ticket-detail, ticket-state-machine, ticket-timeline, ticket-composer, composer-tab-internal/external, composer-cta-evidence_request/tracking_request/apology_refund/patience_carrier, composer-body, composer-send, agent-context-panel, context-tab-shipment/client/evidence/sla, detail-status-select, detail-fullview, back-to-bandeja. NOT TESTED EXPLICITLY: state-machine-claim-branch (no active claim on the seeded ticket) and detail-take-btn (existing ticket already assigned — code path verified by inverse: count=0 when assigned_agent_id is set, as expected). To test those branches, seed a claim or have agent un-take a ticket first. Tenant isolation not tested cross-tenant because only one tenant ('myexcellence') has seeded agents — would require a second tenant with its own agent user; current tenant_id filtering in all 4 endpoints looks correct on code review.",
+  "rca_of_the_issue": "Minor frontend UX bug — KeyboardShortcutsHelp does not open when Esc is pressed after the search input was focused via '/'. Root cause: shortcuts.js useAgentShortcuts handler returns early when target.tagName is INPUT/TEXTAREA (which is correct to not hijack typing). However, on Escape the handler calls onClose but doesn't blur the input, so the next '?' keypress is captured by the still-focused input and ends up typed as text. Mitigation: extend the handler so that when key === 'Escape' AND editable, also do e.target.blur() before returning. This is a 2-line change in /app/frontend/src/pages/agent/shortcuts.js around L30-41. Verified by manual test: after explicit blur via page.evaluate, pressing '?' opens [data-testid='agent-shortcuts-help'] correctly."
+}

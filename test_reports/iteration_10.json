@@ -1,0 +1,45 @@
+{
+  "summary": "PROMPT 26 V2 P2 — Validation end-to-end COMPLETED GREEN. Pytest 45/45 PASS in 6.46s: test_ai_v2.py 18/18 (R36-R42 regression intacta), test_ai_p1.py 15/15 (CircuitBreaker, PromptCache, StreamingSSE, ApproveAndWebhook, DailySummary), test_ai_p2.py 9/9 (Benchmark 4 + AuditExport 5), test_ai_load.py 3/3 (1k concurrent invocations sin race conditions [LOAD] N=1000 throughput=603.9 req/s p99=188ms; 1k cache hits con provider llamado solo 1 vez; append-only sin duplicados). Live ingress OK: POST /api/admin/ai/benchmark/run?dry_run=true&samples=1 superadmin→200 con mode='dry_run' + 4 modelos (haiku, sonnet, gpt-4o-mini, gpt-4.1-mini); admin→403; GET /api/admin/ai/benchmark admin→200; GET /api/admin/ai/audit/preview superadmin→200 con signature sha256=… y preview_csv 'invocation_id,…'; GET /api/admin/ai/audit/export.csv superadmin→200 content-type text/csv, X-MyE-Audit-Signature header, X-MyE-Audit-Rows=3, attachment filename ok; admin→403; filtros (status=success) reducen rows correctamente. **HMAC SHA-256 verificado independientemente**: secret leído del backend/.env (AUDIT_SIGNING_SECRET o fallback JWT_SECRET) recalculado localmente coincide EXACTAMENTE con el header X-MyE-Audit-Signature devuelto. Frontend /admin/ai con superadmin: 6 tabs presentes (ai-tab-{features,brackets,clients,consumption,benchmark,audit}); BenchmarkPanel: ai-benchmark-run-dry click → 4 ai-benchmark-row-* renderizados; ai-benchmark-run-live VISIBLE solo para superadmin (admin: oculto OK). AuditPanel: ai-audit-preview-btn click → ai-audit-preview con ai-audit-signature='sha256=6d2760cf8e01390393f9834a952668c5f81e7a35f80b1cd83f604ae0ceea7253'; ai-audit-download-btn VISIBLE solo para superadmin (admin: oculto OK). Bonus: regresión iteration 9 (classify_motivo cache_enabled=False en live) AHORA RESUELTA — GET /api/admin/ai/features live devuelve cache_enabled=True para classify_motivo.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "AdminAI · BenchmarkPanel dry-run",
+        "issues": ["duration_ms=0 en respuesta dry-run live (cosmético; dry-run no mide tiempo real, solo estima desde MODEL_PRICING). No funcional, pero para UX claridad sugerencia: ocultar la columna duration_ms en mode='dry_run' o mostrar guion."]
+      },
+      {
+        "screen": "AdminAI · AuditPanel filtros",
+        "issues": ["Los inputs date_from/date_to usan el browser-native date picker (mm/dd/yyyy) en vez de un componente shadcn calendar. Para consistencia con resto de la app sería preferible Calendar component; menor."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/test_ai_v2.py",
+    "/app/tests/test_ai_p1.py",
+    "/app/tests/test_ai_p2.py",
+    "/app/tests/test_ai_load.py",
+    "/app/test_reports/pytest/iteration10_ai_p2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/ai/benchmark.py — run_benchmark(dry_run=True) calcula avg_cost_usd desde MODEL_PRICING sin llamar al provider; itera los 4 modelos definidos (haiku, sonnet, gpt-4o-mini, gpt-4.1-mini). Persistencia en ai_benchmarks ok (test count_documents). p50_latency_ms=None correcto cuando dry_run=True.",
+    "services/ai/audit_export.py — build_csv aplica filtros date_from/date_to/status/client_id/feature_code; sign_body usa hmac.new(SECRET, body, sha256).hexdigest() con prefix 'sha256='; SECRET fallback robusto (AUDIT_SIGNING_SECRET → JWT_SECRET). Verificación independiente E2E: la firma calculada localmente coincide con la devuelta por el endpoint, lo que confirma que cualquier auditor con el secret puede validar la integridad del CSV.",
+    "routes/ai.py — RBAC correctamente aplicado: /benchmark/run y /audit/export.csv requieren superadmin (admin→403), /benchmark y /audit/preview admiten admin (lista) o superadmin (preview). Los headers X-MyE-Audit-Signature, X-MyE-Audit-Rows y content-disposition (attachment; filename=audit_<timestamp>.csv) están presentes.",
+    "tests/test_ai_load.py — diseño sólido: usa asyncio.Semaphore(64) para evitar tormenta del event loop, mide p50/p95/p99 con _percentile, y valida 3 propiedades clave: (1) successes==N evita silent failures, (2) cons['total_cost_usd'] == sum(individual costs) detecta race en consumo, (3) call_count==1 con 1000 mismos prompts confirma cache hit determinista bajo concurrencia. El throughput observado live (603 req/s vs 641 reportado por main agent) es consistente con variabilidad de I/O Mongo.",
+    "frontend/src/pages/AdminAI.jsx — RBAC frontend correcto: ai-benchmark-run-live y ai-audit-download-btn condicionados por role==='superadmin'. Tabs siempre visibles para admin+ (consistente con review request: 'la pestaña ES visible pero el botón download debe estar oculto'). Todos los data-testid solicitados presentes.",
+    "Sugerencia menor (no bloqueante): en routes/ai.py el endpoint /benchmark/run con dry_run=true devuelve duration_ms=0; idealmente devolvería None para distinguir 'no medido' de '0ms'. UX cosmético."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (45/45 pytest + 8/8 live ingress checks)", "frontend": "100% (6 tabs + RBAC superadmin/admin verified, todos los testids presentes)"},
+  "test_credentials": "superadmin@myexcellence.local / Admin123! · admin@myexcellence.local / Admin123!",
+  "seed_data_creation": "Insertadas 3 invocaciones de prueba en ai_invocation_log (test-inv-live-054034 success, 35635ae3 success, d0ac60f7 error) heredadas de iteración 9 más nueva. También se ejecutó benchmark dry_run live, persistido en ai_benchmarks (2 items en GET /api/admin/ai/benchmark). Cleanup recomendado opcional: db.ai_benchmarks.deleteMany({mode:'dry_run', triggered_by:'<superadmin_user_id>'}) y db.ai_invocation_log.deleteMany({prompt_hash:/^test-inv-live/}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Estado al final de iter 10: P0+P1+P2+Load TODO VERDE en pytest (45/45) y todo el flujo live ingress validado (8/8 checks). HMAC signature verifica independientemente con AUDIT_SIGNING_SECRET del .env. La regresión P1 de iter 9 (classify_motivo cache_enabled=False en live por seed no-mergeante) ESTÁ RESUELTA — el GET /api/admin/ai/features live ahora devuelve cache_enabled=True para classify_motivo. El bug menor de iter 9 (webhook_outbound_secret en claro en GET) NO fue re-validado en iter 10 (fuera del alcance P2); si se quiere cerrar verificar GET /api/admin/ai/client-config/{id} retorna webhook_outbound_secret_set en lugar del valor literal.",
+  "rca_of_the_issue": "N/A — no issues found in P2 scope. Test executed across regression (P0+P1), new P2 backend (benchmark + audit_export), load (1k concurrent), live ingress and frontend RBAC. All passed."
+}
