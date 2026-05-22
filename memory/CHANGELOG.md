@@ -1,6 +1,52 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-21 — FIX P0 INTEGRIDAD: incidencias eliminadas sin trazabilidad
+
+**Reporte del usuario**: 7 incidencias desaparecieron entre ayer y hoy ~3pm en producción. 6 de ellas pertenecientes a la misma ruta Routal (`6a04abeb69d4d67178642d8c`). Imposible determinar quién/cuándo/cómo se eliminaron.
+
+**Root cause real (déficit arquitectónico, no bug puntual)**: el código tenía 3 caminos que eliminaban incidencias y **2 de ellos no guardaban audit_log**:
+1. `DELETE /api/incidents/{id}` (botón 🗑️ en UI, abierto a `agent`/`coordinator`/`developer`) → hard-delete sin audit_log.
+2. `POST /api/admin/cleanup/routes-packages` → hard-delete masivo sin audit_log.
+3. `DELETE /api/journeys/{id}` cascade → con audit_log pero sin archivo.
+
+Cualquier click accidental en el basurero o ejecución de cleanup masivo sin filtros borraba incidencias **irrecuperables** y sin testigo. Una incidencia de cliente vale dinero (multas, PowerBI, SLA): la pérdida silenciosa es inaceptable.
+
+**Patrón de fix elegido — `incidents_archive` collection**:
+- En vez de soft-delete con campo `deleted_at` (que requeriría modificar las ~25 queries de incidents existentes y abrir riesgo de regresiones), se copia el documento completo a colección `incidents_archive` antes del `delete_one` / `delete_many`. La colección `incidents` queda exactamente igual (sólo activas), por lo que ninguna query pre-existente cambia su comportamiento.
+- Cada documento archivado lleva metadata `_archive_meta`: `deleted_at`, `deleted_by_id`, `deleted_by_email`, `deleted_by_name`, `deletion_source`, `deletion_reason` (opcional).
+
+**Cambios** (`/app/backend/routes/journey_routes.py`, `/app/backend/routes/admin_routes.py`):
+
+1. **`DELETE /api/incidents/{id}`** ahora:
+   - Acepta body opcional con `reason`.
+   - Copia incidencia completa a `incidents_archive` con metadata.
+   - Inserta `audit_logs.action=incident_deleted` con `tracking_number`, `incident_type`, `severity`, `imputability`, `journey_id`, `user_email`.
+   - Recién entonces hace `delete_one`.
+   - **Role restringido a `coordinator`/`developer`** (antes incluía `agent`).
+
+2. **`POST /api/incidents/{id}/restore`** (nuevo, sólo `developer`):
+   - Mueve documento desde `incidents_archive` → `incidents`.
+   - Audit_log con `originally_deleted_at` y `originally_deleted_by`.
+
+3. **`DELETE /api/journeys/{id}`** cascade ahora también archiva las incidencias afectadas y reporta `incidents_archived` en el response y audit log.
+
+4. **`POST /api/admin/cleanup/routes-packages`** ahora:
+   - Archiva todas las incidencias afectadas antes del bulk delete.
+   - Inserta `audit_logs.action=cleanup_all` o `cleanup_by_date` con `journeys_deleted`, `packages_deleted`, `incidents_deleted`, `incidents_archived`, rango de fechas y `user_email`.
+
+5. **`POST /api/incidents/forensics`** (nuevo, `coordinator`/`developer`):
+   - Recibe `{ tracking_numbers: [], journey_id?, routal_route_id?, hours_back?: 48 }`.
+   - Devuelve por cada tracking: estado actual del package + journey + incidencias activas + **incidencias archivadas con quién/cuándo/por qué se borraron** + audit logs relevantes.
+   - Adicionalmente devuelve `recent_destructive_events` global con todos los `cleanup_*`/`journey_deleted`/`incident_deleted` de la ventana.
+   - Esta es la herramienta para que el equipo investigue producción sin acceso a Atlas.
+
+**Limitación importante para producción actual**: las 7 incidencias borradas hoy 3pm fueron eliminadas con el código viejo (sin archive ni audit_log) → **no son recuperables vía `/api/incidents/forensics` ni `restore`**. Sólo se pueden recuperar desde el oplog de Atlas dentro de la ventana de 24h (contactar Emergent Support antes de mañana 3pm).
+
+**Verificación local**: lint OK, backend reinicia, `/api/incidents/forensics` y `/api/incidents/{id}/restore` registrados con auth (401 sin token). `/health` sigue en 1.9ms.
+
+
+
 ## 2026-05-15 — REFACTOR ARQUITECTÓNICO P0 (CAPA 6): Workers en proceso separado
 
 **Motivación**: tras capas 3 (middleware bypass), 4 (yields explícitos) y 5 (raw ASGI middleware), `/health` ya no timeoutea bajo carga normal. Pero la causa raíz subyacente — **workers compartiendo event loop con FastAPI** — permanecía. Bajo picos extremos (concurrencias altas, ráfagas LLM con timeouts de 30s+, sweeps masivos) las mitigaciones podían no ser suficientes. La solución definitiva es ejecutar los workers en un **proceso OS separado** con su propio event loop.

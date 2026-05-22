@@ -497,20 +497,134 @@ async def update_incident(incident_id: str, data: dict, user: dict = Depends(req
 
 
 @router.delete("/incidents/{incident_id}")
-async def delete_incident(incident_id: str, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
+async def delete_incident(incident_id: str, body: Optional[dict] = None, user: dict = Depends(require_role(["coordinator", "developer"]))):
+    """Soft-delete via archive collection.
+
+    Bug fix 2026-05-21: el endpoint anterior hacía hard-delete sin audit_log,
+    permitiendo que incidencias eliminadas por error (botón 🗑️ en UI) fueran
+    irrecuperables y sin trazabilidad. Ahora:
+    1. Copia el documento completo a `incidents_archive` con metadata de auditoría.
+    2. Inserta entrada en `audit_logs` con tracking_number/incident_type/usuario.
+    3. Solo entonces hace delete_one en `incidents`.
+
+    Restaurable vía POST /api/incidents/{id}/restore (solo developer).
+    Role restringido a coordinator/developer (antes incluía 'agent').
+    """
+    incident = await db.incidents.find_one({"id": incident_id}, {"_id": 0})
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incidencia no encontrada")
+
+    deletion_reason = ""
+    if body and isinstance(body, dict):
+        deletion_reason = (body.get("reason") or "").strip()[:500]
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    archive_doc = {
+        **incident,
+        "_archive_meta": {
+            "deleted_at": now_iso,
+            "deleted_by_id": user["id"],
+            "deleted_by_email": user.get("email"),
+            "deleted_by_name": user.get("name"),
+            "deletion_reason": deletion_reason,
+            "deletion_source": "ui_individual_delete",
+        },
+    }
+    await db.incidents_archive.insert_one(archive_doc)
+
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "incident_deleted",
+        "incident_id": incident_id,
+        "journey_id": incident.get("journey_id"),
+        "tracking_number": incident.get("tracking_number"),
+        "incident_type": incident.get("incident_type"),
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "details": {
+            "deletion_reason": deletion_reason,
+            "severity": incident.get("severity"),
+            "imputability": incident.get("imputability"),
+        },
+        "timestamp": now_iso,
+    })
+
     result = await db.incidents.delete_one({"id": incident_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Incidencia no encontrada")
-    return {"message": "Incidencia eliminada"}
+        # Race: archive succeeded but delete didn't; not critical, archive is source of truth.
+        logger.warning(f"Incident {incident_id} archived but not deleted (race). Continuing.")
+
+    logger.info(
+        f"[incident_deleted] id={incident_id[:8]} tracking={incident.get('tracking_number')} "
+        f"by={user.get('email')} reason='{deletion_reason[:60]}'"
+    )
+    return {"message": "Incidencia eliminada", "archived": True, "incident_id": incident_id}
+
+
+@router.post("/incidents/{incident_id}/restore")
+async def restore_incident(incident_id: str, user: dict = Depends(require_role(["developer"]))):
+    """Restaura una incidencia desde incidents_archive → incidents.
+
+    Solo developer (operación administrativa). Audit_log obligatorio.
+    """
+    archived = await db.incidents_archive.find_one({"id": incident_id}, {"_id": 0})
+    if not archived:
+        raise HTTPException(status_code=404, detail="Incidencia no encontrada en archivo")
+
+    # Check it's not already active
+    existing = await db.incidents.find_one({"id": incident_id}, {"_id": 0, "id": 1})
+    if existing:
+        raise HTTPException(status_code=409, detail="Incidencia ya está activa")
+
+    # Strip archive metadata before restoring
+    archive_meta = archived.pop("_archive_meta", {}) or {}
+    archived.pop("_id", None)
+    await db.incidents.insert_one(archived)
+    await db.incidents_archive.delete_one({"id": incident_id})
+
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "incident_restored",
+        "incident_id": incident_id,
+        "journey_id": archived.get("journey_id"),
+        "tracking_number": archived.get("tracking_number"),
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "details": {
+            "originally_deleted_at": archive_meta.get("deleted_at"),
+            "originally_deleted_by": archive_meta.get("deleted_by_email"),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"message": "Incidencia restaurada", "incident_id": incident_id}
 
 
 
 @router.delete("/journeys/{journey_id}")
 async def delete_journey(journey_id: str, user: dict = Depends(require_role(["coordinator", "developer"]))):
-    """Delete a journey and cascade delete all related packages, incidents, and images."""
+    """Delete a journey and cascade delete all related packages, incidents, and images.
+
+    Bug fix 2026-05-21: las incidencias eliminadas en cascada ahora se copian a
+    `incidents_archive` antes del delete_many para mantener trazabilidad y
+    permitir recuperación vía POST /api/incidents/{id}/restore.
+    """
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0, "id": 1, "status": 1})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    archive_meta = {
+        "deleted_at": now_iso,
+        "deleted_by_id": user["id"],
+        "deleted_by_email": user.get("email"),
+        "deleted_by_name": user.get("name"),
+        "deletion_source": "journey_cascade_delete",
+        "deleted_journey_id": journey_id,
+    }
+    incidents_to_archive = await db.incidents.find({"journey_id": journey_id}, {"_id": 0}).to_list(10000)
+    if incidents_to_archive:
+        archive_docs = [{**inc, "_archive_meta": archive_meta} for inc in incidents_to_archive]
+        await db.incidents_archive.insert_many(archive_docs)
 
     # Cascade delete
     pkg_result = await db.packages.delete_many({"journey_id": journey_id})
@@ -529,18 +643,20 @@ async def delete_journey(journey_id: str, user: dict = Depends(require_role(["co
         "details": {
             "packages_deleted": pkg_result.deleted_count,
             "incidents_deleted": inc_result.deleted_count,
+            "incidents_archived": len(incidents_to_archive),
             "images_deleted": img_result.deleted_count,
             "training_samples_deleted": ts_result.deleted_count,
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso,
     })
 
-    logger.info(f"Journey {journey_id} deleted by {user.get('email')}: {pkg_result.deleted_count} packages, {inc_result.deleted_count} incidents")
+    logger.info(f"Journey {journey_id} deleted by {user.get('email')}: {pkg_result.deleted_count} packages, {inc_result.deleted_count} incidents (archived={len(incidents_to_archive)})")
     return {
         "message": "Ruta eliminada exitosamente",
         "deleted": {
             "packages": pkg_result.deleted_count,
             "incidents": inc_result.deleted_count,
+            "incidents_archived": len(incidents_to_archive),
             "images": img_result.deleted_count,
         },
     }
