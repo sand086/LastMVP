@@ -280,6 +280,37 @@ async def create_journey(data: JourneyCreate, user: dict = Depends(require_role(
 
     # Bulk update retry packages with a single update_many call
     if data.retry_packages:
+        # Bug fix 2026-05-21: snapshot estado previo de packages antes de
+        # reasignar journey_id + reset status a "pending". Sin esto, el flujo
+        # destruía silenciosamente delivered/failed previos sin trazabilidad.
+        prev_states = await db.packages.find(
+            {"id": {"$in": data.retry_packages}},
+            {"_id": 0, "id": 1, "journey_id": 1, "status": 1, "tracking_number": 1, "evidence_score": 1},
+        ).to_list(len(data.retry_packages))
+        if prev_states:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.audit_logs.insert_one({
+                "id": str(uuid.uuid4()),
+                "action": "packages_reassigned_for_retry",
+                "journey_id": journey_id,
+                "user_id": user["id"],
+                "user_email": user.get("email"),
+                "details": {
+                    "new_journey_id": journey_id,
+                    "package_count": len(prev_states),
+                    "snapshots": [
+                        {
+                            "package_id": p["id"],
+                            "tracking_number": p.get("tracking_number"),
+                            "prev_journey_id": p.get("journey_id"),
+                            "prev_status": p.get("status"),
+                            "prev_evidence_score": p.get("evidence_score"),
+                        }
+                        for p in prev_states
+                    ],
+                },
+                "timestamp": now_iso,
+            })
         await db.packages.update_many(
             {"id": {"$in": data.retry_packages}},
             {"$set": {"journey_id": journey_id, "status": "pending", "is_retry": True}},
@@ -604,11 +635,13 @@ async def restore_incident(incident_id: str, user: dict = Depends(require_role([
 async def delete_journey(journey_id: str, user: dict = Depends(require_role(["coordinator", "developer"]))):
     """Delete a journey and cascade delete all related packages, incidents, and images.
 
-    Bug fix 2026-05-21: las incidencias eliminadas en cascada ahora se copian a
-    `incidents_archive` antes del delete_many para mantener trazabilidad y
-    permitir recuperación vía POST /api/incidents/{id}/restore.
+    Bug fix 2026-05-21: archive completo antes del delete para permitir restore:
+    - journey → journeys_archive
+    - packages asociados → packages_archive
+    - incidents asociadas → incidents_archive
+    Cada uno con metadata `_archive_meta` (deleted_at, deleted_by, source, journey_id).
     """
-    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0, "id": 1, "status": 1})
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
 
@@ -618,13 +651,22 @@ async def delete_journey(journey_id: str, user: dict = Depends(require_role(["co
         "deleted_by_id": user["id"],
         "deleted_by_email": user.get("email"),
         "deleted_by_name": user.get("name"),
-        "deletion_source": "journey_cascade_delete",
+        "deletion_source": "journey_individual_delete",
         "deleted_journey_id": journey_id,
     }
+
+    # Archive packages
+    pkgs_to_archive = await db.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(50000)
+    if pkgs_to_archive:
+        await db.packages_archive.insert_many([{**p, "_archive_meta": archive_meta} for p in pkgs_to_archive])
+
+    # Archive incidents
     incidents_to_archive = await db.incidents.find({"journey_id": journey_id}, {"_id": 0}).to_list(10000)
     if incidents_to_archive:
-        archive_docs = [{**inc, "_archive_meta": archive_meta} for inc in incidents_to_archive]
-        await db.incidents_archive.insert_many(archive_docs)
+        await db.incidents_archive.insert_many([{**inc, "_archive_meta": archive_meta} for inc in incidents_to_archive])
+
+    # Archive journey itself
+    await db.journeys_archive.insert_one({**journey, "_archive_meta": archive_meta})
 
     # Cascade delete
     pkg_result = await db.packages.delete_many({"journey_id": journey_id})
@@ -642,6 +684,7 @@ async def delete_journey(journey_id: str, user: dict = Depends(require_role(["co
         "user_email": user.get("email"),
         "details": {
             "packages_deleted": pkg_result.deleted_count,
+            "packages_archived": len(pkgs_to_archive),
             "incidents_deleted": inc_result.deleted_count,
             "incidents_archived": len(incidents_to_archive),
             "images_deleted": img_result.deleted_count,
@@ -650,16 +693,123 @@ async def delete_journey(journey_id: str, user: dict = Depends(require_role(["co
         "timestamp": now_iso,
     })
 
-    logger.info(f"Journey {journey_id} deleted by {user.get('email')}: {pkg_result.deleted_count} packages, {inc_result.deleted_count} incidents (archived={len(incidents_to_archive)})")
+    logger.info(
+        f"Journey {journey_id} deleted by {user.get('email')}: "
+        f"{pkg_result.deleted_count} packages (archived={len(pkgs_to_archive)}), "
+        f"{inc_result.deleted_count} incidents (archived={len(incidents_to_archive)})"
+    )
     return {
         "message": "Ruta eliminada exitosamente",
         "deleted": {
             "packages": pkg_result.deleted_count,
+            "packages_archived": len(pkgs_to_archive),
             "incidents": inc_result.deleted_count,
             "incidents_archived": len(incidents_to_archive),
             "images": img_result.deleted_count,
         },
     }
+
+
+@router.post("/journeys/{journey_id}/restore")
+async def restore_journey(journey_id: str, user: dict = Depends(require_role(["developer"]))):
+    """Restaura una journey + sus packages + sus incidents desde archive collections.
+
+    Solo developer. Idempotente respecto a journeys ya activas.
+    """
+    archived_journey = await db.journeys_archive.find_one({"id": journey_id}, {"_id": 0})
+    if not archived_journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada en archivo")
+
+    existing = await db.journeys.find_one({"id": journey_id}, {"_id": 0, "id": 1})
+    if existing:
+        raise HTTPException(status_code=409, detail="Ruta ya está activa")
+
+    archive_meta = archived_journey.pop("_archive_meta", {}) or {}
+    archived_journey.pop("_id", None)
+    await db.journeys.insert_one(archived_journey)
+
+    archived_pkgs = await db.packages_archive.find({"journey_id": journey_id}, {"_id": 0}).to_list(50000)
+    pkg_restored = 0
+    for p in archived_pkgs:
+        p.pop("_archive_meta", None)
+        p.pop("_id", None)
+        # Skip if package already active
+        if not await db.packages.find_one({"id": p["id"]}, {"_id": 0, "id": 1}):
+            await db.packages.insert_one(p)
+            pkg_restored += 1
+    if archived_pkgs:
+        await db.packages_archive.delete_many({"journey_id": journey_id})
+
+    archived_incs = await db.incidents_archive.find({"journey_id": journey_id}, {"_id": 0}).to_list(10000)
+    inc_restored = 0
+    for i in archived_incs:
+        i.pop("_archive_meta", None)
+        i.pop("_id", None)
+        if not await db.incidents.find_one({"id": i["id"]}, {"_id": 0, "id": 1}):
+            await db.incidents.insert_one(i)
+            inc_restored += 1
+    if archived_incs:
+        await db.incidents_archive.delete_many({"journey_id": journey_id})
+
+    await db.journeys_archive.delete_one({"id": journey_id})
+
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "journey_restored",
+        "journey_id": journey_id,
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "details": {
+            "packages_restored": pkg_restored,
+            "incidents_restored": inc_restored,
+            "originally_deleted_at": archive_meta.get("deleted_at"),
+            "originally_deleted_by": archive_meta.get("deleted_by_email"),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {
+        "message": "Ruta y dependencias restauradas",
+        "journey_id": journey_id,
+        "packages_restored": pkg_restored,
+        "incidents_restored": inc_restored,
+    }
+
+
+@router.post("/packages/{package_id}/restore")
+async def restore_package(package_id: str, user: dict = Depends(require_role(["developer"]))):
+    """Restaura un package desde packages_archive → packages.
+
+    Solo developer. No restaura sus incidencias (esas se restauran via
+    POST /incidents/{id}/restore individualmente).
+    """
+    archived = await db.packages_archive.find_one({"id": package_id}, {"_id": 0})
+    if not archived:
+        raise HTTPException(status_code=404, detail="Paquete no encontrado en archivo")
+
+    if await db.packages.find_one({"id": package_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=409, detail="Paquete ya está activo")
+
+    archive_meta = archived.pop("_archive_meta", {}) or {}
+    archived.pop("_id", None)
+    await db.packages.insert_one(archived)
+    await db.packages_archive.delete_one({"id": package_id})
+
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "package_restored",
+        "package_id": package_id,
+        "tracking_number": archived.get("tracking_number"),
+        "journey_id": archived.get("journey_id"),
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "details": {
+            "originally_deleted_at": archive_meta.get("deleted_at"),
+            "originally_deleted_by": archive_meta.get("deleted_by_email"),
+            "deletion_source": archive_meta.get("deletion_source"),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"message": "Paquete restaurado", "package_id": package_id}
 
 
 @router.put("/incidents/journey/{journey_id}/resolve-all")
@@ -1080,6 +1230,12 @@ async def bulk_update_package_status(
     journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
     if not journey:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
+    # Bug fix 2026-05-21: snapshot estado previo antes del bulk update.
+    # Sin esto, un cambio de delivered → pending borraba el estado terminal sin rastro.
+    prev_pkgs = await db.packages.find(
+        {"id": {"$in": data.package_ids}, "journey_id": journey_id},
+        {"_id": 0, "id": 1, "tracking_number": 1, "status": 1, "evidence_score": 1},
+    ).to_list(len(data.package_ids))
     result = await db.packages.update_many(
         {"id": {"$in": data.package_ids}, "journey_id": journey_id},
         {"$set": {"status": data.new_status}},
@@ -1102,6 +1258,30 @@ async def bulk_update_package_status(
         "bulk_status_update", "packages", journey_id,
         details=f"Updated {result.modified_count} packages to {data.new_status}",
     )
+    # Snapshot detallado de estado previo (capa adicional de trazabilidad)
+    if prev_pkgs:
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "action": "packages_bulk_status_update",
+            "journey_id": journey_id,
+            "user_id": user["id"],
+            "user_email": user.get("email"),
+            "details": {
+                "new_status": data.new_status,
+                "modified_count": result.modified_count,
+                "snapshots": [
+                    {
+                        "package_id": p["id"],
+                        "tracking_number": p.get("tracking_number"),
+                        "prev_status": p.get("status"),
+                        "new_status": data.new_status,
+                        "prev_evidence_score": p.get("evidence_score"),
+                    }
+                    for p in prev_pkgs
+                ],
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
     await ws_manager.broadcast_journey_update(journey_id, "packages_updated")
     return {
         "updated": result.modified_count,

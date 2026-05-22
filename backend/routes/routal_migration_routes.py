@@ -152,11 +152,33 @@ async def restore_orphan_incidents(
 
     if not dry_run and bulk_updates:
         # Apply updates
+        now_iso = _now_iso()
         for inc_id, new_jid in bulk_updates:
+            # Fetch current incident for audit before update
+            old_inc = await db.incidents.find_one(
+                {"id": inc_id},
+                {"_id": 0, "journey_id": 1, "tracking_number": 1, "incident_type": 1},
+            )
             await db.incidents.update_one(
                 {"id": inc_id},
-                {"$set": {"journey_id": new_jid, "_restored_at": _now_iso()}},
+                {"$set": {"journey_id": new_jid, "_restored_at": now_iso}},
             )
+            # Audit each move so we can reconstruct who/when later
+            await db.audit_logs.insert_one({
+                "id": str(uuid.uuid4()),
+                "action": "incident_journey_id_reassigned",
+                "incident_id": inc_id,
+                "tracking_number": (old_inc or {}).get("tracking_number"),
+                "user_id": user.get("id") if isinstance(user, dict) else None,
+                "user_email": user.get("email") if isinstance(user, dict) else None,
+                "details": {
+                    "prev_journey_id": (old_inc or {}).get("journey_id"),
+                    "new_journey_id": new_jid,
+                    "incident_type": (old_inc or {}).get("incident_type"),
+                    "source": "restore_orphan_incidents",
+                },
+                "timestamp": now_iso,
+            })
         logger.info(
             f"[restore-incidents] client={client_id} restored="
             f"{len(bulk_updates)} (tracking={restored_by_tracking} fallback={restored_by_fallback})"

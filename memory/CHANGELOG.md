@@ -1,6 +1,54 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-21 (PARTE 2) — Extensión archive a journeys/packages + audit de sobrescritos indirectos
+
+**Solicitud usuario**: "Implementa sugerencia adicional y asegura que ningún flujo indirectamente sobrescriba algún registro que haga que lo 'elimine'."
+
+### Auditoría exhaustiva de patrones destructivos
+Buscados con grep en `routes/`, `services/`, `workers/`:
+- `replace_one` / `find_one_and_replace` → 0 ocurrencias en código de negocio.
+- `$unset` → 0 ocurrencias en producción (solo tests).
+- `delete_many({})` sin filtros → solo en `system_routes.py:integrity_results` (colección de logs auto-rotativa, OK).
+- `update_many` que reescribe `journey_id` o `status` → **3 puntos críticos identificados**.
+
+### Patrones destructivos indirectos cerrados con audit + snapshot
+
+1. **`POST /journeys` con `retry_packages`** (journey_routes.py:283): reasigna `journey_id` y resetea `status: pending` sobre packages existentes (potencialmente `delivered`/`failed`). Antes: silencioso. Ahora: audit_log `packages_reassigned_for_retry` con snapshot por package (`prev_journey_id`, `prev_status`, `prev_evidence_score`).
+
+2. **`PUT /journeys/{id}/packages-bulk-status`** (journey_routes.py:1083): permite a coordinator/developer cambiar status de N packages. Antes: audit_log básico sin valor previo. Ahora: snapshot completo (`prev_status`, `tracking_number`, `prev_evidence_score`) en audit_log `packages_bulk_status_update`.
+
+3. **`POST /integrations/routal/restore-orphan-incidents/{client_id}`** (routal_migration_routes.py:158): mueve incidencias entre `journey_id` legacy → nuevo. Antes: sin audit. Ahora: audit_log por incidencia movida con `prev_journey_id` y `new_journey_id`.
+
+### Archive collections extendidas
+
+Antes: solo `incidents_archive`. Ahora: 3 collections en patrón uniforme:
+- `incidents_archive`
+- `packages_archive`
+- `journeys_archive`
+
+Operaciones que ahora archivan antes de borrar:
+- `DELETE /api/journeys/{id}` → archiva journey + sus packages + sus incidents.
+- `POST /api/admin/cleanup/routes-packages` (con o sin filtro de fecha) → archiva todos los journeys + packages + incidents en scope.
+
+Nuevos endpoints de restauración (sólo `developer`):
+- `POST /api/journeys/{id}/restore` — restaura journey + packages + incidents desde archives. Idempotente.
+- `POST /api/packages/{id}/restore` — restaura un package individual.
+- `POST /api/incidents/{id}/restore` — ya existía.
+
+### Endpoint forense extendido
+`POST /api/incidents/forensics` ahora también:
+- Busca packages archivados con el tracking_number dado y devuelve quién/cuándo los borró.
+- Si el package no existe activo pero sí archivado, busca también la journey archivada.
+- Incluye en `recent_destructive_events` los nuevos action types: `packages_reassigned_for_retry`, `packages_bulk_status_update`, `incident_journey_id_reassigned`.
+
+### Verificación local
+- Lint OK en los 3 archivos.
+- Backend reinicia limpio.
+- `/health` 1ms. 4 endpoints nuevos retornan 401 sin auth (registrados correctamente): `/api/journeys/{id}/restore`, `/api/packages/{id}/restore`, `/api/incidents/forensics`, `/api/incidents/{id}/restore`.
+
+
+
 ## 2026-05-21 — FIX P0 INTEGRIDAD: incidencias eliminadas sin trazabilidad
 
 **Reporte del usuario**: 7 incidencias desaparecieron entre ayer y hoy ~3pm en producción. 6 de ellas pertenecientes a la misma ruta Routal (`6a04abeb69d4d67178642d8c`). Imposible determinar quién/cuándo/cómo se eliminaron.

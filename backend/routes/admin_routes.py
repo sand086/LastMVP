@@ -298,11 +298,16 @@ async def cleanup_routes_packages(
                 "error_detail": "Cancelado por limpieza total de rutas/pedidos.",
             }},
         )
-        # Archive ALL incidents before nuking the collection
+        # Archive ALL journeys, packages, incidents before nuking the collections
+        all_j = await db.journeys.find({}, {"_id": 0}).to_list(100000)
+        if all_j:
+            await db.journeys_archive.insert_many([{**j, "_archive_meta": archive_meta_base} for j in all_j])
+        all_pkg = await db.packages.find({}, {"_id": 0}).to_list(500000)
+        if all_pkg:
+            await db.packages_archive.insert_many([{**p, "_archive_meta": archive_meta_base} for p in all_pkg])
         all_inc = await db.incidents.find({}, {"_id": 0}).to_list(100000)
         if all_inc:
-            archive_docs = [{**inc, "_archive_meta": archive_meta_base} for inc in all_inc]
-            await db.incidents_archive.insert_many(archive_docs)
+            await db.incidents_archive.insert_many([{**inc, "_archive_meta": archive_meta_base} for inc in all_inc])
         j_del_count = await _chunked_delete(db.journeys, {})
         p_del_count = await _chunked_delete(db.packages, {})
         i_del_count = await _chunked_delete(db.incidents, {})
@@ -315,7 +320,9 @@ async def cleanup_routes_packages(
             "user_email": user.get("email"),
             "details": {
                 "journeys_deleted": j_del_count,
+                "journeys_archived": len(all_j),
                 "packages_deleted": p_del_count,
+                "packages_archived": len(all_pkg),
                 "incidents_deleted": i_del_count,
                 "incidents_archived": len(all_inc),
                 "ai_eval_jobs_cancelled": cancel_all.modified_count or 0,
@@ -326,7 +333,9 @@ async def cleanup_routes_packages(
             "message": "Datos limpiados (todo)",
             "deleted": {
                 "journeys": j_del_count,
+                "journeys_archived": len(all_j),
                 "packages": p_del_count,
+                "packages_archived": len(all_pkg),
                 "incidents": i_del_count,
                 "incidents_archived": len(all_inc),
                 "ai_evaluation_jobs": aij_del_count,
@@ -352,7 +361,13 @@ async def cleanup_routes_packages(
         }},
     )
 
-    # Archive incidents from these journeys before deleting
+    # Archive journeys, packages, incidents in scope before bulk delete
+    j_to_archive = await db.journeys.find(jquery, {"_id": 0}).to_list(50000)
+    if j_to_archive:
+        await db.journeys_archive.insert_many([{**j, "_archive_meta": archive_meta_base} for j in j_to_archive])
+    pkg_to_archive = await db.packages.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(500000)
+    if pkg_to_archive:
+        await db.packages_archive.insert_many([{**p, "_archive_meta": archive_meta_base} for p in pkg_to_archive])
     inc_to_archive = await db.incidents.find({"journey_id": {"$in": journey_ids}}, {"_id": 0}).to_list(50000)
     if inc_to_archive:
         archive_docs = [{**inc, "_archive_meta": {**archive_meta_base, "journey_ids_count": len(journey_ids)}} for inc in inc_to_archive]
@@ -373,7 +388,9 @@ async def cleanup_routes_packages(
             "date_from": data.date_from,
             "date_to": data.date_to,
             "journeys_deleted": j_del_count,
+            "journeys_archived": len(j_to_archive),
             "packages_deleted": p_del_count,
+            "packages_archived": len(pkg_to_archive),
             "incidents_deleted": i_del_count,
             "incidents_archived": len(inc_to_archive),
             "ai_eval_jobs_cancelled": cancel_result.modified_count or 0,
@@ -387,7 +404,9 @@ async def cleanup_routes_packages(
         "date_to": data.date_to,
         "deleted": {
             "journeys": j_del_count,
+            "journeys_archived": len(j_to_archive),
             "packages": p_del_count,
+            "packages_archived": len(pkg_to_archive),
             "incidents": i_del_count,
             "incidents_archived": len(inc_to_archive),
             "ai_evaluation_jobs": aij_del_count,
@@ -441,20 +460,35 @@ async def incidents_forensics(
     trackings = list(set(data.tracking_numbers or []))
     for tn in trackings:
         pkg = await db.packages.find_one({"tracking_number": tn}, {"_id": 0})
+        # Also check archive for packages with this tracking
+        pkg_archived = await db.packages_archive.find({"tracking_number": tn}, {"_id": 0}).to_list(20)
         active_incs = await db.incidents.find({"tracking_number": tn}, {"_id": 0}).to_list(20)
         archived_incs = await db.incidents_archive.find({"tracking_number": tn}, {"_id": 0}).to_list(50)
 
         journey_info = None
+        journey_archived = None
         if pkg and pkg.get("journey_id"):
             journey_info = await db.journeys.find_one(
                 {"id": pkg["journey_id"]},
                 {"_id": 0, "id": 1, "date": 1, "status": 1, "routal_route_id": 1, "routal_plan_id": 1, "driver_name": 1},
             )
+        # If package is archived, look up the archived journey
+        if not pkg and pkg_archived:
+            jid = pkg_archived[0].get("journey_id")
+            if jid:
+                journey_archived = await db.journeys_archive.find_one(
+                    {"id": jid},
+                    {"_id": 0, "id": 1, "date": 1, "status": 1, "routal_route_id": 1, "driver_name": 1, "_archive_meta": 1},
+                )
 
         # Audit logs by tracking_number, by journey_id, or any global cleanup
         or_clauses = [{"tracking_number": tn}]
         if pkg and pkg.get("journey_id"):
             or_clauses.append({"journey_id": pkg["journey_id"]})
+        if pkg_archived:
+            for pa in pkg_archived:
+                if pa.get("journey_id"):
+                    or_clauses.append({"journey_id": pa["journey_id"]})
         or_clauses.append({"action": {"$in": ["cleanup_all", "cleanup_by_date"]}})
         audit_query = {
             "$and": [
@@ -469,7 +503,18 @@ async def incidents_forensics(
             "package_exists": pkg is not None,
             "package_status": pkg.get("status") if pkg else None,
             "package_journey_id": pkg.get("journey_id") if pkg else None,
+            "package_archived_count": len(pkg_archived),
+            "package_archived_meta": [
+                {
+                    "package_id": p["id"],
+                    "deleted_at": (p.get("_archive_meta") or {}).get("deleted_at"),
+                    "deleted_by_email": (p.get("_archive_meta") or {}).get("deleted_by_email"),
+                    "deletion_source": (p.get("_archive_meta") or {}).get("deletion_source"),
+                }
+                for p in pkg_archived
+            ],
             "journey": journey_info,
+            "journey_archived": journey_archived,
             "active_incidents": [
                 {"id": i["id"], "type": i.get("incident_type"), "status": i.get("status"), "occurred_at": i.get("occurred_at")}
                 for i in active_incs
@@ -499,7 +544,11 @@ async def incidents_forensics(
 
     # Global destructive events in the window (regardless of tracking)
     global_events = await db.audit_logs.find(
-        {"timestamp": {"$gte": cutoff_iso}, "action": {"$in": ["cleanup_all", "cleanup_by_date", "journey_deleted", "incident_deleted"]}},
+        {"timestamp": {"$gte": cutoff_iso}, "action": {"$in": [
+            "cleanup_all", "cleanup_by_date", "journey_deleted", "incident_deleted",
+            "packages_reassigned_for_retry", "packages_bulk_status_update",
+            "incident_journey_id_reassigned",
+        ]}},
         {"_id": 0},
     ).sort("timestamp", -1).to_list(100)
     report["recent_destructive_events"] = [
