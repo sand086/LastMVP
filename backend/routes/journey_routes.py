@@ -498,7 +498,32 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
         "created_by": user["id"],
     }
     await db.incidents.insert_one(incident)
-    await log_audit_event(db, user["id"], user["role"], "incident_created", "incident", incident["id"])
+    # Audit log enriquecido: ademas del log estandar (entity=incident),
+    # guardamos journey_id y tracking_number como campos top-level para que
+    # una query de auditoria por journey_id encuentre tambien los eventos
+    # sobre las incidencias asociadas (antes no aparecian).
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "incident_created",
+        "entity_type": "incident",
+        "entity_id": incident["id"],
+        "incident_id": incident["id"],
+        "journey_id": data.journey_id,
+        "tracking_number": data.tracking_number,
+        "incident_type": data.incident_type,
+        "severity": data.severity,
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "user_role": user["role"],
+        "details": {
+            "source": incident["source"],
+            "imputability": incident["imputability"],
+            "comentario_asesor": comentario,
+        },
+        "timestamp": now_iso,
+        "date": now_iso[:10],
+    })
     await ws_manager.broadcast_incident_update(data.journey_id)
 
     # Dispatch webhook
@@ -517,13 +542,40 @@ async def create_incident(data: IncidentCreate, user: dict = Depends(require_rol
 
 @router.put("/incidents/{incident_id}")
 async def update_incident(incident_id: str, data: dict, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
+    # Snapshot previo para auditoria (sobrescribir status sin trazabilidad
+    # era una de las causas potenciales del fenomeno "la incidencia desaparecio").
+    prev = await db.incidents.find_one({"id": incident_id}, {"_id": 0})
+    if not prev:
+        raise HTTPException(status_code=404, detail="Incidencia no encontrada")
     update_data = {k: v for k, v in data.items() if k not in ["id", "_id"]}
     if data.get("status") == "resolved":
         update_data["resolved_at"] = datetime.now(timezone.utc).isoformat()
         update_data["resolved_by"] = user["id"]
     result = await db.incidents.update_one({"id": incident_id}, {"$set": update_data})
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Incidencia no encontrada")
+        # match exists but no fields changed; still record the attempt
+        pass
+    # Audit con journey_id top-level para query cruzada
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "incident_updated",
+        "entity_type": "incident",
+        "entity_id": incident_id,
+        "incident_id": incident_id,
+        "journey_id": prev.get("journey_id"),
+        "tracking_number": prev.get("tracking_number"),
+        "user_id": user["id"],
+        "user_email": user.get("email"),
+        "user_role": user["role"],
+        "details": {
+            "prev_status": prev.get("status"),
+            "new_status": data.get("status", prev.get("status")),
+            "changed_fields": list(update_data.keys()),
+        },
+        "timestamp": now_iso,
+        "date": now_iso[:10],
+    })
     return {"message": "Incidencia actualizada"}
 
 
@@ -566,18 +618,22 @@ async def delete_incident(incident_id: str, body: Optional[dict] = None, user: d
     await db.audit_logs.insert_one({
         "id": str(uuid.uuid4()),
         "action": "incident_deleted",
+        "entity_type": "incident",
+        "entity_id": incident_id,
         "incident_id": incident_id,
         "journey_id": incident.get("journey_id"),
         "tracking_number": incident.get("tracking_number"),
         "incident_type": incident.get("incident_type"),
         "user_id": user["id"],
         "user_email": user.get("email"),
+        "user_role": user.get("role"),
         "details": {
             "deletion_reason": deletion_reason,
             "severity": incident.get("severity"),
             "imputability": incident.get("imputability"),
         },
         "timestamp": now_iso,
+        "date": now_iso[:10],
     })
 
     result = await db.incidents.delete_one({"id": incident_id})
@@ -815,6 +871,13 @@ async def restore_package(package_id: str, user: dict = Depends(require_role(["d
 @router.put("/incidents/journey/{journey_id}/resolve-all")
 async def resolve_all_incidents(journey_id: str, user: dict = Depends(require_role(["coordinator", "agent", "developer"]))):
     now = datetime.now(timezone.utc).isoformat()
+    # Snapshot de incidencias abiertas antes del bulk update (para auditoria).
+    # Sin esto, era imposible reconstruir QUE incidencias se resolvieron en lote
+    # ni cuando, lo cual podia hacerlas "desaparecer" del filtro "abiertas" sin rastro.
+    open_incidents = await db.incidents.find(
+        {"journey_id": journey_id, "status": "open"},
+        {"_id": 0, "id": 1, "tracking_number": 1, "incident_type": 1},
+    ).to_list(5000)
     result = await db.incidents.update_many(
         {"journey_id": journey_id, "status": "open"},
         {"$set": {
@@ -824,6 +887,30 @@ async def resolve_all_incidents(journey_id: str, user: dict = Depends(require_ro
             "action_taken": "Resuelta en lote por el coordinador",
         }},
     )
+    if open_incidents:
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "action": "incidents_bulk_resolved",
+            "entity_type": "journey",
+            "entity_id": journey_id,
+            "journey_id": journey_id,
+            "user_id": user["id"],
+            "user_email": user.get("email"),
+            "user_role": user["role"],
+            "details": {
+                "resolved_count": result.modified_count,
+                "snapshots": [
+                    {
+                        "incident_id": i["id"],
+                        "tracking_number": i.get("tracking_number"),
+                        "incident_type": i.get("incident_type"),
+                    }
+                    for i in open_incidents
+                ],
+            },
+            "timestamp": now,
+            "date": now[:10],
+        })
     return {"message": f"{result.modified_count} incidencias resueltas", "resolved_count": result.modified_count}
 
 

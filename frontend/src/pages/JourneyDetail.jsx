@@ -972,7 +972,26 @@ const JourneyDetail = () => {
             </Tabs>
 
             {/* Incident Modal */}
-            <Dialog open={showIncidentModal} onOpenChange={setShowIncidentModal}>
+            <Dialog open={showIncidentModal} onOpenChange={(open) => {
+                // Bug fix 2026-05-25: si el modal se cierra (X / click fuera / ESC)
+                // con datos en el form sin guardar, confirmar para evitar la
+                // "incidencia fantasma" — el usuario crea el form, lo cierra sin
+                // submit, y asume que se guardo. Sin esta proteccion la incidencia
+                // nunca llega al backend y desaparece silenciosamente.
+                if (!open && !editingIncident) {
+                    const hasContent = !!(
+                        (incidentForm.incident_type || '').trim() ||
+                        (incidentForm.description || '').trim() ||
+                        (incidentForm.tracking_number || '').trim() ||
+                        (incidentForm.comentario_asesor || '').trim() ||
+                        (incidentForm.action_taken || '').trim()
+                    );
+                    if (hasContent && !window.confirm('Tienes datos sin guardar en este formulario de incidencia. ¿Cerrar de todas formas? Los datos se perderán.')) {
+                        return;
+                    }
+                }
+                setShowIncidentModal(open);
+            }}>
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle className="font-heading">
@@ -1121,8 +1140,24 @@ const JourneyDetail = () => {
                             </div>
                         )}
                     </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowIncidentModal(false)}>
+                    <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        {/* Hint visible cuando el boton Guardar esta disabled —
+                            evita que el coordinador piense que ya guardo cuando
+                            en realidad ningun submit ocurrio. */}
+                        {(() => {
+                            const missing = [];
+                            if (!incidentForm.incident_type) missing.push('Tipo');
+                            if (!incidentForm.severity) missing.push('Severidad');
+                            if (!(incidentForm.description || '').trim()) missing.push('Descripción');
+                            if (incidentForm.incident_type === 'otro' && !(incidentForm.comentario_asesor || '').trim()) missing.push('Comentario');
+                            if (missing.length === 0 || incidentSubmitting) return null;
+                            return (
+                                <p className="text-xs text-amber-700 sm:mr-auto" data-testid="save-incident-disabled-hint">
+                                    Faltan campos: <span className="font-semibold">{missing.join(', ')}</span>
+                                </p>
+                            );
+                        })()}
+                        <Button variant="outline" onClick={() => setShowIncidentModal(false)} data-testid="cancel-incident-btn">
                             Cancelar
                         </Button>
                         <Button

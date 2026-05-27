@@ -1,6 +1,30 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-25 — FIX P0 Visibilidad de incidencias en audit + UX modal anti-pérdida
+
+**Reporte**: incidencia para guía `6lZFhEHeBtNppM4K` en ruta `e7b60940-d09b-48fd-9512-cab6a544fece` "desapareció". El audit log de la ruta solo muestra `route_started` y `route_closed`.
+
+**Root cause identificada**: el audit log filtrado por `entity = journey, entity_id = <journey_id>` ocultaba completamente los eventos `incident_*` porque `log_audit_event(..., entity_type="incident", entity_id=incident_id, ...)` no guardaba `journey_id` como campo top-level. La incidencia podía existir (o haber sido creada/eliminada/resuelta) y el filtro de auditoría jamás la mostraría desde la vista de la ruta. **No es una eliminación silenciosa, es una visibilidad inadecuada**.
+
+**Fix 1 — audit cross-referenceable** (`/app/backend/routes/journey_routes.py`):
+- `POST /incidents` ahora inserta directamente en `audit_logs` un doc con campos top-level: `action="incident_created"`, `entity_type="incident"`, `entity_id`, `incident_id`, `journey_id`, `tracking_number`, `incident_type`, `severity`, `user_email`, `details.source`, `details.imputability`, `details.comentario_asesor`.
+- `PUT /incidents/{id}` ahora snapshot del estado previo + audit `incident_updated` con `journey_id`, `tracking_number`, `prev_status`, `new_status`, `changed_fields`.
+- `PUT /incidents/journey/{id}/resolve-all` ahora snapshot de incidencias abiertas + audit `incidents_bulk_resolved` con `journey_id`, `resolved_count`, lista de snapshots.
+- `DELETE /incidents/{id}` actualizado para incluir `entity_type`, `entity_id` y `date` top-level (consistencia con resto).
+
+Resultado: una query simple `db.audit_logs.find({"journey_id": "e7b60940-..."})` ahora devuelve TODOS los eventos relacionados (ruta + incidencias creadas/editadas/resueltas/eliminadas). El filtro de la UI en `/admin/audit` puede usar este campo.
+
+**Fix 2 — UX anti-pérdida modal incidencia** (`/app/frontend/src/pages/JourneyDetail.jsx`):
+- `Dialog onOpenChange` ahora confirma con `window.confirm` antes de cerrar si hay datos en el form sin guardar (incident_type / description / tracking / comentario_asesor / action_taken). Previene cerrar accidentalmente con click fuera/ESC y perder el form sin saber.
+- DialogFooter ahora muestra un hint amarillo: "Faltan campos: Tipo, Severidad, Descripción..." cuando el botón "Registrar" está disabled. Antes el usuario veía un botón inactivo sin saber qué faltaba, podía pensar que ya había guardado y cerrar.
+
+**Verificación local**: lint OK backend + frontend. Backend reinicia limpio. `/health` 1ms.
+
+**Para investigar las 7 + 1 incidencias específicas en producción**: una vez redeployado, llamar `POST /api/incidents/forensics` con los tracking_numbers afectados (`6lZFhEHeBtNppM4K`, `2x8XnBsiJLlYVwyC`, etc.) y `hours_back: 168` (7 días). Devolverá el historial completo incluyendo archives y audit logs cross-referenciados por journey_id.
+
+
+
 ## 2026-05-21 (PARTE 2) — Extensión archive a journeys/packages + audit de sobrescritos indirectos
 
 **Solicitud usuario**: "Implementa sugerencia adicional y asegura que ningún flujo indirectamente sobrescriba algún registro que haga que lo 'elimine'."
