@@ -424,6 +424,22 @@ async def close_journey(journey_id: str, data: JourneyCloseData, user: dict = De
 
     await log_audit_event(db, user["id"], user["role"], "route_closed", "journey", journey_id)
     await evaluate_packages_for_journey(db, journey_id)
+
+    # Auto-trigger confidence evaluation (capa fix 2026-05-28). Antes el coordinador
+    # tenia que clickear "Evaluar confianza" manualmente despues de cerrar la ruta;
+    # ahora corre en el background como parte del cierre. Idempotente: si la confianza
+    # se recalcula despues por AI eval, se actualiza correctamente.
+    try:
+        conf_summary = await run_confidence_evaluation_for_journey(db, journey_id)
+        logger.info(
+            f"[close_journey] auto-confidence journey={journey_id} "
+            f"evaluated={conf_summary.get('evaluated')} "
+            f"discrepancies={conf_summary.get('discrepancies')} "
+            f"avg={conf_summary.get('avg_confidence')}"
+        )
+    except Exception as e:
+        logger.warning(f"[close_journey] auto-confidence failed for {journey_id}: {e}")
+
     await ws_manager.broadcast_journey_update(journey_id, "closed")
 
     # Dispatch webhook
@@ -1777,15 +1793,22 @@ def _detect_discrepancy(pkg: dict, confidence: dict) -> dict:
     }
 
 
-@router.post("/journeys/{journey_id}/guides/evaluate-confidence")
-async def evaluate_confidence(journey_id: str, user: dict = Depends(get_current_user)):
-    """Recalculate confidence scores and detect discrepancies for all guides in a journey."""
-    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+async def run_confidence_evaluation_for_journey(db_inst, journey_id: str) -> dict:
+    """Pure helper: recompute confidence + discrepancy for all packages in a journey.
+
+    Extracted from the HTTP endpoint so it can be triggered automatically from
+    flows like close_journey and ai_eval_worker finalization. Returns the same
+    summary dict as the endpoint. Safe to call multiple times (idempotent).
+
+    Bug fix 2026-05-28: antes de este refactor, la confianza solo se evaluaba
+    cuando el coordinador hacía click manual en "Evaluar confianza". Ahora se
+    dispara automáticamente al cerrar la ruta y al finalizar cada job de IA.
+    """
+    journey = await db_inst.journeys.find_one({"id": journey_id}, {"_id": 0, "id": 1})
     if not journey:
-        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+        return {"evaluated": 0, "discrepancies": 0, "avg_confidence": 0, "skipped": "journey_not_found"}
 
-    packages = await db.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(5000)
-
+    packages = await db_inst.packages.find({"journey_id": journey_id}, {"_id": 0}).to_list(5000)
     discrepancy_count = 0
     total_confidence = 0
     evaluated = 0
@@ -1799,7 +1822,6 @@ async def evaluate_confidence(journey_id: str, user: dict = Depends(get_current_
             "discrepancy": discrepancy,
         }
 
-        # Set manual_review.required based on confidence
         existing_review = pkg.get("manual_review", {})
         if discrepancy["detected"]:
             discrepancy_count += 1
@@ -1821,18 +1843,27 @@ async def evaluate_confidence(journey_id: str, user: dict = Depends(get_current_
                     "decision": existing_review.get("decision"),
                 }
 
-        await db.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
+        await db_inst.packages.update_one({"id": pkg["id"]}, {"$set": update_fields})
         total_confidence += confidence["score"]
         evaluated += 1
 
     avg_confidence = round(total_confidence / evaluated, 1) if evaluated > 0 else 0
-
     return {
         "evaluated": evaluated,
         "discrepancies": discrepancy_count,
         "avg_confidence": avg_confidence,
         "message": f"Evaluación de confianza completa: {discrepancy_count} discrepancias detectadas en {evaluated} guías.",
     }
+
+
+@router.post("/journeys/{journey_id}/guides/evaluate-confidence")
+async def evaluate_confidence(journey_id: str, user: dict = Depends(get_current_user)):
+    """Recalculate confidence scores and detect discrepancies for all guides in a journey."""
+    journey = await db.journeys.find_one({"id": journey_id}, {"_id": 0})
+    if not journey:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+    result = await run_confidence_evaluation_for_journey(db, journey_id)
+    return result
 
 
 @router.patch("/journeys/{journey_id}/guides/{guide_id}/review")

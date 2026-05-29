@@ -1,6 +1,34 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-28 — FIX: Confianza no se calculaba automáticamente
+
+**Reporte usuario**: en `/journeys/a289fc78-...`, la columna "Confianza" muestra "-" en todas las guías y el card "CONFIANZA PROM." está vacío. Solo se calcula cuando el coordinador clickea manualmente el botón "Evaluar confianza". Las 42 guías quedan sin discrepancias detectadas hasta que alguien recuerde clickear.
+
+**Causa raíz**: el endpoint `POST /journeys/{id}/guides/evaluate-confidence` (`journey_routes.py:1780`) era el ÚNICO punto que ejecutaba `_compute_confidence` + `_detect_discrepancy`. Ningún flujo automático lo disparaba — ni el cierre de ruta, ni la finalización del job de IA. El cálculo era manual y olvidable.
+
+**Fix**:
+
+1. Extraída la lógica del endpoint a una función pura reutilizable `run_confidence_evaluation_for_journey(db, journey_id)` en `journey_routes.py`. Idempotente, sin dependencias de HTTP/auth. El endpoint manual ahora es un wrapper de 3 líneas que la invoca.
+
+2. **Trigger automático A** — `close_journey` (`PUT /journeys/{id}/close`): después de `evaluate_packages_for_journey` se llama `run_confidence_evaluation_for_journey`. Logs `[close_journey] auto-confidence journey=... evaluated=... discrepancies=... avg=...`. Try/except defensivo: si falla, no bloquea el cierre.
+
+3. **Trigger automático B** — `ai_eval_worker._finalize_job`: cuando un job termina con `Evaluada` o `Parcial` y al menos 1 guía evaluada con éxito, se carga el `route_id` del job y se llama `run_confidence_evaluation_for_journey`. Import lazy desde `routes.journey_routes` para evitar ciclos. Logs `[ai-eval] auto-confidence triggered job=... journey=... ...`.
+
+**Comportamiento resultante**:
+- Al cerrar la ruta → confianza calculada automáticamente.
+- Al finalizar la evaluación IA en background → confianza recalculada con los nuevos scores.
+- El botón "Evaluar confianza" sigue funcionando como antes para forzar re-cálculo manual.
+
+**Otros procesos no afectados**:
+- El endpoint manual mantiene contrato y signature idénticos.
+- `evaluate_packages_for_journey` (scoring IA) no toca: solo agrega un step adicional después.
+- Worker subprocess (capa 6) sigue funcionando: el trigger corre en el event loop del worker, no en el del API.
+
+**Verificación local**: lint OK backend; backend reinicia; `/health` 0.9ms; worker subprocess vivo (pid 581).
+
+
+
 ## 2026-05-25 — FIX P0 Visibilidad de incidencias en audit + UX modal anti-pérdida
 
 **Reporte**: incidencia para guía `6lZFhEHeBtNppM4K` en ruta `e7b60940-d09b-48fd-9512-cab6a544fece` "desapareció". El audit log de la ruta solo muestra `route_started` y `route_closed`.

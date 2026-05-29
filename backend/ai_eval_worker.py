@@ -337,6 +337,26 @@ async def _finalize_job(db, job_id: str, start: datetime, evaluated: int, errors
 
     await db.ai_evaluation_jobs.update_one({"job_id": job_id}, {"$set": update})
     logger.info(f"Job {job_id} finished: {final_status} ({evaluated}/{total}, {errors} errors, {total_tokens} tokens, {round(duration)}s)")
+
+    # Auto-trigger confidence evaluation when AI scoring produced results (capa fix
+    # 2026-05-28). Solo si hubo al menos una guia evaluada con exito; saltamos si
+    # todo fallo para no gastar updates DB innecesarios. Idempotente.
+    if evaluated > 0 and final_status in ("Evaluada", "Parcial"):
+        try:
+            job_doc = await db.ai_evaluation_jobs.find_one({"job_id": job_id}, {"_id": 0, "route_id": 1})
+            jid = (job_doc or {}).get("route_id")
+            if jid:
+                # Import lazy para evitar ciclos (journey_routes importa cosas del modulo workers)
+                from routes.journey_routes import run_confidence_evaluation_for_journey
+                conf = await run_confidence_evaluation_for_journey(db, jid)
+                logger.info(
+                    f"[ai-eval] auto-confidence triggered job={job_id} journey={jid} "
+                    f"evaluated={conf.get('evaluated')} discrepancies={conf.get('discrepancies')} "
+                    f"avg={conf.get('avg_confidence')}"
+                )
+        except Exception as e:
+            logger.warning(f"[ai-eval] auto-confidence failed job={job_id}: {e}")
+
     return final_status
 
 
