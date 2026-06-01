@@ -1,6 +1,36 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-29 — FIX: criterio "Timestamp visible" no se reflejaba en revisión manual
+
+**Reporte usuario**: ruta `59cfb6b4-...`, guía `UFpkdHaDlD6cYuwl`. La descripción IA por foto detecta correctamente "tomada con Timemark, timestamp 14:43 del 29 de mayo 2026", pero en el modal "Evaluación de evidencia" el criterio "Timestamp visible" aparece sin evaluar (gris, sin ✓ ni ✗).
+
+**Causa raíz**: desajuste de contrato entre tres capas:
+- `ReviewModal.jsx:16,27` lee `pkg.evidence_detail.criteria_met['timestamp']`.
+- Prompt LLM en `evidence_scoring.py` instruye a Claude evaluar `timestamp_visible` **por foto individual** dentro de `photos_analysis[]`.
+- Schema `criteria_met` del prompt **no incluía la clave `timestamp`**, por lo que Claude jamás lo emitía a nivel criterio agregado.
+
+Resultado: la IA sí detectaba el timestamp (visible en la descripción y en `photos_analysis[*].timestamp_visible`), pero el modal nunca lo veía y el coordinador tenía que validarlo manualmente cada vez.
+
+**Fix** (`/app/backend/evidence_scoring.py`):
+
+1. **Schema del prompt**: añadido `"timestamp": true/false` dentro de `criteria_met`.
+2. **Regla de agregación**: bloque explícito al final de `AI_RESPONSE_FORMAT`:
+   > "timestamp debe ser true si AL MENOS UNA foto en `photos_analysis` tiene `timestamp_visible=true` (apps como Timemark/Timestamp Camera muestran hora+fecha+geolocalización sobreimpresas). Debe ser false si NINGUNA foto tiene timestamp visible."
+3. **Post-proceso defensivo** en `_build_ai_result` (donde se compone `evidence_detail`): si Claude omite `criteria_met.timestamp` (respuestas viejas pre-fix o desviaciones del schema), se deriva automáticamente del campo ya presente `photos_analysis[*].timestamp_visible`. Cero cambio de comportamiento si la clave sí viene.
+
+**Aplica universalmente**: `_get_system_prompt` concatena `AI_RESPONSE_FORMAT` tanto al prompt default como a cualquier prompt custom (línea 357), por lo que el fix cubre todos los clientes.
+
+**Sin efectos colaterales**:
+- Otros criterios (foto_fachada, foto_paquete_guia, foto_receptor, nota_driver, etc.) intactos.
+- `evidence_score`, `ia_confidence`, `ia_errors`, `missing_items` intactos.
+- `photos_analysis` intacto: la información granular por foto sigue ahí.
+- Idempotente: si Claude ya retorna `criteria_met.timestamp`, el defensivo no lo sobrescribe.
+
+**Verificación local**: lint OK, backend reinicia, `/health` 0.9ms.
+
+
+
 ## 2026-05-28 — FIX: Confianza no se calculaba automáticamente
 
 **Reporte usuario**: en `/journeys/a289fc78-...`, la columna "Confianza" muestra "-" en todas las guías y el card "CONFIANZA PROM." está vacío. Solo se calcula cuando el coordinador clickea manualmente el botón "Evaluar confianza". Las 42 guías quedan sin discrepancias detectadas hasta que alguien recuerde clickear.

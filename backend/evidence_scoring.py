@@ -82,7 +82,8 @@ RESPONDE SIEMPRE en formato JSON con esta estructura exacta:
     "foto_receptor": true/false,
     "nota_driver": true/false,
     "captura_llamadas": true/false,
-    "min_2_llamadas": true/false
+    "min_2_llamadas": true/false,
+    "timestamp": true/false
   },
   "overall_score": 0-100,
   "confidence": 0.0-1.0,
@@ -91,7 +92,13 @@ RESPONDE SIEMPRE en formato JSON con esta estructura exacta:
   "missing_items": ["lista de items faltantes según criterios Cubbo"],
   "alerts": ["alertas importantes"],
   "feedback": "Explicación concisa en español de los hallazgos principales"
-}"""
+}
+
+REGLAS DE AGREGACIÓN PARA criteria_met:
+- "timestamp" debe ser true si AL MENOS UNA foto en photos_analysis tiene timestamp_visible=true
+  (apps como Timemark/Timestamp Camera muestran hora+fecha+geolocalización sobreimpresas).
+  Debe ser false si NINGUNA foto tiene timestamp visible.
+"""
 
 
 def _score_delivered(proof_count: int, driver_note: str, has_incident: bool) -> dict:
@@ -245,6 +252,23 @@ def _build_ai_result(ai_result: dict, package: dict, has_incident: bool, proof_u
 
     feedback = ai_result.get("feedback", ai_result.get("ai_observations", ""))
 
+    # Bug fix 2026-05-29: el prompt LLM detecta timestamp_visible por foto
+    # (en photos_analysis[*].timestamp_visible) pero antes el bloque
+    # criteria_met no incluia la clave 'timestamp', por lo que el modal de
+    # revision manual mostraba "Timestamp visible" sin evaluar (gris) aunque
+    # la IA si lo habia detectado en la descripcion de la foto.
+    # Ahora se añade al schema del prompt, y aqui derivamos defensivamente
+    # el valor desde photos_analysis para no romper paquetes ya evaluados
+    # antes del fix (respuestas LLM antiguas que no traen criteria_met.timestamp).
+    criteria_met_raw = dict(ai_result.get("criteria_met", {}) or {})
+    if "timestamp" not in criteria_met_raw:
+        photos_analysis = ai_result.get("photos_analysis") or []
+        any_visible = any(
+            bool((p or {}).get("timestamp_visible"))
+            for p in photos_analysis
+        )
+        criteria_met_raw["timestamp"] = any_visible
+
     return {
         "evidence_type": evidence_type,
         "evidence_score": ai_result.get("overall_score", 0),
@@ -261,7 +285,7 @@ def _build_ai_result(ai_result: dict, package: dict, has_incident: bool, proof_u
             "missing_items": ai_result.get("missing_items", []),
             "alerts": ai_result.get("alerts", []),
             "photos_analysis": ai_result.get("photos_analysis", []),
-            "criteria_met": ai_result.get("criteria_met", {}),
+            "criteria_met": criteria_met_raw,
             "ai_observations": feedback,
         },
         "evidence_evaluated_at": datetime.now(timezone.utc).isoformat(),
