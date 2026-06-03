@@ -705,6 +705,18 @@ class ClientConfigPatch(BaseModel):
     scheduler_time: Optional[str] = Field(None, description="HH:MM (24h, tz CDMX) — legacy single-time")
     scheduler_times: Optional[List[str]] = Field(None, description="HH:MM array (RT-11 multi-cutoff)")
     active: Optional[bool] = None
+    # ─── RTV2 package-oriented cohort (2026-05-30) ───
+    audit_target_packages_daily: Optional[int] = Field(None, ge=1, le=100000)
+    audit_min_packages_daily: Optional[int] = Field(None, ge=0, le=100000)
+    audit_max_packages_daily: Optional[int] = Field(None, ge=1, le=100000)
+    audit_target_packages_weekly: Optional[int] = Field(None, ge=1, le=1000000)
+    audit_overshoot_tolerance: Optional[float] = Field(None, ge=0.0, le=1.0)
+    audit_distribution_strategy: Optional[str] = Field(None, description="'flat' | 'adaptive_calendar_week'")
+    audit_safety_circuit_breaker: Optional[int] = Field(None, ge=1, le=100000)
+    ingest_cutoff_time: Optional[str] = Field(None, description="HH:MM cutoff for the package-oriented selection")
+    ingest_cutoff_timezone: Optional[str] = Field(None, description="IANA TZ (default America/Mexico_City)")
+    ingest_eligibility_states: Optional[List[str]] = Field(None, description="Allowed Routal plan states for audit")
+    ingest_force_resync_at_cutoff: Optional[bool] = None
 
 
 @router.get("/client-config")
@@ -717,7 +729,7 @@ async def list_client_configs(user: dict = Depends(get_current_user)):
 
 @router.get("/client-config/{client_id}")
 async def get_client_config(client_id: str, user: dict = Depends(get_current_user)):
-    _require_role(user, ["developer"])
+    _require_role(user, ["coordinator", "developer"])
     svc = ClientConfigService(db)
     cfg = await svc.get(client_id)
     if not cfg:
@@ -726,6 +738,12 @@ async def get_client_config(client_id: str, user: dict = Depends(get_current_use
         if not client:
             raise HTTPException(status_code=404, detail="cliente no existe")
         cfg = await svc.upsert(client_id=client_id, client_name=client["name"], selection_enabled=False)
+    # RTV2: fill in defaults for any missing new field so the UI form always shows
+    # populated values even for legacy docs that haven't been migrated yet.
+    from services.client_config_service import DEFAULTS
+    for k, v in DEFAULTS.items():
+        if k not in cfg:
+            cfg[k] = v
     return cfg
 
 
@@ -753,7 +771,148 @@ async def patch_client_config(
             scheduler_time=payload.scheduler_time,
             scheduler_times=payload.scheduler_times,
             active=payload.active,
+            audit_target_packages_daily=payload.audit_target_packages_daily,
+            audit_min_packages_daily=payload.audit_min_packages_daily,
+            audit_max_packages_daily=payload.audit_max_packages_daily,
+            audit_target_packages_weekly=payload.audit_target_packages_weekly,
+            audit_overshoot_tolerance=payload.audit_overshoot_tolerance,
+            audit_distribution_strategy=payload.audit_distribution_strategy,
+            audit_safety_circuit_breaker=payload.audit_safety_circuit_breaker,
+            ingest_cutoff_time=payload.ingest_cutoff_time,
+            ingest_cutoff_timezone=payload.ingest_cutoff_timezone,
+            ingest_eligibility_states=payload.ingest_eligibility_states,
+            ingest_force_resync_at_cutoff=payload.ingest_force_resync_at_cutoff,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return cfg
+
+
+# ─────────────── RTV2 CAPTACIÓN STATS (2026-05-30) ───────────────
+
+@router.get("/captacion/stats/{client_id}")
+async def captacion_stats(
+    client_id: str,
+    days: int = 28,
+    user: dict = Depends(get_current_user),
+):
+    """Aggregated captación metrics for the package-oriented cohort dashboard.
+
+    Returns:
+        - today: {date, packages_audited, target_today, adjusted_target, min, max}
+        - week: {monday, sunday, target_weekly, accumulated, projected, days_remaining}
+        - sparkline: list of {date, packages_audited} for last `days` days
+        - last_run: snapshot of most recent selection_runs entry for this client
+    """
+    _require_role(user, ["coordinator", "developer"])
+    from workers.routal_selection_worker import (
+        _today_cdmx, _date_to_dt, _calendar_week_bounds,
+        compute_adjusted_target_packages,
+    )
+
+    cfg = await db.client_config.find_one({"client_id": client_id, "active": True}, {"_id": 0})
+    if not cfg:
+        raise HTTPException(status_code=404, detail="cliente sin configuración activa")
+
+    today = _today_cdmx()
+    monday, sunday = _calendar_week_bounds(today)
+    today_dt = _date_to_dt(today)
+    monday_dt = _date_to_dt(monday)
+    next_monday_dt = _date_to_dt(sunday + timedelta(days=1))
+
+    # Today
+    today_pipeline = [
+        {"$match": {
+            "client_id": client_id, "selection_status": "selected",
+            "date": today_dt,
+        }},
+        {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$packages_audited", 0]}}}},
+    ]
+    today_total = 0
+    async for doc in db.driver_audit_log.aggregate(today_pipeline):
+        today_total = int(doc.get("total") or 0)
+
+    # Week accumulated (Mon..Sun)
+    week_pipeline = [
+        {"$match": {
+            "client_id": client_id, "selection_status": "selected",
+            "date": {"$gte": monday_dt, "$lt": next_monday_dt},
+        }},
+        {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$packages_audited", 0]}}}},
+    ]
+    week_total = 0
+    async for doc in db.driver_audit_log.aggregate(week_pipeline):
+        week_total = int(doc.get("total") or 0)
+
+    # Adjusted target snapshot
+    cohort = await compute_adjusted_target_packages(db, client_id, today, cfg)
+
+    # Sparkline (last `days` days)
+    from datetime import date as _date_t
+    days_count = max(7, min(int(days or 28), 90))
+    spark_start = today - timedelta(days=days_count - 1)
+    spark_start_dt = _date_to_dt(spark_start)
+    spark_end_dt = _date_to_dt(today + timedelta(days=1))
+    spark_pipeline = [
+        {"$match": {
+            "client_id": client_id, "selection_status": "selected",
+            "date": {"$gte": spark_start_dt, "$lt": spark_end_dt},
+        }},
+        {"$group": {"_id": "$date", "total": {"$sum": {"$ifNull": ["$packages_audited", 0]}}}},
+        {"$sort": {"_id": 1}},
+    ]
+    spark_map: dict = {}
+    async for doc in db.driver_audit_log.aggregate(spark_pipeline):
+        d = doc["_id"]
+        if isinstance(d, datetime):
+            d = d.date()
+        if isinstance(d, _date_t):
+            spark_map[d.isoformat()] = int(doc.get("total") or 0)
+
+    sparkline = []
+    for i in range(days_count):
+        d = (spark_start + timedelta(days=i)).isoformat()
+        sparkline.append({"date": d, "packages_audited": spark_map.get(d, 0)})
+
+    # Last run snapshot
+    last_run = await db.selection_runs.find_one(
+        {"client_id": client_id}, {"_id": 0}, sort=[("ran_at", -1)]
+    )
+
+    days_remaining = (sunday - today).days + 1
+    target_daily = int(cfg.get("audit_target_packages_daily", 1000))
+    weekly_target = int(cfg.get("audit_target_packages_weekly", 7000))
+    # Projected = week_total + (adjusted_target * days_remaining)
+    projected = week_total + cohort["adjusted_target"] * days_remaining
+
+    return {
+        "client_id": client_id,
+        "today": {
+            "date": today.isoformat(),
+            "packages_audited": today_total,
+            "target_daily": target_daily,
+            "adjusted_target": cohort["adjusted_target"],
+            "min_daily": cohort["min_daily"],
+            "max_daily": cohort["max_daily"],
+            "pct_of_target": round(today_total / target_daily * 100, 1) if target_daily else 0,
+        },
+        "week": {
+            "monday": monday.isoformat(),
+            "sunday": sunday.isoformat(),
+            "target_weekly": weekly_target,
+            "accumulated": week_total,
+            "projected": projected,
+            "days_remaining_incl_today": days_remaining,
+            "pct_of_weekly_target": round(week_total / weekly_target * 100, 1) if weekly_target else 0,
+        },
+        "cohort_today": cohort,
+        "sparkline": sparkline,
+        "last_run": last_run,
+        "config_snapshot": {
+            "ingest_cutoff_time": cfg.get("ingest_cutoff_time", "16:00"),
+            "ingest_cutoff_timezone": cfg.get("ingest_cutoff_timezone", "America/Mexico_City"),
+            "ingest_eligibility_states": cfg.get("ingest_eligibility_states", ["in_progress"]),
+            "audit_distribution_strategy": cfg.get("audit_distribution_strategy", "adaptive_calendar_week"),
+            "audit_safety_circuit_breaker": cfg.get("audit_safety_circuit_breaker", 400),
+        },
+    }

@@ -19,16 +19,34 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Defaults applied when creating a new client_config doc
+# Defaults applied when creating a new client_config doc.
+# 2026-05-30: extended with package-oriented audit cohort (vs. route-count cap).
+# Legacy `max_daily_audits` (route count) is preserved as opt-in hard cap.
 DEFAULTS = {
+    # Legacy (preserved for back-compat; null means no route-count cap)
     "max_daily_audits": 30,
     "selection_enabled": False,  # OFF by default → non-breaking
     "scheduler_time": "06:00",  # Legacy single time
     "scheduler_times": ["06:00"],  # RT-11 multiple cutoffs
     "active": True,
+    # ─── Package-oriented audit cohort (RTV2 propuesta 2026-05-30) ───
+    "audit_target_packages_daily": 1000,
+    "audit_min_packages_daily": 800,
+    "audit_max_packages_daily": 1200,
+    "audit_target_packages_weekly": 7000,  # calendar Mon–Sun
+    "audit_overshoot_tolerance": 0.10,  # 10%
+    "audit_distribution_strategy": "adaptive_calendar_week",  # 'flat' | 'adaptive_calendar_week'
+    "audit_safety_circuit_breaker": 400,  # max packages 'Evaluando' simultáneos
+    # ─── Ingest cutoff (RTV2) ───
+    "ingest_cutoff_time": "16:00",  # HH:MM local CDMX
+    "ingest_cutoff_timezone": "America/Mexico_City",
+    "ingest_eligibility_states": ["in_progress"],
+    "ingest_force_resync_at_cutoff": True,
 }
 
 VALID_TIME_FORMAT = "%H:%M"
+VALID_STRATEGIES = ("flat", "adaptive_calendar_week")
+VALID_PLAN_STATES = ("created", "in_progress", "completed", "cancelled")
 
 
 def _now_iso() -> str:
@@ -54,6 +72,37 @@ def _validate_times(values: list) -> list:
         raise ValueError("scheduler_times max 10 entries")
     cleaned = sorted({_validate_time(v) for v in values})
     return cleaned
+
+
+# ─── Validators for package-oriented audit cohort ───
+def _validate_int_range(name: str, value, lo: int, hi: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{name} must be int")
+    if value < lo or value > hi:
+        raise ValueError(f"{name} must be in [{lo}, {hi}], got {value}")
+    return value
+
+
+def _validate_packages_band(target: int, min_p: int, max_p: int) -> None:
+    if min_p > target:
+        raise ValueError(f"audit_min_packages_daily ({min_p}) cannot exceed target ({target})")
+    if target > max_p:
+        raise ValueError(f"audit_target_packages_daily ({target}) cannot exceed max ({max_p})")
+
+
+def _validate_strategy(value: str) -> str:
+    if value not in VALID_STRATEGIES:
+        raise ValueError(f"audit_distribution_strategy must be one of {VALID_STRATEGIES}")
+    return value
+
+
+def _validate_eligibility_states(values: list) -> list:
+    if not isinstance(values, list) or len(values) == 0:
+        raise ValueError("ingest_eligibility_states must be a non-empty list")
+    invalid = [v for v in values if v not in VALID_PLAN_STATES]
+    if invalid:
+        raise ValueError(f"ingest_eligibility_states invalid values: {invalid}. Allowed: {VALID_PLAN_STATES}")
+    return list(dict.fromkeys(values))  # dedup keep order
 
 
 class ClientConfigService:
@@ -87,6 +136,18 @@ class ClientConfigService:
         scheduler_time: Optional[str] = None,
         scheduler_times: Optional[list] = None,
         active: Optional[bool] = None,
+        # ─── Package-oriented cohort (RTV2 2026-05-30) ───
+        audit_target_packages_daily: Optional[int] = None,
+        audit_min_packages_daily: Optional[int] = None,
+        audit_max_packages_daily: Optional[int] = None,
+        audit_target_packages_weekly: Optional[int] = None,
+        audit_overshoot_tolerance: Optional[float] = None,
+        audit_distribution_strategy: Optional[str] = None,
+        audit_safety_circuit_breaker: Optional[int] = None,
+        ingest_cutoff_time: Optional[str] = None,
+        ingest_cutoff_timezone: Optional[str] = None,
+        ingest_eligibility_states: Optional[list] = None,
+        ingest_force_resync_at_cutoff: Optional[bool] = None,
     ) -> dict:
         """Create or update. Validates fields and returns the updated doc."""
         existing = await self.get(client_id) or {}
@@ -122,6 +183,65 @@ class ClientConfigService:
             update["active"] = bool(active)
         elif "active" not in existing:
             update["active"] = DEFAULTS["active"]
+
+        # ─── Package-oriented cohort (RTV2) ───
+        # Compute final values respecting precedence: explicit param > existing > default.
+        def _resolve_int(name, val, lo, hi):
+            if val is not None:
+                update[name] = _validate_int_range(name, val, lo, hi)
+                return update[name]
+            return existing.get(name, DEFAULTS[name])
+
+        def _resolve_float(name, val, lo, hi):
+            if val is not None:
+                if not isinstance(val, (int, float)) or isinstance(val, bool):
+                    raise ValueError(f"{name} must be number")
+                if val < lo or val > hi:
+                    raise ValueError(f"{name} must be in [{lo}, {hi}]")
+                update[name] = float(val)
+                return update[name]
+            return existing.get(name, DEFAULTS[name])
+
+        final_target = _resolve_int("audit_target_packages_daily", audit_target_packages_daily, 1, 100000)
+        final_min = _resolve_int("audit_min_packages_daily", audit_min_packages_daily, 0, 100000)
+        final_max = _resolve_int("audit_max_packages_daily", audit_max_packages_daily, 1, 100000)
+        _resolve_int("audit_target_packages_weekly", audit_target_packages_weekly, 1, 1000000)
+        _resolve_float("audit_overshoot_tolerance", audit_overshoot_tolerance, 0.0, 1.0)
+        _resolve_int("audit_safety_circuit_breaker", audit_safety_circuit_breaker, 1, 100000)
+
+        # Coherence check on the BAND (target ∈ [min, max])
+        _validate_packages_band(final_target, final_min, final_max)
+
+        if audit_distribution_strategy is not None:
+            update["audit_distribution_strategy"] = _validate_strategy(audit_distribution_strategy)
+        elif "audit_distribution_strategy" not in existing:
+            update["audit_distribution_strategy"] = DEFAULTS["audit_distribution_strategy"]
+
+        if ingest_cutoff_time is not None:
+            update["ingest_cutoff_time"] = _validate_time(ingest_cutoff_time)
+        elif "ingest_cutoff_time" not in existing:
+            update["ingest_cutoff_time"] = DEFAULTS["ingest_cutoff_time"]
+
+        if ingest_cutoff_timezone is not None:
+            # Validate timezone string
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(ingest_cutoff_timezone)
+            except Exception as e:
+                raise ValueError(f"ingest_cutoff_timezone invalid: {e}")
+            update["ingest_cutoff_timezone"] = ingest_cutoff_timezone
+        elif "ingest_cutoff_timezone" not in existing:
+            update["ingest_cutoff_timezone"] = DEFAULTS["ingest_cutoff_timezone"]
+
+        if ingest_eligibility_states is not None:
+            update["ingest_eligibility_states"] = _validate_eligibility_states(ingest_eligibility_states)
+        elif "ingest_eligibility_states" not in existing:
+            update["ingest_eligibility_states"] = DEFAULTS["ingest_eligibility_states"]
+
+        if ingest_force_resync_at_cutoff is not None:
+            update["ingest_force_resync_at_cutoff"] = bool(ingest_force_resync_at_cutoff)
+        elif "ingest_force_resync_at_cutoff" not in existing:
+            update["ingest_force_resync_at_cutoff"] = DEFAULTS["ingest_force_resync_at_cutoff"]
 
         if not existing:
             update["created_at"] = _now_iso()
@@ -168,5 +288,12 @@ async def bootstrap_default_clients(db) -> None:
         selection_enabled=True,
         scheduler_time="06:00",
         active=True,
+        # RTV2 package-oriented defaults
+        audit_target_packages_daily=1000,
+        audit_min_packages_daily=800,
+        audit_max_packages_daily=1200,
+        audit_target_packages_weekly=7000,
+        ingest_cutoff_time="16:00",
+        ingest_eligibility_states=["in_progress"],
     )
-    logger.info(f"[client_config] Bootstrapped Cubbo (client_id={cubbo['id']}) max_daily=30 selection_enabled=True")
+    logger.info(f"[client_config] Bootstrapped Cubbo (client_id={cubbo['id']}) target=1000/day cutoff=16:00")

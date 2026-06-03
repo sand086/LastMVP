@@ -96,6 +96,170 @@ def _select_drivers(
     return selected, {d: "phase_2" for d in selected}
 
 
+# ─────────────── RTV2: PACKAGE-ORIENTED COHORT (2026-05-30) ───────────────
+
+def _is_scanner_placeholder_safe(label) -> bool:
+    """Mirror of workers.routal_event_processor._is_scanner_placeholder without
+    importing it (avoid cycles). Filters out depot/placeholder stops that should
+    not count as a real package for cohort decisions."""
+    if not label or not isinstance(label, str):
+        return False
+    s = label.strip().lower()
+    return s.startswith("scanner ") or s in ("depot", "warehouse", "almacen")
+
+
+def classify_plan_operational_state(plan: dict, eligibility_states: list) -> str:
+    """Classifies a Routal plan into 'in_progress' / 'created' / 'completed' / 'cancelled'
+    based on Routal's plan.status. Returns the literal Routal status.
+
+    The caller decides eligibility comparing against `eligibility_states`.
+    Defaults strictly: only plans with status='in_progress' are auditable.
+    """
+    status = (plan.get("routal_status") or plan.get("status") or "").strip().lower()
+    if status in ("in_progress", "started", "running"):
+        return "in_progress"
+    if status in ("completed", "finished", "done", "closed"):
+        return "completed"
+    if status in ("cancelled", "canceled", "deleted"):
+        return "cancelled"
+    return "created"
+
+
+def _calendar_week_bounds(target_date: date) -> tuple[date, date]:
+    """Returns (monday, sunday) of the calendar week containing target_date (Mon=0)."""
+    monday = target_date - timedelta(days=target_date.weekday())
+    sunday = monday + timedelta(days=6)
+    return monday, sunday
+
+
+async def compute_adjusted_target_packages(
+    db, client_id: str, target_date: date, cfg: dict
+) -> dict:
+    """RTV2: adaptive_calendar_week target computation.
+
+    Returns:
+        {
+            "strategy": "flat" | "adaptive_calendar_week",
+            "target_daily": int,           # base daily target from config
+            "min_daily": int,
+            "max_daily": int,
+            "adjusted_target": int,        # value to use in knapsack
+            "week_monday": "YYYY-MM-DD",
+            "week_sunday": "YYYY-MM-DD",
+            "week_accumulated": int,       # packages audited Mon..yesterday
+            "week_target": int,
+            "days_remaining_incl_today": int,
+        }
+    """
+    target_base = int(cfg.get("audit_target_packages_daily", 1000))
+    min_p = int(cfg.get("audit_min_packages_daily", 800))
+    max_p = int(cfg.get("audit_max_packages_daily", 1200))
+    weekly_target = int(cfg.get("audit_target_packages_weekly", 7000))
+    strategy = cfg.get("audit_distribution_strategy", "adaptive_calendar_week")
+
+    monday, sunday = _calendar_week_bounds(target_date)
+    days_remaining = (sunday - target_date).days + 1  # includes today
+
+    result = {
+        "strategy": strategy,
+        "target_daily": target_base,
+        "min_daily": min_p,
+        "max_daily": max_p,
+        "week_monday": monday.isoformat(),
+        "week_sunday": sunday.isoformat(),
+        "week_target": weekly_target,
+        "days_remaining_incl_today": days_remaining,
+        "week_accumulated": 0,
+        "adjusted_target": target_base,
+    }
+
+    if strategy == "flat":
+        return result
+
+    # adaptive_calendar_week: compute accumulated Mon..yesterday
+    if target_date > monday:
+        monday_dt = _date_to_dt(monday)
+        today_dt = _date_to_dt(target_date)
+        pipeline = [
+            {"$match": {
+                "client_id": client_id,
+                "selection_status": "selected",
+                "date": {"$gte": monday_dt, "$lt": today_dt},
+            }},
+            {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$packages_audited", 0]}}}},
+        ]
+        accumulated = 0
+        async for doc in db.driver_audit_log.aggregate(pipeline):
+            accumulated = int(doc.get("total") or 0)
+        result["week_accumulated"] = accumulated
+
+    target_residual = weekly_target - result["week_accumulated"]
+    if days_remaining <= 0:
+        adjusted = min_p
+    else:
+        adjusted = target_residual / days_remaining
+    # Clamp to band
+    adjusted_int = max(min_p, min(max_p, int(round(adjusted))))
+    result["adjusted_target"] = adjusted_int
+    return result
+
+
+def knapsack_select_by_packages(
+    ordered_plans: list,
+    adjusted_target: int,
+    max_packages: int,
+    overshoot_tolerance: float = 0.10,
+) -> tuple[list, list, dict]:
+    """RTV2: greedy selection by packages.
+
+    Iterates `ordered_plans` (already sorted by phase_1 → phase_2 priority) and
+    accumulates until adjusted_target ± tolerance is reached, never exceeding
+    max_packages × (1 + tolerance).
+
+    Each plan dict must have at minimum: id, driver_id, packages_count.
+    Returns (selected, discarded, summary).
+    """
+    selected: list = []
+    discarded: list = []
+    acc = 0
+    hard_ceiling = int(max_packages * (1 + overshoot_tolerance))
+    soft_ceiling = int(adjusted_target * (1 + overshoot_tolerance))
+    discard_reason_summary: dict = {}
+
+    for plan in ordered_plans:
+        pkgs = int(plan.get("packages_count") or 0)
+        if pkgs <= 0:
+            discarded.append({**plan, "_discard_reason": "no_packages"})
+            discard_reason_summary["no_packages"] = discard_reason_summary.get("no_packages", 0) + 1
+            continue
+
+        projected = acc + pkgs
+        # Hard cap: never exceed max × tolerance
+        if projected > hard_ceiling:
+            discarded.append({**plan, "_discard_reason": "hard_cap_reached"})
+            discard_reason_summary["hard_cap_reached"] = discard_reason_summary.get("hard_cap_reached", 0) + 1
+            continue
+        # Soft cap: if target reached with margin, stop accumulating (don't blow target by 100%)
+        if acc >= adjusted_target and projected > soft_ceiling:
+            discarded.append({**plan, "_discard_reason": "target_reached_with_margin"})
+            discard_reason_summary["target_reached_with_margin"] = discard_reason_summary.get("target_reached_with_margin", 0) + 1
+            continue
+
+        selected.append(plan)
+        acc += pkgs
+
+    summary = {
+        "selected_count": len(selected),
+        "selected_packages": acc,
+        "discarded_count": len(discarded),
+        "discard_reasons": discard_reason_summary,
+        "adjusted_target": adjusted_target,
+        "hard_ceiling": hard_ceiling,
+        "soft_ceiling": soft_ceiling,
+    }
+    return selected, discarded, summary
+
+
 # ─────────────── ORCHESTRATOR ───────────────
 
 async def run_daily_selection(db, client_id: str, target_date: Optional[date] = None) -> dict:
@@ -112,7 +276,9 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
     if not cfg:
         logger.warning(f"[selection] no active client_config for {client_id}")
         return {"ok": False, "error": "no_active_config", "client_id": client_id}
-    max_daily = int(cfg["max_daily_audits"])
+    # max_daily is computed inside legacy branch (STEP 6) — package mode uses
+    # the new audit_max_packages_daily / audit_target_packages_daily band.
+    max_daily = int(cfg.get("max_daily_audits", 30))
 
     # STEP 2 — staged plans for today
     plans = await db.routal_daily_plans.find(
@@ -174,23 +340,103 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
         "client_id": client_id, "date": target_dt, "selection_status": "unselected",
     })
 
-    # STEP 6 — algorithm on REMAINING quota with NEW candidates only.
-    # Bug fix 2026-05-06: previously the algorithm was called with all drivers_today
-    # and max_daily, which could over-select on subsequent backfills (e.g. first
-    # run picks 10/30, second run picks another 25 → total 35, exceeding cap).
-    remaining_quota = max(0, max_daily - len(already_selected))
+    # STEP 6 — algorithm on REMAINING quota.
+    #
+    # RTV2 (2026-05-30): bifurcación según estrategia configurada.
+    # ───────────────────────────────────────────────────────────────
+    # Si el cliente tiene `audit_target_packages_daily` configurado (cohort
+    # orientado a paquetes), aplicamos:
+    #   1. Filtro de elegibilidad por estado operativo (default: only in_progress)
+    #   2. Ordenamiento phase_1 (drivers no auditados ayer) → phase_2
+    #   3. Knapsack greedy por paquetes hasta adjusted_target
+    # Caso contrario: cae al algoritmo legacy `_select_drivers` (rotación por route count).
+    #
+    # Bug fix 2026-05-06 (legacy path preserved): max_daily route count se aplica
+    # como hard cap absoluto si está configurado.
+    target_packages_daily = cfg.get("audit_target_packages_daily")
+    package_mode = bool(target_packages_daily) and bool(cfg.get("audit_distribution_strategy"))
+
     candidate_drivers = [d for d in drivers_today if d not in already_selected]
 
-    if remaining_quota > 0 and candidate_drivers:
-        selected_list, phase_map = _select_drivers(
-            drivers_today=candidate_drivers,
-            audited_yesterday=audited_yesterday,
-            audit_counts=audit_counts,
-            max_daily=remaining_quota,
-            target_date=target_date,
+    if package_mode:
+        # ───── PACKAGE-ORIENTED COHORT ─────
+        cohort_info = await compute_adjusted_target_packages(db, client_id, target_date, cfg)
+        adjusted_target = cohort_info["adjusted_target"]
+        max_pkg_daily = int(cfg.get("audit_max_packages_daily", 1200))
+        tolerance = float(cfg.get("audit_overshoot_tolerance", 0.10))
+        eligibility_states = set(cfg.get("ingest_eligibility_states", ["in_progress"]))
+
+        # Filter plans by operational state + new drivers only
+        eligible_plans = []
+        for p in plans:
+            if p.get("driver_id") in already_selected:
+                continue
+            op_state = classify_plan_operational_state(p.get("route_metadata") or {}, list(eligibility_states))
+            if op_state not in eligibility_states:
+                continue
+            # Compute packages_count from route_metadata stops/services
+            rm = p.get("route_metadata") or {}
+            stops = rm.get("stops") or rm.get("services") or []
+            pkgs_count = sum(
+                1 for s in stops
+                if not _is_scanner_placeholder_safe(s.get("label") if isinstance(s, dict) else None)
+            ) if stops else int(p.get("packages_count") or 0)
+            eligible_plans.append({
+                **p,
+                "packages_count": pkgs_count,
+                "_op_state": op_state,
+            })
+
+        # Order plans by driver phase: phase_1 (not audited yesterday) first
+        rng = random.Random(_seed_for_date(target_date))
+        phase_1_plans = [p for p in eligible_plans if p["driver_id"] not in audited_yesterday]
+        phase_2_plans = [p for p in eligible_plans if p["driver_id"] in audited_yesterday]
+        rng.shuffle(phase_1_plans)
+        phase_2_plans.sort(key=lambda p: audit_counts.get(p["driver_id"], 0))
+        ordered_plans = phase_1_plans + phase_2_plans
+
+        selected_plans, discarded_plans, ks_summary = knapsack_select_by_packages(
+            ordered_plans, adjusted_target, max_pkg_daily, overshoot_tolerance=tolerance
+        )
+
+        selected_list = [p["driver_id"] for p in selected_plans]
+        phase_map = {
+            p["driver_id"]: ("phase_1" if p["driver_id"] not in audited_yesterday else "phase_2")
+            for p in selected_plans
+        }
+
+        # Persist cohort decision for /api/captacion/stats endpoint
+        await db.selection_runs.insert_one({
+            "client_id": client_id,
+            "date": target_dt,
+            "ran_at": _now_iso(),
+            "mode": "package",
+            "cohort": cohort_info,
+            "knapsack": ks_summary,
+            "eligible_count": len(eligible_plans),
+            "selected_count": len(selected_plans),
+            "discarded_count": len(discarded_plans),
+        })
+        logger.info(
+            f"[selection.pkg] client={client_id} date={target_date} "
+            f"eligible={len(eligible_plans)} selected={len(selected_plans)} "
+            f"pkgs={ks_summary['selected_packages']}/{adjusted_target} "
+            f"discarded={len(discarded_plans)} reasons={ks_summary['discard_reasons']}"
         )
     else:
-        selected_list, phase_map = [], {}
+        # ───── LEGACY ROUTE-COUNT COHORT ─────
+        max_daily = int(cfg.get("max_daily_audits", 30))
+        remaining_quota = max(0, max_daily - len(already_selected))
+        if remaining_quota > 0 and candidate_drivers:
+            selected_list, phase_map = _select_drivers(
+                drivers_today=candidate_drivers,
+                audited_yesterday=audited_yesterday,
+                audit_counts=audit_counts,
+                max_daily=remaining_quota,
+                target_date=target_date,
+            )
+        else:
+            selected_list, phase_map = [], {}
 
     new_selected = set(selected_list)
     # Combined view for summary metrics (already + new) — never re-elect existing
@@ -235,6 +481,14 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
                 logger.error(f"[selection] journey create failed for {drv}: {e}")
                 journey_id = None
 
+            # Compute packages_audited for this driver's plan (RTV2: weekly target accumulator)
+            rm = plan.get("route_metadata") or {}
+            _stops = rm.get("stops") or rm.get("services") or []
+            pkgs_audited = sum(
+                1 for s in _stops
+                if isinstance(s, dict) and not _is_scanner_placeholder_safe(s.get("label"))
+            ) if _stops else int(plan.get("packages_count") or 0)
+
             await db.driver_audit_log.update_one(
                 {"client_id": client_id, "driver_id": drv, "date": target_dt},
                 {"$set": {
@@ -248,6 +502,7 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
                     "selection_phase": phase,
                     "audit_count_30d_at_selection": audit_counts.get(drv, 0),
                     "journey_id": journey_id,
+                    "packages_audited": pkgs_audited,
                     "created_at": _now_iso(),
                 }},
                 upsert=True,
@@ -362,6 +617,12 @@ async def _scheduler_loop(db):
                         # Fallback to legacy single-time
                         single = cfg.get("scheduler_time", "06:00")
                         times = [single]
+                    # RTV2 (2026-05-30): include ingest_cutoff_time as a scheduler cutoff
+                    # so the package-oriented cohort selection runs at the configured hour
+                    # (default 16:00 CDMX). Idempotent: tracked in last_scheduled_run_dates.
+                    cutoff = cfg.get("ingest_cutoff_time")
+                    if cutoff and cutoff not in times:
+                        times = list(times) + [cutoff]
                     last_runs = cfg.get("last_scheduled_run_dates") or {}
                     # Legacy compatibility: if old `last_scheduled_run_date` exists, treat
                     # it as "first cutoff already ran today"

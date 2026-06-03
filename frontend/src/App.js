@@ -23,6 +23,7 @@ const Manuals = lazy(() => import('./pages/Manuals'));
 const ManualViewer = lazy(() => import('./pages/ManualViewer'));
 const MonitorProcesos = lazy(() => import('./pages/MonitorProcesos'));
 const Architecture = lazy(() => import('./pages/Architecture'));
+const Captacion = lazy(() => import('./pages/Captacion'));
 import LumiChat from './components/LumiChat';
 import ErrorBoundary from './components/ErrorBoundary';
 import './App.css';
@@ -250,6 +251,15 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute allowedRoles={['developer', 'executive']}>
                         <Architecture />
+                    </ProtectedRoute>
+                } 
+            />
+
+            <Route 
+                path="/captacion" 
+                element={
+                    <ProtectedRoute allowedRoles={['coordinator', 'developer', 'executive']}>
+                        <Captacion />
                     </ProtectedRoute>
                 } 
             />

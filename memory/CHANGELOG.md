@@ -1,6 +1,61 @@
 # LastMile OS - Changelog
 
 
+## 2026-05-30 — FEATURE: Cohorte de auditoría orientada a PAQUETES (RTV2)
+
+**Motivación usuario**: cambiar el paradigma de captación de "N rutas/día" a "X paquetes/día con ventana semanal calendar L–D". Mantiene rotación de drivers, agrega controles min/max/target dinámicos y hora de corte configurable.
+
+### Backend
+- **`services/client_config_service.py`**: 10 nuevos parámetros con validaciones (`audit_target_packages_daily`, `audit_min_packages_daily`, `audit_max_packages_daily`, `audit_target_packages_weekly`, `audit_overshoot_tolerance`, `audit_distribution_strategy`, `audit_safety_circuit_breaker`, `ingest_cutoff_time`, `ingest_cutoff_timezone`, `ingest_eligibility_states`, `ingest_force_resync_at_cutoff`). Bootstrap Cubbo con defaults: target=1000/día, min=800, max=1200, semanal=7000, corte=16:00 CDMX, solo `in_progress` elegible.
+- **`workers/routal_selection_worker.py`**: 3 helpers nuevos.
+  - `classify_plan_operational_state(plan, eligibility_states)` — mapea status Routal a `in_progress`/`completed`/`cancelled`/`created`.
+  - `compute_adjusted_target_packages(db, client_id, target_date, cfg)` — algoritmo `adaptive_calendar_week`: lee acumulado semanal L–anterior, calcula target ajustado = `(weekly_target - accumulated) / days_remaining`, clamp [min, max].
+  - `knapsack_select_by_packages(ordered_plans, target, max, tolerance)` — greedy: acumula rutas hasta target ± tolerancia, respeta hard cap = max × (1 + tolerance).
+- **Refactor `run_daily_selection`**: bifurcación por config. Si el cliente tiene `audit_target_packages_daily` y `audit_distribution_strategy`, usa knapsack package-mode (filtra por `ingest_eligibility_states`, ordena phase_1 → phase_2 a nivel plan, knapsack por paquetes). Si no, fallback al algoritmo legacy route-count. Cero breaking change.
+- **Scheduler**: el loop honra `ingest_cutoff_time` además de `scheduler_times[]` (deduplicado, idempotente).
+- **`driver_audit_log`**: ahora persiste `packages_audited` por entrada — necesario para el aggregate semanal del adaptive.
+- **`selection_runs`**: nueva colección con snapshot completo de cada corrida (cohort target, knapsack summary, conteos selected/discarded con motivos de descarte).
+- **`routes/selection_routes.py`**: PATCH `/client-config/{id}` extendido con los 10 nuevos campos. GET rellena defaults para docs legacy. Nuevo endpoint `GET /api/captacion/stats/{client_id}?days=N` con:
+  - `today`: pkgs auditados / target_daily / adjusted_target / banda / % cumplimiento.
+  - `week`: monday/sunday calendar, accumulated, proyección, días restantes incl. hoy, % weekly_target.
+  - `cohort_today`: snapshot completo del cálculo adaptive.
+  - `sparkline`: serie diaria últimos N días (default 28).
+  - `last_run`: última entrada de `selection_runs`.
+  - `config_snapshot`: cutoff_time, tz, eligibility_states, strategy, circuit breaker.
+
+### Frontend
+- **Nueva página `/captacion`** (`/app/frontend/src/pages/Captacion.jsx`):
+  - **Header**: selector cliente + botón "Configurar".
+  - **Card "Hoy"**: gauge con paquetes auditados, banda min/target/max, % cumplimiento, estado visual (En target / Avanzando / Por debajo).
+  - **Card "Semana"**: barra L→M→X→J→V→S→D con días transcurridos/actual/restantes pintados; proyección semanal vs target.
+  - **Sparkline 28 días**: SVG inline con banda min/max sombreada + línea target.
+  - **Card "Última corrida"**: elegibles / seleccionadas / descartadas / paquetes seleccionados con motivos de descarte detallados.
+  - **Dialog "Configurar cohorte de captación"** — UX amigable:
+    - Inputs numéricos con validación visual en vivo (target debe estar entre min y max → indicador ámbar si banda inválida + botón Guardar deshabilitado).
+    - Calculadora en vivo: "Con este target base, alcanzarás ~X,XXX paquetes/semana en condiciones planas".
+    - Time picker para hora de corte + selector de zona horaria.
+    - Toggle por cada estado Routal elegible con badge "recomendado" en `in_progress`.
+    - Slider visual para tolerancia overshoot (0–50%).
+    - Switch maestro de "Selección automática".
+- **Sidebar**: entrada nueva "Captación" con icono `Target` (lucide-react), visible para `coordinator/developer/executive`.
+- **App.js**: ruta `/captacion` protegida.
+
+### Cero impacto en flujos existentes
+- `journeys`, `packages`, `incidents`, AI eval, confianza, archive, audit logs — sin cambios.
+- Capa-6 worker subprocess — sin cambios.
+- Algoritmo `_select_drivers` legacy preservado y se ejecuta si el cliente no tiene config nueva.
+- `max_daily_audits` (route count) preservado como hard cap opcional.
+
+### Verificación local
+- Lint backend + frontend OK.
+- `/health` 1ms; worker subprocess vivo.
+- Endpoints registrados con auth (`/api/captacion/stats/{id}`, `/api/client-config/{id}` GET+PATCH extendido).
+- Validación de banda: rechaza correctamente `min > target` con HTTP 400 mensaje claro.
+- Test end-to-end: GET devuelve defaults para doc legacy de Cubbo, PATCH persiste correctamente, validación cruzada funciona.
+- Smoke test UI: página `/captacion` carga, cards muestran datos reales (hoy=0/1000 target ajustado=1200, semana=0/7000 proyección=6000), modal de configuración carga con todos los defaults y la calculadora en vivo funciona.
+
+
+
 ## 2026-05-29 — FIX: criterio "Timestamp visible" no se reflejaba en revisión manual
 
 **Reporte usuario**: ruta `59cfb6b4-...`, guía `UFpkdHaDlD6cYuwl`. La descripción IA por foto detecta correctamente "tomada con Timemark, timestamp 14:43 del 29 de mayo 2026", pero en el modal "Evaluación de evidencia" el criterio "Timestamp visible" aparece sin evaluar (gris, sin ✓ ni ✗).
