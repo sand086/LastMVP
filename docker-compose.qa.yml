@@ -1,0 +1,69 @@
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: mye-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mye-backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      MONGO_URL: ${MONGO_URL:?Missing MONGO_URL in .env}
+      DB_NAME: ${DB_NAME:?Missing DB_NAME in .env}
+      JWT_SECRET: ${JWT_SECRET:?Missing JWT_SECRET in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Missing ENCRYPTION_KEY in .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Missing ADMIN_EMAIL in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Missing ADMIN_PASSWORD in .env}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:?Missing SUPERADMIN_EMAIL in .env}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:?Missing SUPERADMIN_PASSWORD in .env}
+      RESEND_API_KEY: ${RESEND_API_KEY?Missing RESEND_API_KEY in .env}
+      SENDER_EMAIL: ${SENDER_EMAIL:?Missing SENDER_EMAIL in .env}
+      SENDER_NAME: ${SENDER_NAME:?Missing SENDER_NAME in .env}
+      ROUTAL_API_KEY: ${ROUTAL_API_KEY?Missing ROUTAL_API_KEY in .env}
+      ROUTAL_PROJECT_ID: ${ROUTAL_PROJECT_ID?Missing ROUTAL_PROJECT_ID in .env}
+      ROUTAL_BASE_URL: ${ROUTAL_BASE_URL:?Missing ROUTAL_BASE_URL in .env}
+      CRON_ENABLED: ${CRON_ENABLED:?Missing CRON_ENABLED in .env}
+      EVIDENCE_ROOT: ${EVIDENCE_ROOT:?Missing EVIDENCE_ROOT in .env}
+    volumes:
+      - evidence_data:/app/data/evidences
+    ports:
+      - "8001:8001"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:?Missing REACT_APP_BACKEND_URL in .env}
+    container_name: mye-frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:?Missing REACT_APP_BACKEND_URL in .env}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  mongo_data:
+  evidence_data:

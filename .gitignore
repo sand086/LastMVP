@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # IDE and editors
@@ -98,3 +99,60 @@ frontend/node_modules/.cache/default-development/43.pack
 .env
 .env.*
 *.env
+=======
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local runtime data
+data/
+backend/data/
+test_reports/
+audits/
+
+# Database dumps and generated imports
+db/
+*.dump
+*.archive
+*.bson
+*.sqlite
+*.sqlite3
+
+# Docker / local generated files
+*.pid
+*.log
+docker-compose.dev.yml
+>>>>>>> e78c9dd (Merge pull request #1 from sand086/devArmando)
