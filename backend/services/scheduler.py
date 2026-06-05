@@ -33,21 +33,18 @@ from services.sla_inactivity import scan_claim_sla, scan_inactive_agents, scan_s
 _scheduler: Optional[AsyncIOScheduler] = None
 
 
-def _int_env(key: str, default: int) -> int:
-    try:
-        return int(os.environ.get(key, default))
-    except ValueError:
-        return default
+def _int_env(key: str) -> int:
+    return int(os.environ[key])
 
 
 def _enabled() -> bool:
-    return os.environ.get("CRON_ENABLED", "0") == "1"
+    return os.environ["CRON_ENABLED"] == "1"
 
 
 # ───────────────────────── Job bodies ──────────────────────────────────
 async def _job_sla() -> None:
     db = get_db()
-    minutes = _int_env("MYE_SLA_MINUTES", 60)
+    minutes = _int_env("MYE_SLA_MINUTES")
     tenants = await db.tenants.find({"status": "active"}, {"_id": 0}).to_list(length=500)
     for t in tenants:
         try:
@@ -58,7 +55,7 @@ async def _job_sla() -> None:
 
 async def _job_inactivity() -> None:
     db = get_db()
-    minutes = _int_env("MYE_INACTIVITY_MINUTES", 30)
+    minutes = _int_env("MYE_INACTIVITY_MINUTES")
     tenants = await db.tenants.find({"status": "active"}, {"_id": 0}).to_list(length=500)
     for t in tenants:
         try:
@@ -249,8 +246,8 @@ async def _job_escalation() -> None:
     notificaciones + grace window."""
     from services.escalation import scan_unresponsive_tickets
     db = get_db()
-    max_notifs = _int_env("MYE_ESCALATION_MAX_NOTIFICATIONS", 3)
-    grace_hours = _int_env("MYE_ESCALATION_GRACE_HOURS", 48)
+    max_notifs = _int_env("MYE_ESCALATION_MAX_NOTIFICATIONS")
+    grace_hours = _int_env("MYE_ESCALATION_GRACE_HOURS")
     tenants = await db.tenants.find({"status": "active"}, {"_id": 0}).to_list(length=500)
     for t in tenants:
         try:
@@ -273,11 +270,11 @@ def start() -> Optional[AsyncIOScheduler]:
         log.info("cron_disabled", extra={"context": {"reason": "CRON_ENABLED!=1"}})
         return None
 
-    sla_every = _int_env("SLA_SCAN_INTERVAL_MIN", 5)
-    inactivity_every = _int_env("INACTIVITY_SCAN_INTERVAL_MIN", 5)
-    claim_sla_every = _int_env("CLAIM_SLA_SCAN_INTERVAL_MIN", 30)
-    pulling_every = _int_env("PULLING_INTERVAL_MIN", 5)
-    daily_hour = _int_env("MYE_DAILY_SUMMARY_HOUR_UTC", 9)
+    sla_every = _int_env("SLA_SCAN_INTERVAL_MIN")
+    inactivity_every = _int_env("INACTIVITY_SCAN_INTERVAL_MIN")
+    claim_sla_every = _int_env("CLAIM_SLA_SCAN_INTERVAL_MIN")
+    pulling_every = _int_env("PULLING_INTERVAL_MIN")
+    daily_hour = _int_env("MYE_DAILY_SUMMARY_HOUR_UTC")
 
     sched = AsyncIOScheduler(timezone="UTC")
     sched.add_job(_job_sla, IntervalTrigger(minutes=sla_every),
@@ -290,10 +287,10 @@ def start() -> Optional[AsyncIOScheduler]:
                   id="pulling", coalesce=True, max_instances=1)
     sched.add_job(_job_daily_summary, CronTrigger(hour=daily_hour, minute=0),
                   id="daily_summary", coalesce=True, max_instances=1)
-    webhook_every = _int_env("WEBHOOK_WORKER_INTERVAL_SEC", 30)
+    webhook_every = _int_env("MYE_WEBHOOK_WORKER_INTERVAL_SEC")
     sched.add_job(_job_webhook_worker, IntervalTrigger(seconds=webhook_every),
                   id="webhook_worker", coalesce=True, max_instances=1)
-    escalation_every = _int_env("ESCALATION_INTERVAL_MIN", 60)
+    escalation_every = _int_env("ESCALATION_INTERVAL_MIN")
     sched.add_job(_job_escalation, IntervalTrigger(minutes=escalation_every),
                   id="escalation", coalesce=True, max_instances=1)
     sched.start()

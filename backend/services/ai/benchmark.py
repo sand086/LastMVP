@@ -114,7 +114,7 @@ async def run_benchmark(*, dry_run: bool = True, samples: int = 3,
     modelos en `results[]`).
     """
     started = datetime.now(timezone.utc)
-    api_key = os.environ.get("EMERGENT_LLM_KEY", "")
+    api_key = os.environ["EMERGENT_LLM_KEY"]
     results = []
     if dry_run or not api_key:
         for prov, model in _BENCHMARK_MODELS:

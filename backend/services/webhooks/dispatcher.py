@@ -54,7 +54,7 @@ BACKOFF_MINUTES: dict[int, int] = {
     2: 1, 3: 5, 4: 30, 5: 120, 6: 720, 7: 1440,
 }
 MAX_ATTEMPTS = 7
-WORKER_TIMEOUT_S = float(os.environ.get("MYE_WEBHOOK_WORKER_TIMEOUT_S", "30"))
+WORKER_TIMEOUT_S = float(os.environ["MYE_WEBHOOK_WORKER_TIMEOUT_S"])
 USER_AGENT = "MyExcellence-Webhook/1.0"
 
 

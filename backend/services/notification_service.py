@@ -41,7 +41,7 @@ def _from_header() -> str:
 
 def _key() -> str:
     """Pull the key fresh from the env so tests can patch it."""
-    return os.environ.get("RESEND_API_KEY", RESEND_API_KEY or "")
+    return os.environ["RESEND_API_KEY"]
 
 
 async def send_email(

@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api/webhooks/resend", tags=["webhooks-resend"])
 
 def _verify_signature(raw_body: bytes, signature_header: str | None) -> None:
     """Valida la firma Svix si hay secret en env. Lanza si inválida."""
-    secret = os.environ.get("RESEND_WEBHOOK_SECRET")
+    secret = os.environ["RESEND_WEBHOOK_SECRET"]
     if not secret:
         return  # dev mode — sin validación
     if not signature_header:

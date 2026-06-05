@@ -31,7 +31,7 @@ class _BaseAdapter(CarrierAdapterInterface):
 
     @property
     def mock_mode(self) -> bool:
-        return os.environ.get("MYE_CAE_REAL_MODE", "0") != "1"
+        return os.environ["MYE_CAE_REAL_MODE"] != "1"
 
     async def get_raw_status(self, tracking_id: str) -> RawCarrierEvent:
         if self.mock_mode:

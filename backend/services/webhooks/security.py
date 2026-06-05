@@ -14,14 +14,10 @@ def generate_secret() -> str:
 
 
 def _fernet() -> Fernet:
-    key = (
-        os.environ.get("MYE_WEBHOOK_FERNET_KEY")
-        or os.environ.get("ENCRYPTION_KEY")
-        or os.environ.get("MYE_FERNET_KEY")
-    )
+    key = os.environ["MYE_WEBHOOK_FERNET_KEY"]
     if not key:
         raise RuntimeError(
-            "Falta ENCRYPTION_KEY/MYE_WEBHOOK_FERNET_KEY en .env "
+            "Falta MYE_WEBHOOK_FERNET_KEY en .env "
             "para cifrar secretos HMAC.")
     return Fernet(key.encode("utf-8") if isinstance(key, str) else key)
 

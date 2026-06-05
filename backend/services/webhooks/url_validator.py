@@ -46,7 +46,7 @@ def _is_private_ip(ip_str: str) -> bool:
 
 
 def _allow_http() -> bool:
-    return os.environ.get("MYE_WEBHOOK_ALLOW_HTTP", "0") == "1"
+    return os.environ["MYE_WEBHOOK_ALLOW_HTTP"] == "1"
 
 
 def validate_static(url: str, *, allow_extra_ports: bool = False) -> None:

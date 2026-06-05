@@ -3,9 +3,8 @@
 Uses cryptography.Fernet (AES-128-CBC + HMAC-SHA256) as a libsodium-equivalent
 free alternative for the MVP. Key lives in ``ENCRYPTION_KEY`` env var.
 
-If ENCRYPTION_KEY is missing, a key is generated for the running process and
-a WARNING is logged — never use this in production: every restart would
-invalidate stored ciphertexts.
+If ENCRYPTION_KEY is missing or invalid, startup fails. Configuration must come
+from .env; no ephemeral encryption fallback is allowed.
 """
 from __future__ import annotations
 import base64
@@ -13,7 +12,6 @@ import base64
 from cryptography.fernet import Fernet, InvalidToken
 
 from .config import ENCRYPTION_KEY
-from .logger import log
 
 
 def _resolve_key() -> bytes:
@@ -24,8 +22,7 @@ def _resolve_key() -> bytes:
             return ENCRYPTION_KEY.encode()
         except Exception:  # noqa: BLE001
             pass
-    log.warning("ENCRYPTION_KEY missing or invalid — generating ephemeral key (NOT for production)")
-    return Fernet.generate_key()
+    raise RuntimeError("ENCRYPTION_KEY must be set to a valid Fernet key in .env")
 
 
 _FERNET = Fernet(_resolve_key())

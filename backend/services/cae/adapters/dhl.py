@@ -52,11 +52,10 @@ class DhlAdapter(_BaseAdapter):
                  timeout: float | None = None) -> None:
         # NB: project_ids is accepted-and-ignored to keep the same SaaS
         # constructor signature across carriers; DHL bills the API key directly.
-        self.api_key: str = api_key or os.environ.get("DHL_API_KEY", "")
-        self.base_url: str = base_url or os.environ.get(
-            "DHL_BASE_URL", "https://api-eu.dhl.com/track")
+        self.api_key: str = api_key if api_key is not None else os.environ["DHL_API_KEY"]
+        self.base_url: str = base_url if base_url is not None else os.environ["DHL_BASE_URL"]
         self.timeout: float = float(timeout if timeout is not None
-                                    else os.environ.get("DHL_TIMEOUT", "10"))
+                                    else os.environ["DHL_TIMEOUT"])
 
     # When no api_key is configured we keep returning deterministic mock data
     # so the rest of the test suite continues to operate without secrets.
@@ -65,7 +64,7 @@ class DhlAdapter(_BaseAdapter):
         if not self.api_key:
             return True
         # An env-level override allows force-mock e.g. in CI even with a key set.
-        return os.environ.get("MYE_CAE_REAL_MODE", "1") == "0"
+        return os.environ["MYE_CAE_REAL_MODE"] == "0"
 
     async def validate_config(self) -> bool:
         if self.mock_mode:

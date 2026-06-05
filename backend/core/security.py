@@ -5,13 +5,12 @@ Aligned with auth playbook + MYEXCELLENCE.md sec 8.1:
 - JWT in httpOnly cookies, 8h lifetime (sec 8.1)
 """
 from __future__ import annotations
-import os
 from datetime import datetime, timezone, timedelta
 
 import bcrypt
 import jwt
 
-from .config import BCRYPT_COST, SESSION_LIFETIME_SECONDS
+from .config import BCRYPT_COST, JWT_SECRET, SESSION_LIFETIME_SECONDS
 
 JWT_ALGORITHM = "HS256"
 
@@ -29,14 +28,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def _jwt_secret() -> str:
-    secret = os.environ.get("JWT_SECRET", "")
-    if not secret:
-        # Fail closed — refuse to issue tokens without a configured secret in non-dev
-        from .config import APP_ENV
-        if APP_ENV == "production":
-            raise RuntimeError("JWT_SECRET is required in production")
-        return "dev-only-insecure-secret-replace-me"
-    return secret
+    if not JWT_SECRET:
+        raise RuntimeError("JWT_SECRET must be set in .env")
+    return JWT_SECRET
 
 
 def create_access_token(*, user_id: str, tenant_id: str, role: str, email: str,

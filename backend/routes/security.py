@@ -54,7 +54,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
     warned = 0
 
     # ──────── Secrets / env ────────
-    if not os.environ.get("JWT_SECRET") or os.environ.get("JWT_SECRET") in ("changeme", "secret"):
+    if not os.environ["JWT_SECRET"] or os.environ["JWT_SECRET"] in ("changeme", "secret"):
         checks.append(_check("JWT secret", "fail", "JWT_SECRET no configurado o default.",
                              "Configura JWT_SECRET con una cadena aleatoria de 32+ chars."))
         failed += 1
@@ -69,7 +69,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
             checks.append(_check("JWT secret length", "pass",
                                  f"Configurado ({sec_len} chars)."))
 
-    if not os.environ.get("ENCRYPTION_KEY"):
+    if not os.environ["ENCRYPTION_KEY"]:
         checks.append(_check("Fernet ENCRYPTION_KEY", "fail",
                              "Falta para cifrar credentials/HMAC secrets.",
                              "Genera con `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`."))
@@ -77,7 +77,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
     else:
         checks.append(_check("Fernet ENCRYPTION_KEY", "pass", "Configurada."))
 
-    audit_sec = os.environ.get("AUDIT_SIGNING_SECRET", "")
+    audit_sec = os.environ["AUDIT_SIGNING_SECRET"]
     if not audit_sec or "rotate-quarterly" in audit_sec.lower():
         checks.append(_check("AUDIT_SIGNING_SECRET", "warn",
                              "Default o ausente — secreto compartido para CSV de auditoría IA.",
@@ -87,7 +87,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
         checks.append(_check("AUDIT_SIGNING_SECRET", "pass",
                              f"Configurado ({len(audit_sec)} chars)."))
 
-    bcrypt_cost = int(os.environ.get("BCRYPT_COST", "12"))
+    bcrypt_cost = int(os.environ["BCRYPT_COST"])
     if bcrypt_cost < 12:
         checks.append(_check("BCRYPT_COST", "warn",
                              f"Cost {bcrypt_cost} < 12 (recomendado).",
@@ -97,7 +97,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
         checks.append(_check("BCRYPT_COST", "pass", f"Cost {bcrypt_cost}."))
 
     # ──────── CORS ────────
-    cors = os.environ.get("CORS_ORIGINS", "")
+    cors = os.environ["CORS_ORIGINS"]
     bad = [o for o in cors.split(",")
            if o.strip().startswith("http://")
            and "localhost" not in o
@@ -111,7 +111,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
         checks.append(_check("CORS HTTPS", "pass", "Sin orígenes HTTP no-localhost."))
 
     # ──────── Webhooks SSRF ────────
-    if os.environ.get("MYE_WEBHOOK_ALLOW_HTTP") == "1":
+    if os.environ["MYE_WEBHOOK_ALLOW_HTTP"] == "1":
         checks.append(_check("Webhooks anti-SSRF", "warn",
                              "MYE_WEBHOOK_ALLOW_HTTP=1 (deshabilita HTTPS-only).",
                              "Setear a 0 en producción."))
@@ -120,7 +120,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
         checks.append(_check("Webhooks anti-SSRF", "pass",
                              "MYE_WEBHOOK_ALLOW_HTTP off (HTTPS-only forzado)."))
 
-    test_sec = os.environ.get("MYE_WEBHOOK_TEST_SECRET", "")
+    test_sec = os.environ["MYE_WEBHOOK_TEST_SECRET"]
     if test_sec.startswith("test-shared-secret"):
         checks.append(_check("Webhook test secret", "warn",
                              "Default — sólo para dev/staging.",
@@ -131,7 +131,7 @@ async def security_audit(request: Request, _: object = Depends(_RBAC_SUPER)):
                              "Custom — listo para producción."))
 
     # ──────── Cron ────────
-    if os.environ.get("CRON_ENABLED", "1") == "1":
+    if os.environ["CRON_ENABLED"] == "1":
         checks.append(_check("Cron scheduler", "pass", "APScheduler activo."))
     else:
         checks.append(_check("Cron scheduler", "warn",

@@ -35,7 +35,7 @@ from core.uuid import new_id
 router = APIRouter(prefix="/api/webhook-test", tags=["webhook-test"])
 
 CAP = 1000
-TEST_SECRET = os.environ.get("MYE_WEBHOOK_TEST_SECRET", "test-shared-secret-2026")
+TEST_SECRET = os.environ["MYE_WEBHOOK_TEST_SECRET"]
 
 
 def _verify(body: bytes, signature: str) -> bool:

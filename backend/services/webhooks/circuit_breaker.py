@@ -24,17 +24,14 @@ from core.logger import log
 
 
 # ───────────────────────── Config ─────────────────────────────────────
-def _int(env: str, default: int) -> int:
-    try:
-        return int(os.environ.get(env, default))
-    except ValueError:
-        return default
+def _int(env: str) -> int:
+    return int(os.environ[env])
 
 
-CB_WINDOW_MIN = _int("MYE_WEBHOOK_CB_WINDOW_MIN", 60)
-CB_MIN_SAMPLES = _int("MYE_WEBHOOK_CB_MIN_SAMPLES", 5)
-CB_THRESHOLD_PCT = _int("MYE_WEBHOOK_CB_THRESHOLD_PCT", 30)
-CB_COOLDOWN_MIN = _int("MYE_WEBHOOK_CB_COOLDOWN_MIN", 5)
+CB_WINDOW_MIN = _int("MYE_WEBHOOK_CB_WINDOW_MIN")
+CB_MIN_SAMPLES = _int("MYE_WEBHOOK_CB_MIN_SAMPLES")
+CB_THRESHOLD_PCT = _int("MYE_WEBHOOK_CB_THRESHOLD_PCT")
+CB_COOLDOWN_MIN = _int("MYE_WEBHOOK_CB_COOLDOWN_MIN")
 
 # Estados que cuentan como falla para el circuit breaker
 FAILURE_STATUSES = {"failed_temporary", "failed_permanent", "timeout"}

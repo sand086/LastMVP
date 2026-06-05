@@ -6,8 +6,7 @@ y la firma se devuelve en el header `X-MyE-Audit-Signature`.
 
 Auditores externos verifican: hmac.new(secret, csv_body, sha256).hexdigest()
 
-Secret: env `AUDIT_SIGNING_SECRET`. Si no está, se usa `JWT_SECRET` como
-fallback (no ideal pero garantiza que la firma sea verificable contra algo).
+Secret: env `AUDIT_SIGNING_SECRET`. Debe venir de `.env`; no hay fallback.
 
 Columnas exportadas (orden estable — los auditores consumen este orden):
   invocation_id, created_at, tenant_id, client_id, user_id, feature_code,
@@ -38,8 +37,10 @@ _AUDIT_COLUMNS = [
 
 
 def _signing_secret() -> bytes:
-    s = os.environ.get("AUDIT_SIGNING_SECRET") or os.environ.get("JWT_SECRET", "")
-    return s.encode("utf-8") or b"dev-fallback"
+    s = os.environ["AUDIT_SIGNING_SECRET"]
+    if not s:
+        raise RuntimeError("AUDIT_SIGNING_SECRET must be set in .env")
+    return s.encode("utf-8")
 
 
 def sign_body(body: bytes) -> str:

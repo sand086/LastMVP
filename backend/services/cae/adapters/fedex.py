@@ -48,14 +48,14 @@ class FedExAdapter(_BaseAdapter):
                  timeout: float | None = None) -> None:
         # NB: api_key alias = client_id (so the generic CarrierConfigDialog +
         # ClientRepository encryption code keeps a single "api_key" secret).
-        self.client_id: str = api_key or os.environ.get("FEDEX_CLIENT_ID", "")
-        self.client_secret: str = client_secret or os.environ.get("FEDEX_CLIENT_SECRET", "")
+        self.client_id: str = api_key if api_key is not None else os.environ["FEDEX_CLIENT_ID"]
+        self.client_secret: str = (
+            client_secret if client_secret is not None else os.environ["FEDEX_CLIENT_SECRET"])
         self.account_number: str = (
-            account_number or os.environ.get("FEDEX_ACCOUNT_NUMBER", ""))
-        self.base_url: str = base_url or os.environ.get(
-            "FEDEX_BASE_URL", "https://apis-sandbox.fedex.com")
+            account_number if account_number is not None else os.environ["FEDEX_ACCOUNT_NUMBER"])
+        self.base_url: str = base_url if base_url is not None else os.environ["FEDEX_BASE_URL"]
         self.timeout: float = float(timeout if timeout is not None
-                                    else os.environ.get("FEDEX_TIMEOUT", "10"))
+                                    else os.environ["FEDEX_TIMEOUT"])
         self._token: str | None = None
         self._token_expires_at: float = 0.0
 
@@ -63,7 +63,7 @@ class FedExAdapter(_BaseAdapter):
     def mock_mode(self) -> bool:
         if not self.client_id or not self.client_secret:
             return True
-        return os.environ.get("MYE_CAE_REAL_MODE", "1") == "0"
+        return os.environ["MYE_CAE_REAL_MODE"] == "0"
 
     async def _get_token(self) -> str | None:
         """Cached OAuth2 client_credentials. Returns None on auth failure."""

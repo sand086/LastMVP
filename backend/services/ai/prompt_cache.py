@@ -18,8 +18,8 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 
-_TTL_S = float(os.environ.get("AI_CACHE_TTL_S", "300"))
-_MAX = int(os.environ.get("AI_CACHE_MAX_ENTRIES", "1024"))
+_TTL_S = float(os.environ["AI_CACHE_TTL_S"])
+_MAX = int(os.environ["AI_CACHE_MAX_ENTRIES"])
 
 
 @dataclass

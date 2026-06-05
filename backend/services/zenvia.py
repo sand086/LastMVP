@@ -24,21 +24,21 @@ import httpx
 
 from core.logger import log
 
-_BASE_URL = os.environ.get("ZENVIA_BASE_URL", "https://api.zenvia.com")
-_TIMEOUT_S = float(os.environ.get("ZENVIA_TIMEOUT_S", "10"))
-_RATE_PER_S = int(os.environ.get("ZENVIA_RATE_PER_S", "20"))
-_FROM = os.environ.get("ZENVIA_FROM_NUMBER", "")     # configurar en Zenvia dashboard
+_BASE_URL = os.environ["ZENVIA_BASE_URL"]
+_TIMEOUT_S = float(os.environ["ZENVIA_TIMEOUT_S"])
+_RATE_PER_S = int(os.environ["ZENVIA_RATE_PER_S"])
+_FROM = os.environ["ZENVIA_FROM_NUMBER"]     # configurar en Zenvia dashboard
 
 _call_history: deque = deque(maxlen=_RATE_PER_S * 2)
 _lock = asyncio.Lock()
 
 
 def _api_key() -> str:
-    return os.environ.get("ZENVIA_API_KEY", "")
+    return os.environ["ZENVIA_API_KEY"]
 
 
 def _webhook_secret() -> bytes:
-    s = os.environ.get("ZENVIA_WEBHOOK_SECRET") or os.environ.get("ZENVIA_API_KEY", "")
+    s = os.environ["ZENVIA_WEBHOOK_SECRET"]
     return s.encode("utf-8")
 
 

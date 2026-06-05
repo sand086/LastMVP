@@ -21,8 +21,8 @@ import httpx
 from core.logger import log
 from core.db import get_db
 
-_WEBHOOK_TIMEOUT_S = float(os.environ.get("AI_WEBHOOK_TIMEOUT_S", "8"))
-_WEBHOOK_RETRIES = int(os.environ.get("AI_WEBHOOK_RETRIES", "3"))
+_WEBHOOK_TIMEOUT_S = float(os.environ["AI_WEBHOOK_TIMEOUT_S"])
+_WEBHOOK_RETRIES = int(os.environ["AI_WEBHOOK_RETRIES"])
 
 
 def _sign(secret: str, body: bytes) -> str:

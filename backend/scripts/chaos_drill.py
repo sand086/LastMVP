@@ -63,7 +63,7 @@ async def _ensure_subscription(*, tenant_id: str, client_id: str,
     }, {"_id": 0, "id": 1})
     if existing:
         return existing["id"]
-    secret = os.environ.get("MYE_WEBHOOK_TEST_SECRET", "test-shared-secret-2026")
+    secret = os.environ["MYE_WEBHOOK_TEST_SECRET"]
     sub = await repo.create({
         "client_id": client_id,
         "endpoint_url": full_url,
@@ -81,7 +81,7 @@ async def run_drill(*, tenant_id: str, client_id: str, total: int = 1000,
     """Ejecuta el drill. Devuelve un dict con métricas."""
     from services.webhooks.dispatcher import dispatch, worker_tick
 
-    base = os.environ.get("MYE_BASE_URL", "http://localhost:8001")
+    base = os.environ["MYE_BASE_URL"]
     target = target_url or f"{base}/api/webhook-test/echo"
     sub_id = await _ensure_subscription(
         tenant_id=tenant_id, client_id=client_id, target_url=target,

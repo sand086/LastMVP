@@ -18,9 +18,9 @@ import os
 import time
 from dataclasses import dataclass, field
 
-_FAILURES = int(os.environ.get("AI_BREAKER_FAILURES", "5"))
-_WINDOW_S = float(os.environ.get("AI_BREAKER_WINDOW_S", "60"))
-_COOLDOWN_S = float(os.environ.get("AI_BREAKER_COOLDOWN_S", "30"))
+_FAILURES = int(os.environ["AI_BREAKER_FAILURES"])
+_WINDOW_S = float(os.environ["AI_BREAKER_WINDOW_S"])
+_COOLDOWN_S = float(os.environ["AI_BREAKER_COOLDOWN_S"])
 
 
 @dataclass

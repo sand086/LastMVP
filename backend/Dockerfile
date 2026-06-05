@@ -5,6 +5,13 @@ WORKDIR /app
 # System deps for cryptography + leaflet binaries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential curl \
+    libcairo2 \
+    libgdk-pixbuf-2.0-0 \
+    libglib2.0-0 \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    shared-mime-info \
+    fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

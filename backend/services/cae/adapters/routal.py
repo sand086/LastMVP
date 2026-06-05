@@ -60,19 +60,15 @@ class RoutalAdapter(CarrierAdapterInterface):
                  project_ids: list[str] | None = None,
                  base_url: str | None = None,
                  timeout: float | None = None) -> None:
-        # env fallbacks make `RoutalAdapter()` continue to work for the
-        # tenant-level admin health endpoint (transversal); per-client
-        # callers pass explicit args.
-        self.api_key: str = api_key or os.environ.get("ROUTAL_API_KEY", "")
+        self.api_key: str = api_key if api_key is not None else os.environ["ROUTAL_API_KEY"]
         if project_ids is None:
-            env_pid = os.environ.get("ROUTAL_PROJECT_ID", "")
+            env_pid = os.environ["ROUTAL_PROJECT_ID"]
             self.project_ids: list[str] = [env_pid] if env_pid else []
         else:
             self.project_ids = [p for p in project_ids if p]
-        self.base_url: str = base_url or os.environ.get(
-            "ROUTAL_BASE_URL", "https://api.routal.com")
+        self.base_url: str = base_url if base_url is not None else os.environ["ROUTAL_BASE_URL"]
         self.timeout: float = float(timeout if timeout is not None
-                                    else os.environ.get("ROUTAL_TIMEOUT", "10"))
+                                    else os.environ["ROUTAL_TIMEOUT"])
 
     # ─── public ─────────────────────────────────────────────────────────
     @property

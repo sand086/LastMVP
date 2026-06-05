@@ -6,16 +6,16 @@ Las evidencias se guardan en disco bajo
 con lectura sólo via endpoint autenticado (no se sirven directo desde nginx).
 """
 from __future__ import annotations
-import os
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from core.config import EVIDENCE_ROOT as EVIDENCE_ROOT_RAW
 from core.uuid import new_id
 from repositories.base import BaseRepository
 
-EVIDENCE_ROOT = Path(os.environ.get("EVIDENCE_ROOT", "/app/data/evidences"))
+EVIDENCE_ROOT = Path(EVIDENCE_ROOT_RAW)
 
 
 def _now_iso() -> str:

@@ -114,7 +114,7 @@ class CurrencyService:
                 pass
 
         # 3) Banxico (deshabilitado por defecto — habilitar con BANXICO_TOKEN)
-        token = os.environ.get("BANXICO_TOKEN")
+        token = os.environ["BANXICO_TOKEN"]
         if token and from_curr == "USD" and to_curr == "MXN":
             try:
                 # Implementación real diferida — usar requests/httpx aquí.

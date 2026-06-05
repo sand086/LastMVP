@@ -17,8 +17,8 @@ from core.db import get_db
 from core.logger import log
 from core.uuid import new_id
 
-_NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
-_USER_AGENT = os.environ.get("NOMINATIM_USER_AGENT", "MyExcellence/2.1 (ops@myexcellence.local)")
+_NOMINATIM_URL = os.environ["NOMINATIM_URL"]
+_USER_AGENT = os.environ["NOMINATIM_USER_AGENT"]
 _LAST_CALL = 0.0
 _lock = asyncio.Lock()
 

@@ -97,25 +97,43 @@ def _resolve_credentials(client_config: dict) -> tuple[str, str]:
             log.warning("ai_custom_key_decrypt_failed", extra={"context": {
                 "client_id": client_config.get("client_id"),
             }})
-    universal = os.environ.get("EMERGENT_LLM_KEY", "")
+    universal = os.environ["EMERGENT_LLM_KEY"]
     return "anthropic", universal
+
+
+def _litellm_model(provider: str, model: str) -> str:
+    """Build a LiteLLM model id while preserving already-prefixed ids."""
+    if "/" in model:
+        return model
+    provider = (provider or "").lower()
+    if provider in {"anthropic", "openai", "gemini"}:
+        return f"{provider}/{model}"
+    if provider in {"google", "google-genai", "google_genai"}:
+        return f"gemini/{model}"
+    return model
 
 
 async def _call_provider(provider: str, model: str, system: str, prompt: str,
                          api_key: str, *, timeout_s: float = 30.0) -> dict:
-    """Llamada real al proveedor vía emergentintegrations.LlmChat.
+    """Llamada real al proveedor vía LiteLLM.
 
     Devuelve {text, input_tokens, output_tokens, latency_ms}.
     En caso de fallo, lanza excepción con .code (`provider_unavailable`/`timeout`/`error`).
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from litellm import acompletion
 
     started = time.monotonic()
     try:
-        chat = LlmChat(api_key=api_key, session_id=new_id(), system_message=system or "")
-        chat = chat.with_model(provider, model)
-        msg = UserMessage(text=prompt)
-        text = await chat.send_message(msg)
+        resp = await acompletion(
+            model=_litellm_model(provider, model),
+            messages=[
+                {"role": "system", "content": system or ""},
+                {"role": "user", "content": prompt},
+            ],
+            api_key=api_key,
+            timeout=timeout_s,
+        )
+        text = resp.choices[0].message.content if resp and resp.choices else ""
         if not isinstance(text, str):
             text = str(text)
     except TimeoutError as e:
