@@ -23,16 +23,22 @@ body { color: #1F3A5F; font-size: 10pt; line-height: 1.45; }
 h1 { font-size: 18pt; color: #C2410C; margin: 0 0 4pt; }
 h2 { font-size: 12pt; margin: 14pt 0 4pt; border-bottom: 1px solid #C2410C; padding-bottom: 2pt; }
 h3 { font-size: 10pt; margin: 8pt 0 2pt; color: #6b7280; text-transform: uppercase; letter-spacing: 1pt; }
+svg { width: auto; height: auto; overflow: visible; }
+svg text, .svg-number { font-size: 18pt; font-weight: 700; dominant-baseline: middle; text-anchor: middle; }
 .muted { color: #6b7280; font-size: 9pt; }
 .mono { font-family: 'Courier New', monospace; font-size: 9pt; }
 .kv { display: table; width: 100%; }
 .kv > div { display: table-row; }
 .kv > div > * { display: table-cell; padding: 3pt 0; vertical-align: top; }
 .kv > div > strong { width: 40%; color: #6b7280; font-weight: 600; }
+.summary { display: table; width: 100%; margin: 12pt 0 8pt; border-spacing: 6pt 0; }
+.summary > div { display: table-cell; width: 33.33%; padding: 8pt; border: 1px solid #e5e7eb; border-radius: 6pt; background: #f9fafb; }
+.summary .num { display: block; color: #C2410C; font-size: 22pt; font-weight: 700; line-height: 1; }
+.summary .label { display: block; color: #6b7280; font-size: 8pt; text-transform: uppercase; letter-spacing: .5pt; margin-top: 3pt; }
 table { width: 100%; border-collapse: collapse; margin: 4pt 0; }
 th, td { padding: 4pt 6pt; text-align: left; border-bottom: 1px solid #e5e7eb; font-size: 9pt; }
 th { background: #f9fafb; color: #6b7280; text-transform: uppercase; font-size: 8pt; letter-spacing: 0.5pt; }
-.badge { display: inline-block; padding: 1pt 6pt; border-radius: 99pt; font-size: 8pt; font-weight: 600; background: #f3f4f6; }
+.badge { display: inline-block; padding: 2pt 7pt; border-radius: 99pt; font-size: 9pt; font-weight: 700; background: #f3f4f6; }
 .signature { margin-top: 18pt; padding-top: 6pt; border-top: 1px dashed #6b7280; font-size: 8pt; color: #6b7280; }
 """
 
@@ -45,6 +51,23 @@ def _esc(v) -> str:
 
 def _kv_row(label: str, value) -> str:
     return f'<div><strong>{_esc(label)}</strong><span>{_esc(value)}</span></div>'
+
+
+def _kv_row_html(label: str, html: str) -> str:
+    return f'<div><strong>{_esc(label)}</strong><span>{html}</span></div>'
+
+
+def _badge(value) -> str:
+    return f"<span class='badge'>{_esc(value)}</span>"
+
+
+def _summary_card(number: int | str, label: str) -> str:
+    return (
+        "<div>"
+        f"<span class='num'>{_esc(number)}</span>"
+        f"<span class='label'>{_esc(label)}</span>"
+        "</div>"
+    )
 
 
 def _now() -> str:
@@ -76,16 +99,24 @@ async def render_ticket_pdf(*, tenant_id: str, ticket_id: str) -> bytes:
 <style>{_BASE_CSS}</style></head><body>
 <h1>Expediente del ticket</h1>
 <div class='muted mono'>ID {ticket['id']} · generado {_now()}</div>
+
+<div class='summary'>
+{_summary_card(len(timeline), "Eventos")}
+{_summary_card(len(evidences), "Evidencias")}
+{_summary_card(_esc(ticket.get('status') or "—"), "Estado")}
+</div>
+
 <h2>Información general</h2>
 <div class='kv'>
 {_kv_row("Cliente", client.get('name'))}
 {_kv_row("Carrier", carrier.get('name') or carrier.get('code'))}
-{_kv_row("Estado", f"<span class='badge'>{_esc(ticket.get('status'))}</span>")}
+{_kv_row_html("Estado", _badge(ticket.get('status')))}
 {_kv_row("Motivo", ticket.get('motivo_codigo'))}
 {_kv_row("Solución asignada", ticket.get('solucion_codigo') or "—")}
 {_kv_row("Tracking", ticket.get('tracking_id') or "—")}
 {_kv_row("Creado", ticket.get('created_at'))}
 {_kv_row("Actualizado", ticket.get('updated_at'))}
+{_kv_row("Cerrado", ticket.get('closed_at') or "—")}
 </div>
 <h2>Timeline ({len(timeline)} eventos)</h2>
 <table><thead><tr><th>Cuándo</th><th>Tipo</th><th>Detalle</th></tr></thead><tbody>
@@ -161,10 +192,16 @@ async def render_claim_pdf(*, tenant_id: str, claim_id: str) -> bytes:
 <h1>Expediente del reclamo</h1>
 <div class='muted mono'>Reclamo {claim['id']} · Ticket {ticket.get('id', '—')} · generado {_now()}</div>
 
+<div class='summary'>
+{_summary_card(len(events), "Eventos")}
+{_summary_card(len(evidences), "Evidencias")}
+{_summary_card(_esc(claim.get('estado') or claim.get('status') or "—"), "Estado")}
+</div>
+
 <h2>Información general</h2>
 <div class='kv'>
 {_kv_row("Cliente cartera", client.get('name'))}
-{_kv_row("Estado del reclamo", f"<span class='badge'>{_esc(claim.get('estado') or claim.get('status'))}</span>")}
+{_kv_row_html("Estado del reclamo", _badge(claim.get('estado') or claim.get('status')))}
 {_kv_row("Tipo de daño", claim.get('tipo_dano') or claim.get('tipo'))}
 {_kv_row("Monto reclamado", monto_str)}
 {_kv_row("Promovido por", claim.get('promoted_by') or "—")}

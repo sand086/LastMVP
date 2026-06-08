@@ -8,11 +8,27 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+      - ./db:/seed-data:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: mye-mongo-express
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-change-me}
+    ports:
+      - "${MONGO_EXPRESS_HOST_PORT:-8081}:8081"
 
   backend:
     build:
@@ -62,7 +78,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_HOST_PORT:-3001}:3000"
 
 volumes:
   mongo_data:
