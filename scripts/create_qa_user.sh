@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 COMPOSE_FILE="docker-compose.qa.yml"
 EMAIL=""
@@ -27,7 +27,7 @@ Valid roles:
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
   case "$1" in
     --compose-file)
       COMPOSE_FILE="$2"
@@ -65,23 +65,30 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$EMAIL" ]]; then
+if [ -z "$EMAIL" ]; then
   echo "--email is required" >&2
   usage >&2
   exit 1
 fi
 
-if [[ -z "$PASSWORD" ]]; then
-  read -r -s -p "Password for $EMAIL: " PASSWORD
+if [ -z "$PASSWORD" ]; then
+  printf "Password for %s: " "$EMAIL"
+  trap 'stty echo' EXIT INT TERM
+  stty -echo
+  read -r PASSWORD
+  stty echo
+  trap - EXIT INT TERM
   echo
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 docker compose -f "$COMPOSE_FILE" up -d mongo backend
 
 docker compose -f "$COMPOSE_FILE" exec -T \
+  -w /app \
+  -e PYTHONPATH=/app \
   -e QA_USER_EMAIL="$EMAIL" \
   -e QA_USER_PASSWORD="$PASSWORD" \
   -e QA_USER_ROLE="$ROLE" \

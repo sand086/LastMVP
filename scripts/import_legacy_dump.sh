@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPOSE_FILE="docker-compose.dev.yml"
+COMPOSE_FILE="docker-compose.qa.yml"
 DUMP_DIR="lastmile-mvp-test_database_dump_20260521_160025"
-DATABASE="myexcellence_legacy"
+DATABASE="myexcellence"
 DROP_DATABASE=0
 IMPORT_ALL=0
 MAX_SECONDS_PER_FILE=900
