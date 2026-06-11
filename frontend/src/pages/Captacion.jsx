@@ -39,7 +39,7 @@ import { toast } from 'sonner';
 import api from '../lib/api';
 import {
     Target, Calendar, Settings, Sparkles, AlertCircle, CheckCircle2,
-    TrendingUp, TrendingDown, Activity, Clock,
+    TrendingUp, TrendingDown, Activity, Clock, RefreshCw,
 } from 'lucide-react';
 
 const PLAN_STATE_OPTIONS = [
@@ -57,6 +57,9 @@ const Captacion = () => {
     const [loading, setLoading] = useState(true);
     const [configOpen, setConfigOpen] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [backfillOpen, setBackfillOpen] = useState(false);
+    const [backfilling, setBackfilling] = useState(false);
+    const [backfillResult, setBackfillResult] = useState(null);
 
     // ─── Load clients
     useEffect(() => {
@@ -111,6 +114,7 @@ const Captacion = () => {
                     stats={stats}
                     cfg={cfg}
                     onConfigClick={() => setConfigOpen(true)}
+                    onBackfillClick={() => { setBackfillResult(null); setBackfillOpen(true); }}
                 />
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -141,12 +145,40 @@ const Captacion = () => {
                         }
                     }}
                 />
+
+                <BackfillDialog
+                    open={backfillOpen}
+                    onOpenChange={(o) => { setBackfillOpen(o); if (!o) setBackfillResult(null); }}
+                    cfg={cfg}
+                    busy={backfilling}
+                    result={backfillResult}
+                    onRun={async ({ date, autoRunSelection }) => {
+                        setBackfilling(true);
+                        setBackfillResult(null);
+                        try {
+                            const res = await api.post(
+                                `/selection/backfill-from-routal/${clientId}`,
+                                null,
+                                { params: { date_from: date, date_to: date, auto_run_selection: autoRunSelection } },
+                            );
+                            setBackfillResult(res.data);
+                            const staged = res.data?.staged ?? 0;
+                            const selectedTotal = res.data?.selection_totals?.selected ?? 0;
+                            toast.success(`Ingesta forzada: ${staged} rutas stageadas · ${selectedTotal} seleccionadas`);
+                            await refresh();
+                        } catch (e) {
+                            toast.error(`Error: ${e?.response?.data?.detail || e.message}`);
+                        } finally {
+                            setBackfilling(false);
+                        }
+                    }}
+                />
             </div>
         </DashboardLayout>
     );
 };
 
-const Header = ({ clients, clientId, onClientChange, stats, cfg, onConfigClick }) => (
+const Header = ({ clients, clientId, onClientChange, stats, cfg, onConfigClick, onBackfillClick }) => (
     <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
             <div className="flex items-center gap-2 text-amber-600 text-xs font-semibold uppercase tracking-wide">
@@ -170,6 +202,9 @@ const Header = ({ clients, clientId, onClientChange, stats, cfg, onConfigClick }
                     ))}
                 </SelectContent>
             </Select>
+            <Button onClick={onBackfillClick} variant="outline" data-testid="captacion-backfill-btn">
+                <RefreshCw className="w-4 h-4 mr-2" /> Forzar ingesta
+            </Button>
             <Button onClick={onConfigClick} variant="outline" data-testid="captacion-config-btn">
                 <Settings className="w-4 h-4 mr-2" /> Configurar
             </Button>
@@ -567,4 +602,112 @@ const NumField = ({ label, value, onChange, testid, highlight = false }) => (
     </div>
 );
 
+const BackfillDialog = ({ open, onOpenChange, cfg, busy, result, onRun }) => {
+    const todayStr = useMemo(() => {
+        // CDMX local YYYY-MM-DD (matches the cutoff timezone in cfg).
+        const d = new Date();
+        return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    }, []);
+    const [date, setDate] = useState(todayStr);
+    const [autoRunSelection, setAutoRunSelection] = useState(true);
+    useEffect(() => { if (open) { setDate(todayStr); setAutoRunSelection(true); } }, [open, todayStr]);
+
+    const cutoffTime = cfg?.ingest_cutoff_time || '16:00';
+    const eligibility = cfg?.ingest_eligibility_states || ['in_progress'];
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-lg">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <RefreshCw className="w-5 h-5 text-amber-600" /> Forzar ingesta del día
+                    </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2 text-sm">
+                    <p className="text-gray-600">
+                        Trae los planes de Routal para la fecha elegida y los stagea en
+                        <code className="mx-1 text-xs bg-gray-100 px-1 rounded">routal_daily_plans</code>
+                        respetando la configuración actual (corte <strong>{cutoffTime}</strong>,
+                        estados elegibles: <strong>{eligibility.join(', ')}</strong>).
+                    </p>
+
+                    <div>
+                        <Label className="text-xs">Fecha (CDMX)</Label>
+                        <Input
+                            type="date"
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                            max={todayStr}
+                            data-testid="captacion-backfill-date"
+                        />
+                        <p className="text-[11px] text-gray-500 mt-1">
+                            Por defecto: hoy. Idempotente — re-correr sobre la misma fecha refresca el status live de Routal.
+                        </p>
+                    </div>
+
+                    <div className="flex items-center justify-between border rounded px-3 py-2">
+                        <div>
+                            <div className="text-sm font-medium">Ejecutar selección tras ingesta</div>
+                            <div className="text-xs text-gray-500">
+                                Corre el knapsack para crear journeys de los seleccionados.
+                            </div>
+                        </div>
+                        <Switch
+                            checked={autoRunSelection}
+                            onCheckedChange={setAutoRunSelection}
+                            data-testid="captacion-backfill-auto-run"
+                        />
+                    </div>
+
+                    {result && (
+                        <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3 text-xs space-y-1">
+                            <div className="font-semibold text-emerald-700 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> Resultado
+                            </div>
+                            <div>Planes consultados: <strong>{result.plans_scanned}</strong></div>
+                            <div>Planes en rango: <strong>{result.plans_in_range}</strong></div>
+                            <div>Rutas stageadas: <strong>{result.staged}</strong></div>
+                            {result.skipped_no_driver > 0 && (
+                                <div>Saltados sin driver/vacíos: <strong>{result.skipped_no_driver}</strong></div>
+                            )}
+                            {autoRunSelection && result.selection_totals && (
+                                <div className="pt-1 border-t border-emerald-200 mt-1">
+                                    Seleccionadas: <strong>{result.selection_totals.selected}</strong>
+                                    {' · '}P1: {result.selection_totals.phase_1}
+                                    {' · '}P2: {result.selection_totals.phase_2}
+                                </div>
+                            )}
+                            {result.truncated && (
+                                <div className="text-amber-700 flex items-center gap-1">
+                                    <AlertCircle className="w-3 h-3" />
+                                    Truncado en {result.max_hydrate_cap} planes — re-corre con un rango más corto.
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy} data-testid="captacion-backfill-cancel">
+                        Cerrar
+                    </Button>
+                    <Button
+                        onClick={() => onRun({ date, autoRunSelection })}
+                        disabled={busy || !date}
+                        data-testid="captacion-backfill-run"
+                    >
+                        {busy ? (
+                            <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Ingestando…</>
+                        ) : (
+                            <><RefreshCw className="w-4 h-4 mr-2" /> Ejecutar ingesta</>
+                        )}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
 export default Captacion;
+

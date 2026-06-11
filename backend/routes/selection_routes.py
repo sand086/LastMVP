@@ -176,7 +176,7 @@ async def backfill_from_routal(
       - Máximo 50 páginas escaneadas (5000 plans).
       - Máximo 200 plans hidratados por llamada (re-ejecuta con rangos más cortos si tu flota es grande).
     """
-    _require_role(user, ["developer"])
+    _require_role(user, ["developer", "coordinator"])
 
     df = _parse_date(date_from)
     dt = _parse_date(date_to)
