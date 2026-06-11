@@ -21,7 +21,6 @@
  *   └────────────────────────────────────────────────┘
  */
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { DashboardLayout } from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -96,18 +95,15 @@ const Captacion = () => {
 
     if (loading || !stats || !cfg) {
         return (
-            <DashboardLayout>
-                <div className="p-6">
-                    <div className="text-sm text-gray-500">Cargando captación...</div>
-                </div>
-            </DashboardLayout>
+            <div className="p-6">
+                <div className="text-sm text-gray-500">Cargando captación...</div>
+            </div>
         );
     }
 
     return (
-        <DashboardLayout>
-            <div className="p-6 space-y-6 max-w-7xl mx-auto" data-testid="captacion-page">
-                <Header
+        <div className="p-6 space-y-6 max-w-7xl mx-auto" data-testid="captacion-page">
+            <Header
                     clients={clients}
                     clientId={clientId}
                     onClientChange={setClientId}
@@ -174,7 +170,6 @@ const Captacion = () => {
                     }}
                 />
             </div>
-        </DashboardLayout>
     );
 };
 
