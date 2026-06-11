@@ -139,6 +139,11 @@ async def backfill_plans_for_date(db, client_id: str, target_date: date) -> dict
                     "project_id": project_id,
                     "execution_date": exd,
                     "date": date_str,
+                    # RTV2 (2026-06-11): persist Routal `status` so the package-cohort
+                    # selector can filter by operational state (in_progress / planning / completed).
+                    # Without this, `classify_plan_operational_state` defaults to "created" and
+                    # the knapsack filters out every plan → 0 selected (the prod bug we're fixing).
+                    "status": detail.get("status") or p.get("status"),
                     "driver": {"id": drv_id, "name": drv_name},
                     "driver_id": drv_id,
                     "driver_name": drv_name,
@@ -174,26 +179,39 @@ async def backfill_plans_for_date(db, client_id: str, target_date: date) -> dict
             pass
 
 
-async def maybe_backfill_if_empty(db, client_id: str, target_date: date) -> Optional[dict]:
+async def maybe_backfill_if_empty(db, client_id: str, target_date: date, force_refresh: bool = False) -> Optional[dict]:
     """Run backfill ONLY if there are no unprocessed staged plans for this client/date.
+
+    Args:
+        force_refresh: when True, ALWAYS hit the Routal API and re-upsert (refreshes
+            `status` and resets `processed=False`). Used at scheduler cutoff time
+            so the cohort selector always sees the LIVE Routal status — without
+            this, plans staged via webhook at status="created" stay "created" in
+            our DB forever and never become eligible for the in_progress filter.
 
     Returns the backfill result dict, or None if no backfill was needed.
     """
-    target_dt = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc)
-    pending = await db.routal_daily_plans.count_documents(
-        {"client_id": client_id, "date": target_dt, "processed": False}
-    )
-    if pending > 0:
-        return None  # webhooks delivered plans — no need to backfill
-    logger.info(
-        f"[selection.auto-backfill] client={client_id} date={target_date} no staged plans, "
-        f"pulling from Routal API…"
-    )
+    if not force_refresh:
+        target_dt = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc)
+        pending = await db.routal_daily_plans.count_documents(
+            {"client_id": client_id, "date": target_dt, "processed": False}
+        )
+        if pending > 0:
+            return None  # webhooks delivered plans — no need to backfill
+        logger.info(
+            f"[selection.auto-backfill] client={client_id} date={target_date} no staged plans, "
+            f"pulling from Routal API…"
+        )
+    else:
+        logger.info(
+            f"[selection.auto-backfill] client={client_id} date={target_date} force_refresh=True, "
+            f"refreshing live status from Routal API…"
+        )
     result = await backfill_plans_for_date(db, client_id, target_date)
     if result.get("staged", 0) > 0:
         logger.info(
             f"[selection.auto-backfill] client={client_id} date={target_date} "
-            f"staged={result['staged']} via API fallback"
+            f"staged={result['staged']} (force_refresh={force_refresh})"
         )
     elif result.get("error") and result["error"] != "routal_inactive":
         logger.warning(

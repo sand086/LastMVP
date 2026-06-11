@@ -343,6 +343,11 @@ async def _handle_plan_created(db, payload: dict, client_id: str, branch_id: Opt
             "execution_date": payload.get("execution_date"),
             "date": plan_date_str,
             "project_id": project_id,
+            # RTV2 (2026-06-11): persist Routal `status` (planning / in_progress /
+            # completed / cancelled) so the cohort selector can filter by operational
+            # state. plan.created webhooks carry status="planning" — that's expected;
+            # the scheduler will force_refresh at cutoff to capture the live state.
+            "status": payload.get("status") or payload.get("routal_status"),
             "driver": {"id": route_id, "name": route_label},
             "driver_id": route_id,
             "driver_name": route_label,

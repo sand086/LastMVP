@@ -1,6 +1,30 @@
 # LastMile OS - Changelog
 
 
+## 2026-06-11 — BUGFIX P0: Captación 0 servicios en PROD por status faltante
+
+**Síntoma**: La selección de cohorte por paquetes (`/captacion`) ejecutaba en PROD el corte de 16:00 pero seleccionaba 0 servicios, incluso con 20+ planes Routal del día.
+
+**Causa raíz**: El `route_metadata` staged en `routal_daily_plans` nunca persistía el campo `status` que devuelve la API de Routal (valores `planning`, `in_progress`, `completed`, etc.). El selector `classify_plan_operational_state()` veía `status=""` y por defecto clasificaba como `"created"`. Como `client_config.ingest_eligibility_states=["in_progress"]`, **todos** los planes quedaban filtrados → 0 elegibles → 0 seleccionados (verificado en `selection_runs`: eligible_count=0, selected_count=0).
+
+### Fix
+- **`services/selection_backfill.py`**: persistir `status: detail.get("status") or p.get("status")` en el payload staged. Nuevo parámetro `force_refresh=False` en `maybe_backfill_if_empty(...)` para saltar el short-circuit `pending>0` cuando el scheduler quiere refrescar la vista del API en el cutoff.
+- **`workers/routal_event_processor._handle_plan_created`**: persistir `status: payload.get("status")` en el route_metadata stageado vía webhook.
+- **`workers/routal_selection_worker._scheduler_loop`**: al disparar el `ingest_cutoff_time`, llama `maybe_backfill_if_empty(..., force_refresh=True)` para refrescar la **status live** de cada plan desde Routal antes de correr el knapsack.
+- **`routes/selection_routes.backfill_from_routal`**: mismo fix en el endpoint manual.
+
+### Verificación end-to-end (PROD-like data)
+- 22 planes Routal del día stageados: 3 `in_progress`, 19 `planning`.
+- Selección: **3 elegibles → 3 seleccionados (113 paquetes)**.
+- `/api/captacion/stats/{cubbo}` ahora retorna `packages_audited: 113` (antes 0).
+- 4 tests de regresión en `tests/test_iter87_routal_status_filter.py` (status mapping, package-cohort filtering, webhook persistence, force_refresh bypass).
+
+### Notas
+- Los webhooks `plan.created` siguen llegando con `status="planning"` (esperado). El refresh forzado en el cutoff captura la transición a `in_progress` que ocurre durante el día.
+- Estructura del knapsack y cohort adaptive intactos — solo se reparó la lectura del status.
+
+
+
 ## 2026-05-30 — FEATURE: Cohorte de auditoría orientada a PAQUETES (RTV2)
 
 **Motivación usuario**: cambiar el paradigma de captación de "N rutas/día" a "X paquetes/día con ventana semanal calendar L–D". Mantiene rotación de drivers, agrega controles min/max/target dinámicos y hora de corte configurable.

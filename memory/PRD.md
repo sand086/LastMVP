@@ -19,6 +19,8 @@ Build "LastMile OS MVP" for managing last-mile delivery operations for ME (Mensa
 - **Proveedor** (`proveedor@me.mx`): Read-only restricted view.
 
 ## Core Requirements (Status)
+- [x] **iter87 — BUGFIX P0: Captación 0 servicios en PROD por status faltante** (2026-06-11). Fix de bug crítico: `/captacion` corría a las 16:00 pero seleccionaba 0 servicios. Causa: `route_metadata` staged no persistía el campo `status` de Routal → selector clasificaba todo como `"created"` → eligibility filter `["in_progress"]` descartaba todos. Fix en `services/selection_backfill.py`, `workers/routal_event_processor._handle_plan_created`, `routes/selection_routes.backfill_from_routal` (persistir `status`) + `workers/routal_selection_worker._scheduler_loop` (`force_refresh=True` en el cutoff para refrescar status live antes de correr knapsack). Validación end-to-end live: 22 planes Routal → 3 in_progress correctamente seleccionados (113 paquetes auditables). 4 tests de regresión `tests/test_iter87_routal_status_filter.py` verdes.
+
 - [x] JWT role-based authentication (Agent, Coordinator, Developer, Executive)
 - [x] httpOnly cookie auth (secure, SameSite=lax) with Bearer header backward compat
 - [x] 2-step Cosmo layout upload (history-orders CSV + route-summary XLSX)

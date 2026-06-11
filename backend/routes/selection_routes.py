@@ -318,6 +318,9 @@ async def backfill_from_routal(
                     "project_id": project_id,
                     "execution_date": exd,
                     "date": date_str,
+                    # RTV2 (2026-06-11): persist Routal `status` so the package-cohort
+                    # selector can filter by operational state. See selection_backfill.py.
+                    "status": detail.get("status") or p.get("status"),
                     "driver": {"id": drv_id, "name": drv_name},
                     "driver_id": drv_id,
                     "driver_name": drv_name,

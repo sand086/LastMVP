@@ -648,13 +648,23 @@ async def _scheduler_loop(db):
                             # received a webhook in 10 days but scheduler kept firing
                             # with empty staging → 0 selected. This makes the scheduler
                             # resilient to webhook outages.
+                            #
+                            # RTV2 fix 2026-06-11: at the cutoff scheduler (the audit
+                            # cutoff hour, default 16:00), ALWAYS force_refresh so we
+                            # pull live `status` from Routal. Plans staged earlier via
+                            # webhook carry status="planning" / no status at all, which
+                            # makes the package-cohort selector filter them out. Refreshing
+                            # at cutoff captures the in_progress state for selection.
                             from services.selection_backfill import maybe_backfill_if_empty
+                            is_cutoff = (cutoff is not None and sched == cutoff)
                             try:
-                                bf = await maybe_backfill_if_empty(db, cid, now_cdmx.date())
+                                bf = await maybe_backfill_if_empty(
+                                    db, cid, now_cdmx.date(), force_refresh=is_cutoff,
+                                )
                                 if bf and bf.get("staged", 0) > 0:
                                     logger.info(
                                         f"[selection.scheduler] auto-backfilled {bf['staged']} plans "
-                                        f"for {cid} cutoff={sched} (webhooks gap)"
+                                        f"for {cid} cutoff={sched} (force_refresh={is_cutoff})"
                                     )
                             except Exception as bfe:
                                 logger.warning(
