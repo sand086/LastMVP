@@ -472,41 +472,92 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
             counts[phase] = counts.get(phase, 0) + 1
 
             journey_id = None
+            create_error: Optional[str] = None
             try:
                 journey_id = await _handle_plan_created_direct(
                     db, plan["route_metadata"], client_id, branch_id=plan_branch_id,
                 )
-                counts["selected_new"] += 1
             except Exception as e:
                 logger.error(f"[selection] journey create failed for {drv}: {e}")
+                create_error = str(e)[:200]
                 journey_id = None
 
-            # Compute packages_audited for this driver's plan (RTV2: weekly target accumulator)
-            rm = plan.get("route_metadata") or {}
-            _stops = rm.get("stops") or rm.get("services") or []
-            pkgs_audited = sum(
-                1 for s in _stops
-                if isinstance(s, dict) and not _is_scanner_placeholder_safe(s.get("label"))
-            ) if _stops else int(plan.get("packages_count") or 0)
-
-            await db.driver_audit_log.update_one(
-                {"client_id": client_id, "driver_id": drv, "date": target_dt},
-                {"$set": {
-                    "client_id": client_id,
-                    "branch_id": plan_branch_id,
-                    "driver_id": drv,
-                    "driver_name": plan.get("driver_name"),
-                    "date": target_dt,
-                    "plan_id_routal": plan.get("plan_id_routal"),
-                    "selection_status": "selected",
-                    "selection_phase": phase,
-                    "audit_count_30d_at_selection": audit_counts.get(drv, 0),
-                    "journey_id": journey_id,
-                    "packages_audited": pkgs_audited,
-                    "created_at": _now_iso(),
-                }},
-                upsert=True,
+            # Bug fix 2026-06-16: detect "skipped:..." sentinel returned by
+            # _handle_plan_created_direct when payload yields zero real routes
+            # (placeholders / no_id). Without this, the audit log was recording
+            # selection_status="selected" for plans that never materialized as
+            # journeys — making `/captacion` overcount routes vs `/dashboard`
+            # by 6 routes / 156 pkgs (PROD 2026-06-16: 35 vs 29).
+            journey_created_ok = bool(
+                journey_id and not str(journey_id).startswith("skipped")
             )
+
+            if journey_created_ok:
+                counts["selected_new"] += 1
+                # Compute packages_audited from the actual journey (source of truth)
+                # so captacion stats never diverge from /dashboard ever again.
+                created_pkgs = await db.packages.count_documents(
+                    {"journey_id": journey_id, "client_id": client_id}
+                )
+                rm = plan.get("route_metadata") or {}
+                _stops = rm.get("stops") or rm.get("services") or []
+                stops_pkgs = sum(
+                    1 for s in _stops
+                    if isinstance(s, dict) and not _is_scanner_placeholder_safe(s.get("label"))
+                ) if _stops else int(plan.get("packages_count") or 0)
+                # Prefer real packages count; fall back to stops snapshot only if 0.
+                pkgs_audited = created_pkgs if created_pkgs > 0 else stops_pkgs
+
+                await db.driver_audit_log.update_one(
+                    {"client_id": client_id, "driver_id": drv, "date": target_dt},
+                    {"$set": {
+                        "client_id": client_id,
+                        "branch_id": plan_branch_id,
+                        "driver_id": drv,
+                        "driver_name": plan.get("driver_name"),
+                        "date": target_dt,
+                        "plan_id_routal": plan.get("plan_id_routal"),
+                        "selection_status": "selected",
+                        "selection_phase": phase,
+                        "audit_count_30d_at_selection": audit_counts.get(drv, 0),
+                        "journey_id": journey_id,
+                        "packages_audited": pkgs_audited,
+                        "created_at": _now_iso(),
+                    }},
+                    upsert=True,
+                )
+            else:
+                # Journey could not be materialized → drop from selected set so
+                # /captacion stats and /dashboard stay consistent. Record as
+                # "failed" with the error reason for observability instead of
+                # silently leaving a "selected" entry without a journey.
+                new_selected.discard(drv)
+                selected_set.discard(drv)
+                counts[phase] = max(0, counts.get(phase, 0) - 1)
+                logger.warning(
+                    f"[selection] dropping {drv} from cohort — journey not "
+                    f"materialized (journey_id={journey_id!r} err={create_error})"
+                )
+                await db.driver_audit_log.update_one(
+                    {"client_id": client_id, "driver_id": drv, "date": target_dt},
+                    {"$set": {
+                        "client_id": client_id,
+                        "branch_id": plan_branch_id,
+                        "driver_id": drv,
+                        "driver_name": plan.get("driver_name"),
+                        "date": target_dt,
+                        "plan_id_routal": plan.get("plan_id_routal"),
+                        "selection_status": "failed",
+                        "selection_phase": phase,
+                        "audit_count_30d_at_selection": audit_counts.get(drv, 0),
+                        "journey_id": None,
+                        "failure_reason": (
+                            create_error or (str(journey_id) if journey_id else "unknown")
+                        ),
+                        "created_at": _now_iso(),
+                    }},
+                    upsert=True,
+                )
         else:
             # STEP 8 — unselected
             await db.driver_audit_log.update_one(
@@ -538,6 +589,41 @@ async def run_daily_selection(db, client_id: str, target_date: Optional[date] = 
     if len(drivers_today) > max_daily * 3:
         logger.warning(
             f"[selection] fleet={len(drivers_today)} >3x max_daily={max_daily} for {client_id}; rotation slow"
+        )
+
+    # Bug fix 2026-06-16: reconcile the `selection_runs` snapshot with the actual
+    # materialized journeys/packages. Without this, /captacion ("Última corrida")
+    # showed 35 routes / 1021 pkgs while /dashboard showed 29 routes / 865 pkgs
+    # because some _handle_plan_created_direct calls failed/skipped silently and
+    # were dropped from new_selected above. The /selection_runs doc was inserted
+    # BEFORE materialization with the pre-failure counts.
+    if package_mode:
+        materialized_pipeline = [
+            {"$match": {
+                "client_id": client_id, "selection_status": "selected", "date": target_dt,
+            }},
+            {"$group": {
+                "_id": None,
+                "routes": {"$sum": 1},
+                "pkgs": {"$sum": {"$ifNull": ["$packages_audited", 0]}},
+            }},
+        ]
+        mat_routes, mat_pkgs = 0, 0
+        async for d in db.driver_audit_log.aggregate(materialized_pipeline):
+            mat_routes = int(d.get("routes") or 0)
+            mat_pkgs = int(d.get("pkgs") or 0)
+        failed_count = await db.driver_audit_log.count_documents(
+            {"client_id": client_id, "selection_status": "failed", "date": target_dt},
+        )
+        await db.selection_runs.update_one(
+            {"client_id": client_id, "date": target_dt},
+            {"$set": {
+                "selected_count": mat_routes,
+                "failed_count": failed_count,
+                "knapsack.selected_packages": mat_pkgs,
+                "materialized_at": _now_iso(),
+            }},
+            upsert=False,
         )
 
     # RT-09: per-branch breakdown for multi-project clients (Cubbo CDMX/GDL/...)

@@ -92,24 +92,41 @@ async def test_2_package_cohort_filters_by_status():
             "audit_overshoot_tolerance": 0.10,
         })
 
-        def _stops(n):
-            return [{"id": f"s{i}", "label": f"Order {i}"} for i in range(n)]
+        def _stops(n, route_id="drv"):
+            return [{"id": f"s{i}", "route_id": route_id, "label": f"Order {i}"} for i in range(n)]
 
         await db.routal_daily_plans.insert_many([
             {
                 "client_id": client_id, "driver_id": "drv_inprog", "date": target_dt,
                 "plan_id_routal": "p1", "processed": False,
-                "route_metadata": {"status": "in_progress", "stops": _stops(30)},
+                "route_metadata": {
+                    "id": "drv_inprog", "plan_id": "p1", "label": "Driver IP",
+                    "status": "in_progress",
+                    "driver": {"id": "drv_inprog", "name": "Driver IP"},
+                    "stops": _stops(30, "drv_inprog"),
+                    "services": _stops(30, "drv_inprog"),
+                },
             },
             {
                 "client_id": client_id, "driver_id": "drv_planning", "date": target_dt,
                 "plan_id_routal": "p2", "processed": False,
-                "route_metadata": {"status": "planning", "stops": _stops(50)},
+                "route_metadata": {
+                    "id": "drv_planning", "plan_id": "p2", "label": "Driver PL",
+                    "status": "planning",
+                    "driver": {"id": "drv_planning", "name": "Driver PL"},
+                    "stops": _stops(50, "drv_planning"),
+                    "services": _stops(50, "drv_planning"),
+                },
             },
             {
                 "client_id": client_id, "driver_id": "drv_no_status", "date": target_dt,
                 "plan_id_routal": "p3", "processed": False,
-                "route_metadata": {"stops": _stops(40)},
+                "route_metadata": {
+                    "id": "drv_no_status", "plan_id": "p3", "label": "Driver NS",
+                    "driver": {"id": "drv_no_status", "name": "Driver NS"},
+                    "stops": _stops(40, "drv_no_status"),
+                    "services": _stops(40, "drv_no_status"),
+                },
             },
         ])
 
