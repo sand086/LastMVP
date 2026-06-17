@@ -18,10 +18,12 @@ import { Checkbox } from './ui/checkbox';
 import {
     RefreshCw, Search, Loader2, ChevronDown, ChevronRight, Camera,
     ExternalLink, Eye, ShieldAlert, Check, X, CheckCircle2, XCircle, AlertTriangle,
+    Filter, FilterX,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import EvidenceCarousel from './EvidenceCarousel';
 import ReviewModal from './ReviewModal';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import {
     ScoreCircle, ConfidenceBar, StatusPill, ReviewIndicator,
     SeverityBadge, getMaxSeverity,
@@ -66,14 +68,87 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
     const [aiEvalProgress, setAiEvalProgress] = useState(null);
     const pollingRef = useRef(null);
 
+    // Per-column header filters (added 2026-06-16). Each entry is either an
+    // array of allowed values (multi-select) or null when no filter active.
+    // estado/revision: array of strings; confianza/score_ia/fotos/intento: string bucket.
+    const [colFilters, setColFilters] = useState({
+        estado: [],         // ['exitosa', 'failed', 'pending']
+        confianza: null,    // 'high' (≥75) | 'mid' (50-74) | 'low' (<50) | 'none'
+        score_ia: null,     // 'high' (≥80) | 'mid' (50-79) | 'low' (<50) | 'none'
+        fotos: null,        // 'with' (>0) | 'without' (=0)
+        intento: null,      // '1' | '2' | '3+'
+        revision: [],       // ['pending', 'approved', 'rejected']
+        acciones: null,     // 'has_kosmo' | 'no_kosmo'
+    });
+    const activeFilterCount = useMemo(() => {
+        let n = 0;
+        if (colFilters.estado.length) n++;
+        if (colFilters.confianza) n++;
+        if (colFilters.score_ia) n++;
+        if (colFilters.fotos) n++;
+        if (colFilters.intento) n++;
+        if (colFilters.revision.length) n++;
+        if (colFilters.acciones) n++;
+        return n;
+    }, [colFilters]);
+    const clearAllColFilters = () => setColFilters({
+        estado: [], confianza: null, score_ia: null, fotos: null,
+        intento: null, revision: [], acciones: null,
+    });
+
     useEffect(() => { setReviewOverrides({}); setSelectedPkgs({}); }, [packages]);
 
     // Derived metrics + filtered list (memoized via custom hook)
-    const { mergedPackages, kpis, aiErrorSummary, segmentCounts, filteredPackages } = useGuiasMetrics(
+    const { mergedPackages, kpis, aiErrorSummary, segmentCounts, filteredPackages: segmentFiltered } = useGuiasMetrics(
         packages,
         reviewOverrides,
         segment,
     );
+
+    // Apply column-header filters on top of segment filter.
+    const filteredPackages = useMemo(() => {
+        const cf = colFilters;
+        return segmentFiltered.filter((p) => {
+            if (cf.estado.length && !cf.estado.includes((p.status || '').toLowerCase())) return false;
+            if (cf.confianza) {
+                const c = p.confidence?.score;
+                if (cf.confianza === 'none' && c != null) return false;
+                if (cf.confianza === 'high' && !(c != null && c >= 75)) return false;
+                if (cf.confianza === 'mid' && !(c != null && c >= 50 && c < 75)) return false;
+                if (cf.confianza === 'low' && !(c != null && c < 50)) return false;
+            }
+            if (cf.score_ia) {
+                const s = p.ai_score;
+                if (cf.score_ia === 'none' && s != null) return false;
+                if (cf.score_ia === 'high' && !(s != null && s >= 80)) return false;
+                if (cf.score_ia === 'mid' && !(s != null && s >= 50 && s < 80)) return false;
+                if (cf.score_ia === 'low' && !(s != null && s < 50)) return false;
+            }
+            if (cf.fotos) {
+                const count = (p.photos_count || 0) || (p.kosmo_proof_urls?.length || 0);
+                if (cf.fotos === 'with' && count === 0) return false;
+                if (cf.fotos === 'without' && count > 0) return false;
+            }
+            if (cf.intento) {
+                const a = p.delivery_attempt || 1;
+                if (cf.intento === '1' && a !== 1) return false;
+                if (cf.intento === '2' && a !== 2) return false;
+                if (cf.intento === '3+' && a < 3) return false;
+            }
+            if (cf.revision.length) {
+                let rev = 'pending';
+                if (p.manually_reviewed || p.manual_review?.decision === 'approved') rev = 'approved';
+                else if (p.rejection_reason || p.manual_review?.decision === 'rejected') rev = 'rejected';
+                if (!cf.revision.includes(rev)) return false;
+            }
+            if (cf.acciones) {
+                const hasKosmo = !!p.kosmo_url;
+                if (cf.acciones === 'has_kosmo' && !hasKosmo) return false;
+                if (cf.acciones === 'no_kosmo' && hasKosmo) return false;
+            }
+            return true;
+        });
+    }, [segmentFiltered, colFilters]);
 
     const startPolling = useCallback(() => {
         if (pollingRef.current) return;
@@ -436,14 +511,140 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                                     <th className="w-8"></th>
                                     <th>No. guía</th>
                                     <th>Destinatario</th>
-                                    <th>Estado</th>
-                                    <th>Confianza</th>
-                                    <th>Score IA</th>
+                                    <th>
+                                        <div className="flex items-center gap-1">
+                                            <span>Estado</span>
+                                            <ColumnFilter
+                                                label="Filtrar por estado"
+                                                testId="estado"
+                                                multi
+                                                active={colFilters.estado.length > 0}
+                                                value={colFilters.estado}
+                                                onChange={(v) => setColFilters((s) => ({ ...s, estado: v }))}
+                                                options={[
+                                                    { value: 'delivered', label: 'Exitosa' },
+                                                    { value: 'failed', label: 'Fallida' },
+                                                    { value: 'returned', label: 'Devuelta' },
+                                                    { value: 'pending', label: 'Pendiente' },
+                                                ]}
+                                            />
+                                        </div>
+                                    </th>
+                                    <th>
+                                        <div className="flex items-center gap-1">
+                                            <span>Confianza</span>
+                                            <ColumnFilter
+                                                label="Filtrar por confianza"
+                                                testId="confianza"
+                                                active={!!colFilters.confianza}
+                                                value={colFilters.confianza}
+                                                onChange={(v) => setColFilters((s) => ({ ...s, confianza: v }))}
+                                                options={[
+                                                    { value: 'high', label: 'Alta (≥75%)' },
+                                                    { value: 'mid', label: 'Media (50–74%)' },
+                                                    { value: 'low', label: 'Baja (<50%)' },
+                                                    { value: 'none', label: 'Sin evaluar' },
+                                                ]}
+                                            />
+                                        </div>
+                                    </th>
+                                    <th>
+                                        <div className="flex items-center gap-1">
+                                            <span>Score IA</span>
+                                            <ColumnFilter
+                                                label="Filtrar por score IA"
+                                                testId="score-ia"
+                                                active={!!colFilters.score_ia}
+                                                value={colFilters.score_ia}
+                                                onChange={(v) => setColFilters((s) => ({ ...s, score_ia: v }))}
+                                                options={[
+                                                    { value: 'high', label: 'Alto (≥80)' },
+                                                    { value: 'mid', label: 'Medio (50–79)' },
+                                                    { value: 'low', label: 'Bajo (<50)' },
+                                                    { value: 'none', label: 'Sin score' },
+                                                ]}
+                                            />
+                                        </div>
+                                    </th>
                                     <th>Errores</th>
-                                    <th>Fotos</th>
-                                    <th>Intento</th>
-                                    <th>Revisión</th>
-                                    <th>Acciones</th>
+                                    <th>
+                                        <div className="flex items-center gap-1">
+                                            <span>Fotos</span>
+                                            <ColumnFilter
+                                                label="Filtrar por fotos"
+                                                testId="fotos"
+                                                active={!!colFilters.fotos}
+                                                value={colFilters.fotos}
+                                                onChange={(v) => setColFilters((s) => ({ ...s, fotos: v }))}
+                                                options={[
+                                                    { value: 'with', label: 'Con fotos' },
+                                                    { value: 'without', label: 'Sin fotos' },
+                                                ]}
+                                            />
+                                        </div>
+                                    </th>
+                                    <th>
+                                        <div className="flex items-center gap-1">
+                                            <span>Intento</span>
+                                            <ColumnFilter
+                                                label="Filtrar por intento"
+                                                testId="intento"
+                                                active={!!colFilters.intento}
+                                                value={colFilters.intento}
+                                                onChange={(v) => setColFilters((s) => ({ ...s, intento: v }))}
+                                                options={[
+                                                    { value: '1', label: '1º intento' },
+                                                    { value: '2', label: '2º intento' },
+                                                    { value: '3+', label: '3º o más' },
+                                                ]}
+                                            />
+                                        </div>
+                                    </th>
+                                    <th>
+                                        <div className="flex items-center gap-1">
+                                            <span>Revisión</span>
+                                            <ColumnFilter
+                                                label="Filtrar por revisión"
+                                                testId="revision"
+                                                multi
+                                                active={colFilters.revision.length > 0}
+                                                value={colFilters.revision}
+                                                onChange={(v) => setColFilters((s) => ({ ...s, revision: v }))}
+                                                options={[
+                                                    { value: 'pending', label: 'Pendiente' },
+                                                    { value: 'approved', label: 'Aprobada' },
+                                                    { value: 'rejected', label: 'Rechazada' },
+                                                ]}
+                                            />
+                                        </div>
+                                    </th>
+                                    <th>
+                                        <div className="flex items-center gap-1">
+                                            <span>Acciones</span>
+                                            <ColumnFilter
+                                                label="Filtrar por acciones"
+                                                testId="acciones"
+                                                active={!!colFilters.acciones}
+                                                value={colFilters.acciones}
+                                                onChange={(v) => setColFilters((s) => ({ ...s, acciones: v }))}
+                                                options={[
+                                                    { value: 'has_kosmo', label: 'Con link Kosmo' },
+                                                    { value: 'no_kosmo', label: 'Sin link Kosmo' },
+                                                ]}
+                                            />
+                                            {activeFilterCount > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); clearAllColFilters(); }}
+                                                    className="ml-1 text-amber-600 hover:text-amber-800"
+                                                    title="Limpiar todos los filtros"
+                                                    data-testid="clear-all-col-filters"
+                                                >
+                                                    <FilterX className="w-3 h-3" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -590,7 +791,22 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                                     );
                                 })}
                                 {filteredPackages.length === 0 && (
-                                    <tr><td colSpan={canReview ? 12 : 11} className="text-center py-8 text-slate-400 text-sm">No hay guías que coincidan con el filtro seleccionado.</td></tr>
+                                    <tr><td colSpan={canReview ? 12 : 11} className="text-center py-8 text-slate-400 text-sm">
+                                        No hay guías que coincidan con el filtro seleccionado.
+                                        {activeFilterCount > 0 && (
+                                            <>
+                                                {' '}
+                                                <button
+                                                    type="button"
+                                                    onClick={clearAllColFilters}
+                                                    className="text-amber-600 hover:text-amber-800 underline ml-1"
+                                                    data-testid="empty-clear-col-filters"
+                                                >
+                                                    Limpiar {activeFilterCount} filtro{activeFilterCount > 1 ? 's' : ''} de columna
+                                                </button>
+                                            </>
+                                        )}
+                                    </td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -682,6 +898,71 @@ const GuiasTab = ({ journey, packages, onRefreshJourney, onRegisterIncident }) =
                 </div>
             )}
         </div>
+    );
+};
+
+/* ─── Per-column header filter popover ───
+ * Renders a small filter icon button next to the column label. When a filter
+ * is active, the icon turns amber and shows a dot indicator. Multi-select
+ * filters (estado, revision) use checkboxes; range filters use radio buttons.
+ */
+const ColumnFilter = ({ label, active, options, multi = false, value, onChange, testId }) => {
+    const valArr = Array.isArray(value) ? value : (value ? [value] : []);
+    const toggle = (v) => {
+        if (multi) {
+            const next = valArr.includes(v) ? valArr.filter((x) => x !== v) : [...valArr, v];
+            onChange(next);
+        } else {
+            onChange(valArr.includes(v) ? null : v);
+        }
+    };
+    return (
+        <Popover>
+            <PopoverTrigger asChild>
+                <button
+                    type="button"
+                    className={`inline-flex items-center justify-center w-5 h-5 rounded hover:bg-slate-200 transition-colors ${active ? 'text-amber-600' : 'text-slate-400'}`}
+                    onClick={(e) => e.stopPropagation()}
+                    data-testid={`col-filter-trigger-${testId}`}
+                    aria-label={`Filtrar ${label}`}
+                >
+                    <Filter className="w-3 h-3" />
+                    {active && <span className="absolute -mt-3 ml-2 w-1.5 h-1.5 bg-amber-500 rounded-full" />}
+                </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-52 p-2" align="start" data-testid={`col-filter-popover-${testId}`}>
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1 px-1">{label}</div>
+                <div className="space-y-0.5">
+                    {options.map((opt) => {
+                        const checked = valArr.includes(opt.value);
+                        return (
+                            <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => toggle(opt.value)}
+                                className={`w-full text-left text-xs px-2 py-1.5 rounded flex items-center gap-2 ${checked ? 'bg-amber-50 text-amber-700' : 'hover:bg-slate-50 text-slate-700'}`}
+                                data-testid={`col-filter-opt-${testId}-${opt.value}`}
+                            >
+                                <span className={`inline-flex items-center justify-center w-3.5 h-3.5 border rounded ${checked ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300'}`}>
+                                    {checked && <Check className="w-2.5 h-2.5" />}
+                                </span>
+                                <span className="flex-1">{opt.label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+                {active && (
+                    <button
+                        type="button"
+                        onClick={() => onChange(multi ? [] : null)}
+                        className="mt-2 w-full text-[11px] text-slate-500 hover:text-slate-800 py-1 border-t border-slate-100"
+                        data-testid={`col-filter-clear-${testId}`}
+                    >
+                        Limpiar
+                    </button>
+                )}
+            </PopoverContent>
+        </Popover>
     );
 };
 
