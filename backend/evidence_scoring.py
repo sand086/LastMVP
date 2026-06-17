@@ -662,8 +662,29 @@ async def evaluate_packages_for_journey(db: AsyncIOMotorDatabase, journey_id: st
     }
 
     if not use_ai:
-        # Rule-based: fast, run inline
+        # Rule-based: fast, run inline.
+        #
+        # Bug fix 2026-06-17 (PROD journey 6a3169830a706fc91e281e5d): the user
+        # reported that AI scores between 90–100 were being silently rewritten
+        # to 50/70/70 after closing the route. Cause: close_journey calls this
+        # function in rule-based mode, and the previous loop overwrote the
+        # `evidence_score` for EVERY package — including those already evaluated
+        # by AI Vision (more sophisticated, evaluates address match, receiver
+        # presence, photo quality, etc.). The rule-based fallback only counts
+        # proof photos, so AI's 92 became rules' 70 (2 photos).
+        #
+        # Fix: rules are a FALLBACK for packages the AI never evaluated. Skip
+        # any package that already carries an AI-derived score
+        # (`evidence_method == "ai"`) OR an existing valid `evidence_score`
+        # paired with `evidence_evaluated_at` from a prior eval.
         for pkg in packages:
+            evidence_method = pkg.get("evidence_method")
+            already_evaluated = (
+                evidence_method == "ai"
+                or (pkg.get("evidence_score") is not None and pkg.get("evidence_evaluated_at"))
+            )
+            if already_evaluated:
+                continue
             tn = (pkg.get("tracking_number") or "").strip().lower()
             has_incident = tn in incident_tracking_numbers if tn else False
             result = calculate_evidence_score_rules(pkg, has_incident)
