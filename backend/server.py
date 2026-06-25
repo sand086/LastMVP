@@ -2,6 +2,7 @@
 LastMile OS API - Main Application
 Modular FastAPI application for last-mile delivery management.
 """
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
@@ -19,7 +20,10 @@ from dependencies import db, limiter, mongo_client
 from middleware import AuditMiddleware, SecurityHeadersMiddleware
 from kosmo_sync import start_periodic_sync, stop_periodic_sync, close_http_client
 from ai_eval_worker import start_ai_eval_worker, stop_ai_eval_worker
-from workers.routal_selection_worker import start_selection_scheduler, stop_selection_scheduler
+from workers.routal_selection_worker import (
+    start_selection_scheduler,
+    stop_selection_scheduler,
+)
 from workers.routal_sync_worker import start_routal_sync_worker, stop_routal_sync_worker
 from workers.subprocess_manager import (
     start_worker_subprocess,
@@ -55,10 +59,13 @@ from leader_election import acquire_leader, release_leader, is_leader, worker_id
 import asyncio
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # ==================== APP CREATION ====================
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -72,6 +79,7 @@ async def lifespan(app: FastAPI):
     # workers) se difiere a un background task que arranca DESPUÉS del
     # "startup complete" para no bloquear el probe.
     from utils.encryption import init_encryption
+
     await init_encryption(db)
 
     # Spawn deferred initialization without awaiting it. Uvicorn emitirá
@@ -84,6 +92,11 @@ async def lifespan(app: FastAPI):
     if not deferred_init_task.done():
         deferred_init_task.cancel()
     _workers_mode = os.environ.get("WORKERS_MODE", "subprocess").strip().lower()
+
+    # PARCHE: Forzar modo inline en Windows para evitar errores de subprocesos
+    if os.name == "nt":
+        _workers_mode = "inline"
+
     if _workers_mode == "subprocess":
         # Stop the standalone subprocess (and its monitor).
         await stop_worker_subprocess(grace_seconds=10)
@@ -115,6 +128,7 @@ async def _deferred_startup(app: FastAPI):
         # R00B / SEL01: bootstrap default client_config (Cubbo)
         try:
             from services.client_config_service import bootstrap_default_clients
+
             await bootstrap_default_clients(db)
         except Exception as e:
             logger.warning(f"[client_config] bootstrap failed: {e}")
@@ -129,8 +143,15 @@ async def _deferred_startup(app: FastAPI):
         # de ejecutar los workers en el mismo event loop de uvicorn. Útil
         # como fallback si el modo subprocess da problemas en producción.
         _workers_mode = os.environ.get("WORKERS_MODE", "subprocess").strip().lower()
+
+        # PARCHE: Forzar modo inline en Windows para evitar errores de subprocesos
+        if os.name == "nt":
+            _workers_mode = "inline"
+
         if _workers_mode == "subprocess":
-            logger.info("[bg] WORKERS_MODE=subprocess — spawning standalone worker process")
+            logger.info(
+                "[bg] WORKERS_MODE=subprocess — spawning standalone worker process"
+            )
             # No leader-election aquí: la maneja el propio subprocess.
             start_worker_subprocess()
         else:
@@ -145,7 +166,9 @@ async def _deferred_startup(app: FastAPI):
             from leader_election import register_on_leader_callback
 
             def _start_bg_tasks():
-                logger.info(f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)")
+                logger.info(
+                    f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)"
+                )
                 start_periodic_sync(db)
                 start_ai_eval_worker(db)
                 start_selection_scheduler(db)
@@ -155,7 +178,9 @@ async def _deferred_startup(app: FastAPI):
 
             elected = await acquire_leader(db, role="bg_tasks")
             if elected:
-                logger.info(f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync (INLINE)")
+                logger.info(
+                    f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync (INLINE)"
+                )
                 _start_bg_tasks()
             else:
                 logger.info(
@@ -186,9 +211,11 @@ async def rate_limit_handler(request: StarletteRequest, exc: RateLimitExceeded):
             retry_after = int(getattr(exc.limit, "amount", 60) or 60)
     except Exception:
         retry_after = 60
-    client_ip = (request.client.host if request.client else "?")
+    client_ip = request.client.host if request.client else "?"
     path = request.url.path
-    logger.warning(f"[rate-limit] 429 {path} ip={client_ip} ua={request.headers.get('user-agent','-')[:60]}")
+    logger.warning(
+        f"[rate-limit] 429 {path} ip={client_ip} ua={request.headers.get('user-agent','-')[:60]}"
+    )
     return JSONResponse(
         status_code=429,
         content={"error": "rate_limit_exceeded", "retry_after_seconds": retry_after},
@@ -232,7 +259,10 @@ async def health():
                 "collections_accessible": len(collections),
             }
         except _aio.TimeoutError:
-            return {"status": "timeout", "latency_ms": round((time.monotonic() - t0) * 1000)}
+            return {
+                "status": "timeout",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }
         except Exception as e:
             return {"status": "error", "error": str(e)[:120]}
 
@@ -257,8 +287,12 @@ async def health():
             last_hb_ago = None
             if last and last.get("last_progress_at"):
                 try:
-                    ts = datetime.fromisoformat(last["last_progress_at"].replace("Z", "+00:00"))
-                    last_hb_ago = round((datetime.now(timezone.utc) - ts).total_seconds())
+                    ts = datetime.fromisoformat(
+                        last["last_progress_at"].replace("Z", "+00:00")
+                    )
+                    last_hb_ago = round(
+                        (datetime.now(timezone.utc) - ts).total_seconds()
+                    )
                 except Exception:
                     last_hb_ago = None
             return {
@@ -288,8 +322,12 @@ async def health():
             last_hb_ago = None
             if last and last.get("last_sync_at"):
                 try:
-                    ts = datetime.fromisoformat(str(last["last_sync_at"]).replace("Z", "+00:00"))
-                    last_hb_ago = round((datetime.now(timezone.utc) - ts).total_seconds())
+                    ts = datetime.fromisoformat(
+                        str(last["last_sync_at"]).replace("Z", "+00:00")
+                    )
+                    last_hb_ago = round(
+                        (datetime.now(timezone.utc) - ts).total_seconds()
+                    )
                 except Exception:
                     last_hb_ago = None
             return {"status": "ok", "last_heartbeat_seconds_ago": last_hb_ago}
@@ -315,22 +353,40 @@ async def health():
             last_hb_ago = None
             if last and last.get("routal_synced_at"):
                 try:
-                    ts = datetime.fromisoformat(str(last["routal_synced_at"]).replace("Z", "+00:00"))
-                    last_hb_ago = round((datetime.now(timezone.utc) - ts).total_seconds())
+                    ts = datetime.fromisoformat(
+                        str(last["routal_synced_at"]).replace("Z", "+00:00")
+                    )
+                    last_hb_ago = round(
+                        (datetime.now(timezone.utc) - ts).total_seconds()
+                    )
                 except Exception:
                     last_hb_ago = None
             # Count candidates currently pending (matches the worker's own filter)
             from datetime import timedelta as _td
-            cutoff_date = (datetime.now(timezone.utc) - _td(days=7)).strftime("%Y-%m-%d")
-            skip_synced_after = (datetime.now(timezone.utc) - _td(minutes=5)).isoformat()
+
+            cutoff_date = (datetime.now(timezone.utc) - _td(days=7)).strftime(
+                "%Y-%m-%d"
+            )
+            skip_synced_after = (
+                datetime.now(timezone.utc) - _td(minutes=5)
+            ).isoformat()
             candidates = await _aio.wait_for(
-                db.journeys.count_documents({
-                    "source": "routal",
-                    "status": {"$in": ["planificada", "en_ruta", "in_progress", "scheduled"]},
-                    "date": {"$gte": cutoff_date},
-                    "routal_plan_id": {"$exists": True, "$ne": None},
-                    "routal_synced_at": {"$not": {"$gte": skip_synced_after}},
-                }),
+                db.journeys.count_documents(
+                    {
+                        "source": "routal",
+                        "status": {
+                            "$in": [
+                                "planificada",
+                                "en_ruta",
+                                "in_progress",
+                                "scheduled",
+                            ]
+                        },
+                        "date": {"$gte": cutoff_date},
+                        "routal_plan_id": {"$exists": True, "$ne": None},
+                        "routal_synced_at": {"$not": {"$gte": skip_synced_after}},
+                    }
+                ),
                 timeout=0.3,
             )
             return {
@@ -349,18 +405,26 @@ async def health():
         return {
             "status": "ok",
             "type": "s3" if _os.environ.get("S3_BUCKET_NAME") else "local",
-            "warning": None if _os.environ.get("S3_BUCKET_NAME") else "Local disk; files do not persist across redeploys",
+            "warning": (
+                None
+                if _os.environ.get("S3_BUCKET_NAME")
+                else "Local disk; files do not persist across redeploys"
+            ),
         }
 
     def _check_circuit_breakers():
         try:
             from utils.circuit_breaker import all_breaker_status
+
             return all_breaker_status()
         except Exception as e:
             return {"status": "error", "error": str(e)[:80]}
 
     db_check, ai_check, kosmo_check, routal_check = await _aio.gather(
-        _check_db(), _check_ai_eval(), _check_kosmo_sync(), _check_routal_sync(),
+        _check_db(),
+        _check_ai_eval(),
+        _check_kosmo_sync(),
+        _check_routal_sync(),
     )
     storage_check = _check_storage()
     breakers = _check_circuit_breakers()
@@ -370,8 +434,13 @@ async def health():
     _hb_threshold = int(_os.environ.get("AI_EVAL_HEARTBEAT_THRESHOLD_SECONDS", "1800"))
     if db_check.get("status") in ("error", "timeout"):
         overall = "unhealthy"
-    elif (ai_check.get("last_heartbeat_seconds_ago") is not None and ai_check["last_heartbeat_seconds_ago"] > _hb_threshold) or \
-         any(b.get("state") == "OPEN" for b in (breakers.values() if isinstance(breakers, dict) else [])):
+    elif (
+        ai_check.get("last_heartbeat_seconds_ago") is not None
+        and ai_check["last_heartbeat_seconds_ago"] > _hb_threshold
+    ) or any(
+        b.get("state") == "OPEN"
+        for b in (breakers.values() if isinstance(breakers, dict) else [])
+    ):
         overall = "degraded"
     else:
         overall = "healthy"
@@ -404,7 +473,12 @@ async def health():
 async def global_rate_limit_middleware(request: StarletteRequest, call_next):
     path = request.url.path
     # Excluir health y docs (y rutas no-API)
-    if path in ("/api/health", "/api/", "/api/docs", "/api/openapi.json") or not path.startswith("/api/"):
+    if path in (
+        "/api/health",
+        "/api/",
+        "/api/docs",
+        "/api/openapi.json",
+    ) or not path.startswith("/api/"):
         return await call_next(request)
     # auth y upload tienen sus propios @limiter.limit, slowapi se encarga
     if path.startswith("/api/auth/") or path.startswith("/api/uploads/"):
@@ -418,6 +492,7 @@ async def global_rate_limit_middleware(request: StarletteRequest, call_next):
     try:
         # Best-effort: read user from JWT (cookie or Bearer). NO bloquear si falta.
         from dependencies import _resolve_user_from_request_unsafe  # type: ignore
+
         user_id = await _resolve_user_from_request_unsafe(request)
     except Exception:
         user_id = None
@@ -426,7 +501,11 @@ async def global_rate_limit_middleware(request: StarletteRequest, call_next):
     # P03: Detectar IP real cuando hay ingress/proxy delante (Emergent K8s usa X-Forwarded-For).
     # Tomar el primer hop de la lista (cliente original) en vez de request.client.host (que es el ingress).
     fwd = request.headers.get("X-Forwarded-For", "")
-    real_ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
+    real_ip = (
+        fwd.split(",")[0].strip()
+        if fwd
+        else (request.client.host if request.client else "unknown")
+    )
     key = f"user:{user_id}" if user_id else f"ip:{real_ip}"
 
     # Manual sliding-window check (in-memory; consistent with slowapi default store)
@@ -444,7 +523,9 @@ async def global_rate_limit_middleware(request: StarletteRequest, call_next):
                 _RATE_BUCKETS.pop(k, None)
 
     if cnt > limit_per_min:
-        logger.warning(f"[rate-limit-global] 429 {request.method} {path} key={key} count={cnt}/{limit_per_min}min")
+        logger.warning(
+            f"[rate-limit-global] 429 {request.method} {path} key={key} count={cnt}/{limit_per_min}min"
+        )
         return JSONResponse(
             status_code=429,
             content={"error": "rate_limit_exceeded", "retry_after_seconds": 60},
@@ -477,19 +558,23 @@ api_router.include_router(architecture_router)
 # R00A: Multi-tenant integrations + Routal webhook
 from routes.integration_routes import router as integration_router
 from routes.routal_webhook_routes import router as routal_webhook_router
+
 api_router.include_router(integration_router)
 api_router.include_router(routal_webhook_router)
 
 # R00B / SEL01: Selection module + client config
 from routes.selection_routes import router as selection_router
+
 api_router.include_router(selection_router)
 
 # RT-13 / iter71: Multi-branch (sucursales)
 from routes.branch_routes import router as branch_router
+
 api_router.include_router(branch_router)
 
 # iter79: Routal legacy plan→route journey migration (option 1b)
 from routes.routal_migration_routes import router as routal_migration_router
+
 api_router.include_router(routal_migration_router)
 
 app.include_router(api_router)
@@ -525,7 +610,9 @@ async def workers_process_status():
         "pid": get_worker_pid() if mode == "subprocess" else None,
     }
 
+
 # ==================== WEBSOCKET ENDPOINT ====================
+
 
 @app.websocket("/api/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
@@ -547,7 +634,10 @@ async def websocket_dashboard(websocket: WebSocket):
 app.add_middleware(AuditMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
-_cors_env = os.environ.get("CORS_ORIGINS", "https://lastmile-mvp.preview.emergentagent.com")
+_cors_env = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:3000,https://lastmile-mvp.preview.emergentagent.com",
+)
 _is_wildcard = _cors_env.strip() == "*"
 
 if _is_wildcard:
@@ -587,19 +677,22 @@ else:
 # Latencia sub-millisegundo aunque el event loop esté ocupado.
 class HealthFastBypass:
     """Raw ASGI middleware — bypasses /health checks before FastAPI machinery."""
+
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and scope.get("path") in ("/health", "/api/health"):
-            await send({
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"cache-control", b"no-store"),
-                ],
-            })
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"cache-control", b"no-store"),
+                    ],
+                }
+            )
             await send({"type": "http.response.body", "body": b'{"status":"ok"}'})
             return
         await self.app(scope, receive, send)
@@ -629,7 +722,9 @@ async def _create_indexes():
 
     # Kosmo sync indexes for adaptive scheduling
     await db.packages.create_index("kosmo_scraped_at", background=True)
-    await db.packages.create_index([("tracking_url", 1), ("kosmo_scraped_at", 1)], background=True)
+    await db.packages.create_index(
+        [("tracking_url", 1), ("kosmo_scraped_at", 1)], background=True
+    )
     await db.journeys.create_index("next_sync_at", background=True)
 
     # Driver indexes
@@ -643,8 +738,12 @@ async def _create_indexes():
     await db.manuals.create_index("is_published", background=True)
 
     # TTL indexes for cleanup (Audit P0)
-    await db.request_metrics.create_index("timestamp", expireAfterSeconds=2592000, background=True)
-    await db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0, background=True)
+    await db.request_metrics.create_index(
+        "timestamp", expireAfterSeconds=2592000, background=True
+    )
+    await db.revoked_tokens.create_index(
+        "expires_at", expireAfterSeconds=0, background=True
+    )
 
     # Journey indexes
     await db.journeys.create_index("date", background=True)
@@ -655,12 +754,18 @@ async def _create_indexes():
     await db.journeys.create_index("branch_id", background=True)
     # Perf 2026-05-05: indexes for /api/journeys list filters
     await db.journeys.create_index("migrated_to_journeys", background=True, sparse=True)
-    await db.journeys.create_index("_legacy_incidents_remaining", background=True, sparse=True)
-    await db.journeys.create_index([("client_id", 1), ("date", -1), ("status", 1)], background=True)
+    await db.journeys.create_index(
+        "_legacy_incidents_remaining", background=True, sparse=True
+    )
+    await db.journeys.create_index(
+        [("client_id", 1), ("date", -1), ("status", 1)], background=True
+    )
     await db.journeys.create_index([("provider_id", 1), ("date", -1)], background=True)
 
     # Branch indexes (RT-13 / iter71)
-    await db.branches.create_index([("client_id", 1), ("code", 1)], unique=True, background=True)
+    await db.branches.create_index(
+        [("client_id", 1), ("code", 1)], unique=True, background=True
+    )
     await db.branches.create_index("active", background=True)
 
     # Incident indexes
@@ -677,48 +782,74 @@ async def _create_indexes():
     # Token usage log indexes
     await db.token_usage_log.create_index("timestamp", background=True)
     await db.token_usage_log.create_index("entregable", background=True)
-    await db.token_usage_log.create_index([("timestamp", -1), ("entregable", 1)], background=True)
+    await db.token_usage_log.create_index(
+        [("timestamp", -1), ("entregable", 1)], background=True
+    )
     await db.token_usage_log.create_index("client_id", background=True)
 
     # Audit logs
     await db.audit_logs.create_index("timestamp", background=True)
-    await db.audit_logs.create_index([("user_id", 1), ("timestamp", -1)], background=True)
-    await db.audit_logs.create_index("action", background=True)  # P06: filtrar por accion
+    await db.audit_logs.create_index(
+        [("user_id", 1), ("timestamp", -1)], background=True
+    )
+    await db.audit_logs.create_index(
+        "action", background=True
+    )  # P06: filtrar por accion
 
     # Webhooks
     await db.webhooks.create_index("is_active", background=True)
-    await db.webhook_deliveries.create_index([("webhook_id", 1), ("timestamp", -1)], background=True)
+    await db.webhook_deliveries.create_index(
+        [("webhook_id", 1), ("timestamp", -1)], background=True
+    )
 
     # Compound indexes for production performance
     await db.journeys.create_index([("client_id", 1), ("date", -1)], background=True)
     await db.journeys.create_index([("provider_id", 1), ("date", -1)], background=True)
     await db.journeys.create_index([("driver", 1), ("date", -1)], background=True)
-    await db.packages.create_index([("journey_id", 1), ("evidence_score", 1)], background=True)
+    await db.packages.create_index(
+        [("journey_id", 1), ("evidence_score", 1)], background=True
+    )
     await db.packages.create_index("delivery_type", background=True, sparse=True)
     await db.training_samples.create_index([("labeled_at", -1)], background=True)
     await db.training_samples.create_index("human_label", background=True)
     await db.incidents.create_index([("status", 1), ("severity", 1)], background=True)
-    await db.token_usage_log.create_index([("client_id", 1), ("timestamp", -1)], background=True)
+    await db.token_usage_log.create_index(
+        [("client_id", 1), ("timestamp", -1)], background=True
+    )
 
     # AI Evaluation indexes
     await db.ai_evaluation_jobs.create_index("route_id", background=True)
     await db.ai_evaluation_jobs.create_index("status", background=True)
     await db.ai_evaluation_jobs.create_index("fecha_creacion", background=True)
-    await db.ai_evaluation_jobs.create_index([("priority", -1), ("fecha_creacion", 1)], background=True)
+    await db.ai_evaluation_jobs.create_index(
+        [("priority", -1), ("fecha_creacion", 1)], background=True
+    )
     # P06: cleanup de jobs viejos por status (En_Cola/Error/Evaluada antiguas)
-    await db.ai_evaluation_jobs.create_index([("status", 1), ("fecha_creacion", 1)], background=True)
+    await db.ai_evaluation_jobs.create_index(
+        [("status", 1), ("fecha_creacion", 1)], background=True
+    )
 
     # R00A: Client integrations + Routal events (multi-tenant)
     await db.client_integrations.create_index("client_id", unique=True, background=True)
     await db.client_integrations.create_index("integration_type", background=True)
-    await db.client_integrations.create_index([("integration_type", 1), ("status", 1)], background=True)
-    await db.routal_events.create_index([("event_id", 1), ("client_id", 1)], unique=True, background=True)
-    await db.routal_events.create_index([("client_id", 1), ("processed", 1), ("received_at", -1)], background=True)
-    await db.routal_events.create_index([("processed", 1), ("received_at", 1)], background=True)
+    await db.client_integrations.create_index(
+        [("integration_type", 1), ("status", 1)], background=True
+    )
+    await db.routal_events.create_index(
+        [("event_id", 1), ("client_id", 1)], unique=True, background=True
+    )
+    await db.routal_events.create_index(
+        [("client_id", 1), ("processed", 1), ("received_at", -1)], background=True
+    )
+    await db.routal_events.create_index(
+        [("processed", 1), ("received_at", 1)], background=True
+    )
     await db.journeys.create_index([("client_id", 1), ("source", 1)], background=True)
     await db.journeys.create_index("routal_plan_id", background=True, sparse=True)
     await db.journeys.create_index(
-        [("client_id", 1), ("routal_route_id", 1)], background=True, sparse=True,
+        [("client_id", 1), ("routal_route_id", 1)],
+        background=True,
+        sparse=True,
         name="client_routal_route_idx",
     )
     await db.packages.create_index([("client_id", 1), ("source", 1)], background=True)
@@ -726,14 +857,18 @@ async def _create_indexes():
 
     # R00B / SEL01: Selection module collections
     await db.client_config.create_index("client_id", unique=True, background=True)
-    await db.routal_daily_plans.create_index([("client_id", 1), ("date", 1)], background=True)
+    await db.routal_daily_plans.create_index(
+        [("client_id", 1), ("date", 1)], background=True
+    )
     await db.routal_daily_plans.create_index(
         [("client_id", 1), ("driver_id", 1), ("date", 1)], unique=True, background=True
     )
     await db.routal_daily_plans.create_index(
         [("client_id", 1), ("date", 1), ("processed", 1)], background=True
     )
-    await db.driver_audit_log.create_index([("client_id", 1), ("date", 1)], background=True)
+    await db.driver_audit_log.create_index(
+        [("client_id", 1), ("date", 1)], background=True
+    )
     await db.driver_audit_log.create_index(
         [("client_id", 1), ("driver_id", 1), ("date", 1)], unique=True, background=True
     )
@@ -755,7 +890,9 @@ async def _auto_migrate_routal_source():
         {"$set": {"source": "kosmo"}},
     )
     if j_migrated.modified_count or p_migrated.modified_count:
-        logger.info(f"Schema migration: source=kosmo applied to {j_migrated.modified_count} journeys + {p_migrated.modified_count} packages")
+        logger.info(
+            f"Schema migration: source=kosmo applied to {j_migrated.modified_count} journeys + {p_migrated.modified_count} packages"
+        )
 
 
 async def _auto_migrate_order_id():
