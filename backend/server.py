@@ -112,6 +112,10 @@ async def lifespan(app: FastAPI):
     mongo_client.close()
 
 
+# ASICOM VULN-04: Candado asíncrono global para orquestación segura en memoria
+_orchestration_lock = asyncio.Lock()
+
+
 async def _deferred_startup(app: FastAPI):
     """Inicialización pesada después del 'Application startup complete'.
 
@@ -121,72 +125,81 @@ async def _deferred_startup(app: FastAPI):
     acquire_leader.
     """
     try:
-        await _create_indexes()
-        await _auto_migrate_order_id()
-        await _auto_migrate_routal_source()
+        # ASICOM VULN-04: Adquisición de candado para evitar picos de RAM por concurrencia masiva
+        async with _orchestration_lock:
+            await _create_indexes()
+            await _auto_migrate_order_id()
+            await _auto_migrate_routal_source()
 
-        # R00B / SEL01: bootstrap default client_config (Cubbo)
-        try:
-            from services.client_config_service import bootstrap_default_clients
+            # R00B / SEL01: bootstrap default client_config (Cubbo)
+            try:
+                from services.client_config_service import bootstrap_default_clients
 
-            await bootstrap_default_clients(db)
-        except Exception as e:
-            logger.warning(f"[client_config] bootstrap failed: {e}")
+                await bootstrap_default_clients(db)
+            except Exception as e:
+                logger.warning(f"[client_config] bootstrap failed: {e}")
 
-        # ─── Workers startup ───────────────────────────────────────
-        # WORKERS_MODE=subprocess (default, capa 6): los workers corren en
-        # un proceso Python separado con su propio event loop, eliminando
-        # cualquier contención con el HTTP loop de FastAPI. Esto resuelve
-        # los timeouts de /health bajo carga pesada de LLM/sync.
-        #
-        # WORKERS_MODE=inline (legacy): mantiene el comportamiento previo
-        # de ejecutar los workers en el mismo event loop de uvicorn. Útil
-        # como fallback si el modo subprocess da problemas en producción.
-        _workers_mode = os.environ.get("WORKERS_MODE", "subprocess").strip().lower()
+            # ─── Workers startup ───────────────────────────────────────
+            # WORKERS_MODE=subprocess (default, capa 6): los workers corren en
+            # un proceso Python separado con su propio event loop, eliminando
+            # cualquier contención con el HTTP loop de FastAPI. Esto resuelve
+            # los timeouts de /health bajo carga pesada de LLM/sync.
+            #
+            # WORKERS_MODE=inline (legacy): mantiene el comportamiento previo
+            # de ejecutar los workers en el mismo event loop de uvicorn. Útil
+            # como fallback si el modo subprocess da problemas en producción.
+            _workers_mode = os.environ.get("WORKERS_MODE", "subprocess").strip().lower()
 
-        # PARCHE: Forzar modo inline en Windows para evitar errores de subprocesos
-        if os.name == "nt":
-            _workers_mode = "inline"
+            # PARCHE: Forzar modo inline en Windows para evitar errores de subprocesos
+            if os.name == "nt":
+                _workers_mode = "inline"
 
-        if _workers_mode == "subprocess":
-            logger.info(
-                "[bg] WORKERS_MODE=subprocess — spawning standalone worker process"
-            )
-            # No leader-election aquí: la maneja el propio subprocess.
-            start_worker_subprocess()
-        else:
-            # Leader election: when multiple Uvicorn workers run, only ONE spawns
-            # background tasks (ai_eval_worker + kosmo_sync). Others skip.
-            # Single-worker deploys (current preview) always become leader.
-            # NOTA: si NO somos leader inicialmente (lock zombi de pod muerto), el
-            # módulo leader_election agenda un retry en background y nos promueve
-            # cuando el lock expira. El callback abajo se ejecuta tanto en el acquire
-            # inicial como en la promoción via retry, para que los workers arranquen
-            # sin importar cuál fue el camino.
-            from leader_election import register_on_leader_callback
-
-            def _start_bg_tasks():
+            if _workers_mode == "subprocess":
                 logger.info(
-                    f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)"
+                    "[bg] WORKERS_MODE=subprocess — spawning standalone worker process"
                 )
-                start_periodic_sync(db)
-                start_ai_eval_worker(db)
-                start_selection_scheduler(db)
-                start_routal_sync_worker(db)
-
-            register_on_leader_callback("bg_tasks", _start_bg_tasks)
-
-            elected = await acquire_leader(db, role="bg_tasks")
-            if elected:
-                logger.info(
-                    f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync (INLINE)"
-                )
-                _start_bg_tasks()
+                # No leader-election aquí: la maneja el propio subprocess.
+                start_worker_subprocess()
             else:
-                logger.info(
-                    f"[bg] Worker {worker_id()} is FOLLOWER — bg tasks deferred. "
-                    f"Will auto-start when leader lease expires (retry running in background)."
-                )
+                # Leader election: when multiple Uvicorn workers run, only ONE spawns
+                # background tasks (ai_eval_worker + kosmo_sync). Others skip.
+                # Single-worker deploys (current preview) always become leader.
+                # NOTA: si NO somos leader inicialmente (lock zombi de pod muerto), el
+                # módulo leader_election agenda un retry en background y nos promueve
+                # cuando el lock expira. El callback abajo se ejecuta tanto en el acquire
+                # inicial como en la promoción via retry, para que los workers arranquen
+                # sin importar cuál fue el camino.
+                from leader_election import register_on_leader_callback
+
+                def _start_bg_tasks():
+                    # ASICOM VULN-04: Bloque try-except para fallas controladas en workers (Zero-Downtime)
+                    try:
+                        logger.info(
+                            f"[bg] Worker {worker_id()} starting bg tasks (AI eval + kosmo sync + selection + routal sync)"
+                        )
+                        start_periodic_sync(db)
+                        start_ai_eval_worker(db)
+                        start_selection_scheduler(db)
+                        start_routal_sync_worker(db)
+                    except Exception as exc:
+                        logger.error(
+                            f"[VULN-04] Falla controlada en arranque de workers: {exc}"
+                        )
+
+                register_on_leader_callback("bg_tasks", _start_bg_tasks)
+
+                elected = await acquire_leader(db, role="bg_tasks")
+                if elected:
+                    logger.info(
+                        f"[bg] Worker {worker_id()} is LEADER — starting AI eval + kosmo sync + selection scheduler + routal sync (INLINE)"
+                    )
+                    _start_bg_tasks()
+                else:
+                    logger.info(
+                        f"[bg] Worker {worker_id()} is FOLLOWER — bg tasks deferred. "
+                        f"Will auto-start when leader lease expires (retry running in background)."
+                    )
+
         logger.info("[deferred-startup] complete")
     except asyncio.CancelledError:
         raise

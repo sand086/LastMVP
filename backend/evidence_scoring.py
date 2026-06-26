@@ -23,11 +23,21 @@ logger = logging.getLogger(__name__)
 def _get_db():
     """Get db reference for token logging."""
     from dependencies import db
+
     return db
 
+
 THIRD_PARTY_KEYWORDS = [
-    "vecino", "vigilante", "tercero", "familiar", "portero",
-    "guardia", "recepción", "conserje", "seguridad", "caseta",
+    "vecino",
+    "vigilante",
+    "tercero",
+    "familiar",
+    "portero",
+    "guardia",
+    "recepción",
+    "conserje",
+    "seguridad",
+    "caseta",
 ]
 
 CUBBO_SYSTEM_PROMPT = """Eres un evaluador experto de evidencias fotográficas de entregas de última milla.
@@ -164,7 +174,9 @@ def _score_failed(proof_count: int, driver_note: str, has_incident: bool) -> dic
     }
 
 
-def calculate_evidence_score_rules(package: dict, has_incident: bool = False) -> dict | None:
+def calculate_evidence_score_rules(
+    package: dict, has_incident: bool = False
+) -> dict | None:
     """Rule-based evidence scoring (fallback when AI is unavailable)."""
     status = package.get("status")
     if status not in ("delivered", "failed"):
@@ -198,6 +210,7 @@ async def _download_image_as_base64(url: str, db=None) -> Optional[str]:
         if "://" in url:
             try:
                 from urllib.parse import urlparse
+
                 path = urlparse(url).path or url
             except Exception:
                 path = url
@@ -209,6 +222,7 @@ async def _download_image_as_base64(url: str, db=None) -> Optional[str]:
                 report_id = parts[6]
                 image_id = parts[7]
                 from services.routal_sync import proxy_routal_image
+
                 result = await proxy_routal_image(db, client_id, report_id, image_id)
                 if result:
                     content, _ = result
@@ -221,7 +235,9 @@ async def _download_image_as_base64(url: str, db=None) -> Optional[str]:
             resp = await client.get(url)
             if resp.status_code == 200 and len(resp.content) > 100:
                 return base64.b64encode(resp.content).decode("utf-8")
-            logger.warning(f"[ai-eval] image fetch HTTP {resp.status_code} for {url[:80]}")
+            logger.warning(
+                f"[ai-eval] image fetch HTTP {resp.status_code} for {url[:80]}"
+            )
     except Exception as e:
         logger.warning(f"Failed to download image: {e}")
     return None
@@ -239,14 +255,22 @@ def _rules_fallback(package: dict, has_incident: bool, error_msg: str = None) ->
     return result or {}
 
 
-def _build_ai_result(ai_result: dict, package: dict, has_incident: bool, proof_urls: list, driver_note: str) -> dict:
+def _build_ai_result(
+    ai_result: dict,
+    package: dict,
+    has_incident: bool,
+    proof_urls: list,
+    driver_note: str,
+) -> dict:
     """Build the return dict from a parsed AI response."""
     status = package.get("status")
     note_lower = driver_note.lower()
     is_third_party = any(kw in note_lower for kw in THIRD_PARTY_KEYWORDS)
 
     if status == "delivered":
-        evidence_type = ai_result.get("delivery_type_detected", "terceros" if is_third_party else "exitosa")
+        evidence_type = ai_result.get(
+            "delivery_type_detected", "terceros" if is_third_party else "exitosa"
+        )
     else:
         evidence_type = "fallida"
 
@@ -264,8 +288,7 @@ def _build_ai_result(ai_result: dict, package: dict, has_incident: bool, proof_u
     if "timestamp" not in criteria_met_raw:
         photos_analysis = ai_result.get("photos_analysis") or []
         any_visible = any(
-            bool((p or {}).get("timestamp_visible"))
-            for p in photos_analysis
+            bool((p or {}).get("timestamp_visible")) for p in photos_analysis
         )
         criteria_met_raw["timestamp"] = any_visible
 
@@ -312,7 +335,9 @@ async def evaluate_single_package_ai(
 
     proof_urls = package.get("kosmo_proof_urls") or []
     driver_note = package.get("kosmo_driver_note") or ""
-    tracking = package.get("tracking_number") or package.get("order_reference_id") or "N/A"
+    tracking = (
+        package.get("tracking_number") or package.get("order_reference_id") or "N/A"
+    )
 
     if not proof_urls:
         return _rules_fallback(package, has_incident)
@@ -324,17 +349,29 @@ async def evaluate_single_package_ai(
     valid_images = [img for img in base64_images if img]
 
     if not valid_images:
-        logger.warning(f"No images could be downloaded for package {tracking}, falling back to rules")
-        return _rules_fallback(package, has_incident, "No se pudieron descargar las imágenes (URLs expiradas)")
+        logger.warning(
+            f"No images could be downloaded for package {tracking}, falling back to rules"
+        )
+        return _rules_fallback(
+            package,
+            has_incident,
+            "No se pudieron descargar las imágenes (URLs expiradas)",
+        )
 
     try:
         ai_result = await _call_ai_vision(valid_images, tracking, status, driver_note)
 
         if ai_result:
-            return _build_ai_result(ai_result, package, has_incident, proof_urls, driver_note)
+            return _build_ai_result(
+                ai_result, package, has_incident, proof_urls, driver_note
+            )
 
-        logger.warning(f"AI response could not be parsed for {tracking}, falling back to rules")
-        return _rules_fallback(package, has_incident, "Respuesta de IA no pudo ser procesada")
+        logger.warning(
+            f"AI response could not be parsed for {tracking}, falling back to rules"
+        )
+        return _rules_fallback(
+            package, has_incident, "Respuesta de IA no pudo ser procesada"
+        )
 
     except Exception as e:
         logger.error(f"AI evaluation failed for {tracking}: {e}")
@@ -351,7 +388,9 @@ async def _get_system_prompt() -> str:
             custom_prompt = ia_config_doc.get("value", {}).get("system_prompt", "")
             if custom_prompt and custom_prompt.strip():
                 base_prompt = custom_prompt.strip()
-                logger.info(f"Using custom system prompt from quality criteria config ({len(base_prompt)} chars)")
+                logger.info(
+                    f"Using custom system prompt from quality criteria config ({len(base_prompt)} chars)"
+                )
     except Exception as e:
         logger.warning(f"Could not read custom system prompt: {e}")
     return base_prompt + AI_RESPONSE_FORMAT
@@ -362,24 +401,49 @@ async def _get_training_context() -> str:
     try:
         db = _get_db()
         thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        recent_samples = await db.training_samples.find(
-            {"labeled_at": {"$gte": thirty_days_ago}, "ai_evaluation_incorrect": True},
-            {"_id": 0, "tracking_number": 1, "ia_errors": 1, "original_ai_score": 1,
-             "adjusted_score": 1, "reviewer_note": 1, "decision": 1, "proof_count": 1},
-        ).sort("labeled_at", -1).to_list(5)
+        recent_samples = (
+            await db.training_samples.find(
+                {
+                    "labeled_at": {"$gte": thirty_days_ago},
+                    "ai_evaluation_incorrect": True,
+                },
+                {
+                    "_id": 0,
+                    "tracking_number": 1,
+                    "ia_errors": 1,
+                    "original_ai_score": 1,
+                    "adjusted_score": 1,
+                    "reviewer_note": 1,
+                    "decision": 1,
+                    "proof_count": 1,
+                },
+            )
+            .sort("labeled_at", -1)
+            .to_list(5)
+        )
 
         if recent_samples:
             examples = [
                 f"- Guía {s.get('tracking_number','?')}: IA dio {s.get('original_ai_score',0)}, revisión humana: {s.get('decision','?')} (score ajustado: {s.get('adjusted_score','N/A')}). Nota: {s.get('reviewer_note','')}"
                 for s in recent_samples
             ]
-            return "\n\nCALIBRACIÓN POR REVISIÓN HUMANA (ejemplos recientes donde la IA se equivocó):\n" + "\n".join(examples) + "\nConsidera estos casos al evaluar para calibrar mejor tu criterio.\n"
+            return (
+                "\n\nCALIBRACIÓN POR REVISIÓN HUMANA (ejemplos recientes donde la IA se equivocó):\n"
+                + "\n".join(examples)
+                + "\nConsidera estos casos al evaluar para calibrar mejor tu criterio.\n"
+            )
     except Exception as e:
         logger.debug(f"Training samples fetch skipped: {e}")
     return ""
 
 
-def _build_user_context(tracking: str, status: str, driver_note: str, image_count: int, training_context: str) -> str:
+def _build_user_context(
+    tracking: str,
+    status: str,
+    driver_note: str,
+    image_count: int,
+    training_context: str,
+) -> str:
     """Build the user message context string for AI evaluation."""
     context = f"Paquete: {tracking}\nEstatus: {'Entregado' if status == 'delivered' else 'Fallido'}\n"
     if driver_note:
@@ -404,6 +468,7 @@ async def _log_ai_token_usage(
     """Log AI token usage (non-blocking, swallows errors)."""
     try:
         from token_logger import log_token_usage
+
         await log_token_usage(
             db=_get_db(),
             entregable="evaluacion",
@@ -420,7 +485,9 @@ async def _log_ai_token_usage(
         logger.debug(f"Token log skipped: {log_err}")
 
 
-async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver_note: str) -> Optional[dict]:
+async def _call_ai_vision(
+    valid_images: list, tracking: str, status: str, driver_note: str
+) -> Optional[dict]:
     """Send images to AI Vision and return parsed result."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
     from ai_eval_config import get_ai_eval_config, MODEL_MAP
@@ -451,7 +518,9 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
     except Exception:
         pass  # SDK might not support — outer wait_for still protects us
 
-    context = _build_user_context(tracking, status, driver_note, len(valid_images), training_context)
+    context = _build_user_context(
+        tracking, status, driver_note, len(valid_images), training_context
+    )
     file_contents = [ImageContent(image_base64=img) for img in valid_images]
     user_msg = UserMessage(text=context, file_contents=file_contents)
     image_count = len(valid_images)
@@ -459,14 +528,21 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
     # Circuit breaker: si LLM lleva 5 fallos consecutivos, no enviamos más requests
     # por 60s. Evita drenar saldo cuando Anthropic está overloaded/rate-limited.
     from utils.circuit_breaker import get_circuit_breaker, CircuitOpenError
-    cb = get_circuit_breaker("llm_anthropic_vision", failure_threshold=5, open_timeout_seconds=60)
+
+    cb = get_circuit_breaker(
+        "llm_anthropic_vision", failure_threshold=5, open_timeout_seconds=60
+    )
     if cb.is_open():
-        raise CircuitOpenError("LLM Anthropic vision circuit OPEN — skipping (recovery in progress)")
+        raise CircuitOpenError(
+            "LLM Anthropic vision circuit OPEN — skipping (recovery in progress)"
+        )
 
     # Cualquier excepción a partir de aquí significa que Anthropic YA recibió
     # (o probablemente recibió) el request → debemos loguear el costo aunque la
     # respuesta no llegue, para evitar consumo invisible.
-    hard_timeout = cfg.get("llm_timeout_seconds", 90) + 10  # outer guard slightly above SDK
+    hard_timeout = (
+        cfg.get("llm_timeout_seconds", 90) + 10
+    )  # outer guard slightly above SDK
     try:
         response_text = await asyncio.wait_for(
             chat.send_message(user_msg),
@@ -484,7 +560,9 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
             is_shadow_cost=True,
             shadow_kind="hard_timeout_exceeded",
         )
-        raise Exception(f"LLM hard timeout exceeded ({hard_timeout}s) — Anthropic possibly hung") from te
+        raise Exception(
+            f"LLM hard timeout exceeded ({hard_timeout}s) — Anthropic possibly hung"
+        ) from te
     except Exception as send_err:
         cb.record_failure()
         # Shadow log con el contexto REAL armado (system + user prompt + image count).
@@ -517,6 +595,7 @@ async def _call_ai_vision(valid_images: list, tracking: str, status: str, driver
         # Estimación local (consistente con token_logger) para que el worker pueda
         # sumar tokens al stat del job y el monitor IA muestre consumo real.
         from token_logger import _estimate_tokens, IMAGE_INPUT_TOKEN_ESTIMATE
+
         parsed["_tokens_used_estimate"] = (
             _estimate_tokens(context)
             + _estimate_tokens(system_prompt)
@@ -538,6 +617,7 @@ def _parse_ai_response(text: str) -> Optional[dict]:
         pass
     # Try extracting from markdown code block
     import re
+
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if match:
         try:
@@ -561,6 +641,7 @@ _AI_BATCH_DELAY = 0.1  # Seconds to yield event loop between batches
 
 # Thread pool for isolating heavy AI work from the main event loop
 from concurrent.futures import ThreadPoolExecutor
+
 _ai_thread_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-eval")
 
 # In-memory AI evaluation status tracker per journey
@@ -572,7 +653,9 @@ def get_ai_eval_status(journey_id: str) -> dict:
     return _ai_eval_status.get(journey_id, {"status": "idle"})
 
 
-def _set_ai_eval_status(journey_id: str, status: str, total: int = 0, evaluated: int = 0, errors: int = 0):
+def _set_ai_eval_status(
+    journey_id: str, status: str, total: int = 0, evaluated: int = 0, errors: int = 0
+):
     """Update AI evaluation status for a journey."""
     _ai_eval_status[journey_id] = {
         "status": status,
@@ -591,19 +674,35 @@ def _run_ai_eval_sync(journey_id: str, packages: list, incident_tracking_numbers
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
-            _evaluate_packages_ai_internal(journey_id, packages, incident_tracking_numbers)
+            _evaluate_packages_ai_internal(
+                journey_id, packages, incident_tracking_numbers
+            )
         )
         status = get_ai_eval_status(journey_id)
-        _set_ai_eval_status(journey_id, "completed", total=status["total"], evaluated=status["evaluated"], errors=status["errors"])
+        _set_ai_eval_status(
+            journey_id,
+            "completed",
+            total=status["total"],
+            evaluated=status["evaluated"],
+            errors=status["errors"],
+        )
     except Exception as e:
         logger.error(f"AI eval thread error for journey {journey_id}: {e}")
         status = get_ai_eval_status(journey_id)
-        _set_ai_eval_status(journey_id, "error", total=status["total"], evaluated=status["evaluated"], errors=status["errors"])
+        _set_ai_eval_status(
+            journey_id,
+            "error",
+            total=status["total"],
+            evaluated=status["evaluated"],
+            errors=status["errors"],
+        )
     finally:
         loop.close()
 
 
-async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incident_tracking_numbers: set):
+async def _evaluate_packages_ai_internal(
+    journey_id: str, packages: list, incident_tracking_numbers: set
+):
     """Internal async function that runs in a separate thread's event loop."""
     from motor.motor_asyncio import AsyncIOMotorClient
     import os
@@ -611,6 +710,13 @@ async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incide
     # Create a NEW MongoDB connection for this thread's event loop
     mongo_url = os.environ.get("MONGO_URL")
     db_name = os.environ.get("DB_NAME")
+
+    #  ASICOM VULN-02: Supresión de credenciales acopladas / fallback silencioso
+    if not mongo_url or not db_name:
+        raise ValueError(
+            "Credenciales de base de datos ausentes. MONGO_URL y DB_NAME son estrictamente obligatorios."
+        )
+
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
 
@@ -630,20 +736,28 @@ async def _evaluate_packages_ai_internal(journey_id: str, packages: list, incide
         elif result and "error" in result:
             eval_errors += 1
         evaluated += 1
-        _set_ai_eval_status(journey_id, "running", total=total, evaluated=evaluated, errors=eval_errors)
+        _set_ai_eval_status(
+            journey_id, "running", total=total, evaluated=evaluated, errors=eval_errors
+        )
 
     for i in range(0, total, _AI_BATCH_SIZE):
-        batch = packages[i:i + _AI_BATCH_SIZE]
+        batch = packages[i : i + _AI_BATCH_SIZE]
         await asyncio.gather(*[_eval_one(pkg) for pkg in batch])
         await asyncio.sleep(_AI_BATCH_DELAY)
         if evaluated % 6 == 0 and evaluated > 0:
-            logger.info(f"AI eval progress: {evaluated}/{total} for journey {journey_id}")
+            logger.info(
+                f"AI eval progress: {evaluated}/{total} for journey {journey_id}"
+            )
 
-    logger.info(f"AI evaluation completed for journey {journey_id}: {evaluated}/{total}")
+    logger.info(
+        f"AI evaluation completed for journey {journey_id}: {evaluated}/{total}"
+    )
     client.close()
 
 
-async def evaluate_packages_for_journey(db: AsyncIOMotorDatabase, journey_id: str, use_ai: bool = False):
+async def evaluate_packages_for_journey(
+    db: AsyncIOMotorDatabase, journey_id: str, use_ai: bool = False
+):
     """Evaluate evidence scores for all delivered/failed packages in a journey.
     AI mode runs in a separate thread to avoid blocking the main event loop."""
     packages = await db.packages.find(
@@ -679,9 +793,9 @@ async def evaluate_packages_for_journey(db: AsyncIOMotorDatabase, journey_id: st
         # paired with `evidence_evaluated_at` from a prior eval.
         for pkg in packages:
             evidence_method = pkg.get("evidence_method")
-            already_evaluated = (
-                evidence_method == "ai"
-                or (pkg.get("evidence_score") is not None and pkg.get("evidence_evaluated_at"))
+            already_evaluated = evidence_method == "ai" or (
+                pkg.get("evidence_score") is not None
+                and pkg.get("evidence_evaluated_at")
             )
             if already_evaluated:
                 continue
@@ -694,7 +808,9 @@ async def evaluate_packages_for_journey(db: AsyncIOMotorDatabase, journey_id: st
 
     # AI mode: offload to a separate thread with its own event loop
     total = len(packages)
-    logger.info(f"AI evaluation dispatched to background thread for journey {journey_id}: {total} packages")
+    logger.info(
+        f"AI evaluation dispatched to background thread for journey {journey_id}: {total} packages"
+    )
 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(
@@ -730,7 +846,10 @@ async def evaluate_single_package_for_journey(
         return {"error": "Solo se evalúan paquetes entregados o fallidos"}
 
     incident = await db.incidents.find_one(
-        {"journey_id": journey_id, "tracking_number": {"$regex": guide, "$options": "i"}},
+        {
+            "journey_id": journey_id,
+            "tracking_number": {"$regex": guide, "$options": "i"},
+        },
         {"_id": 0},
     )
     has_incident = incident is not None
@@ -752,7 +871,9 @@ async def evaluate_single_package_for_journey(
     return result
 
 
-async def evaluate_packages_by_ids(db: AsyncIOMotorDatabase, package_ids: list, journey_ids: set = None):
+async def evaluate_packages_by_ids(
+    db: AsyncIOMotorDatabase, package_ids: list, journey_ids: set = None
+):
     """Evaluate evidence for specific packages (used after sync) - rule-based for speed.
     IMPORTANT: Preserves AI evaluations — only applies rules to packages NOT evaluated by AI.
     """
@@ -764,7 +885,9 @@ async def evaluate_packages_by_ids(db: AsyncIOMotorDatabase, package_ids: list, 
         {"_id": 0},
     ).to_list(5000)
 
-    relevant_journey_ids = journey_ids or {p.get("journey_id") for p in packages if p.get("journey_id")}
+    relevant_journey_ids = journey_ids or {
+        p.get("journey_id") for p in packages if p.get("journey_id")
+    }
 
     incidents = await db.incidents.find(
         {"journey_id": {"$in": list(relevant_journey_ids)}},

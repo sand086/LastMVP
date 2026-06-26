@@ -14,6 +14,7 @@ Strategy (R00C / iter58):
       coordinator/developer/executive → see plain after decrypt
       agent/proveedor                  → see masked (e.g. "Juan P***", "55****1234")
 """
+
 import logging
 from typing import Optional, Iterable
 
@@ -33,6 +34,7 @@ PII_FIELDS_PACKAGES = ("recipient_name", "address", "recipient_phone")
 
 
 # ─────────────── ENCRYPT / DECRYPT ───────────────
+
 
 def encrypt_pii(value: Optional[str]) -> Optional[str]:
     """Encrypt a single string value with the `enc::` marker. Idempotent — already
@@ -63,7 +65,7 @@ def decrypt_pii(value: Optional[str]) -> Optional[str]:
         return value
     if not value.startswith(ENC_PREFIX):
         return value  # legacy plain value
-    token = value[len(ENC_PREFIX):]
+    token = value[len(ENC_PREFIX) :]
     try:
         fernet = _get_fernet()
         return fernet.decrypt(token.encode("ascii")).decode("utf-8")
@@ -77,6 +79,7 @@ def is_encrypted(value: Optional[str]) -> bool:
 
 
 # ─────────────── MASKING ───────────────
+
 
 def mask_name(value: Optional[str]) -> str:
     """Juan Pérez García → Juan P*** G***"""
@@ -115,12 +118,14 @@ def mask_address(value: Optional[str]) -> str:
     txt = value.strip()
     # Replace any sequence of 2+ digits with ***
     import re
+
     masked = re.sub(r"\d{2,}", "***", txt)
     # Truncate very long addresses (defensive)
     return masked[:80] + ("…" if len(masked) > 80 else "")
 
 
 # ─────────────── ROLE-BASED VISIBILITY ───────────────
+
 
 def _visibility(role: Optional[str]) -> str:
     """Returns 'plain' | 'masked'.
@@ -176,6 +181,7 @@ def apply_pii_visibility_pkgs(pkgs: Iterable[dict], role: Optional[str]) -> list
 
 # ─────────────── ENCRYPT-ON-WRITE HELPER ───────────────
 
+
 def encrypt_pkg_pii(pkg: dict) -> dict:
     """In-place encryption of PII fields before insert/update.
     Idempotent: skips already-encrypted (enc::) values.
@@ -187,3 +193,31 @@ def encrypt_pkg_pii(pkg: dict) -> dict:
         if v:
             pkg[field] = encrypt_pii(v)
     return pkg
+
+
+#  ASICOM  VULN-06: Aislamiento de Confidencialidad (Regex Data Masking)
+import re
+
+
+def sanitize_payload_pii(text: str) -> str:
+    """
+    Escanea y elimina datos sensibles usando expresiones regulares
+    previo a la transmisión punto a punto hacia integraciones de IA.
+    """
+    if not text or not isinstance(text, str):
+        return text or ""
+
+    # 1. Enmascarar correos electrónicos
+    text = re.sub(
+        r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", "[CORREO_PROTEGIDO]", text
+    )
+
+    # 2. Enmascarar teléfonos o tarjetas (patrones de 8 a 14 dígitos continuos o con espacios)
+    text = re.sub(r"\b(?:\d[ -]*?){8,14}\b", "[DATO_NUMÉRICO_PROTEGIDO]", text)
+
+    # 3. Enmascarar coordenadas exactas de geolocalización
+    text = re.sub(
+        r"-?\d{1,3}\.\d{5,},\s*-?\d{1,3}\.\d{5,}", "[UBICACIÓN_PRIVADA]", text
+    )
+
+    return text
